@@ -33,6 +33,7 @@ type server struct {
 
 	mu   sync.Mutex
 	jobs map[string]*job
+	busy map[string]bool // cluster names with an in-flight create/delete
 	next int
 }
 
@@ -42,7 +43,7 @@ func Serve(port int) (string, http.Handler, net.Listener, error) {
 	if err != nil {
 		return "", nil, nil, err
 	}
-	s := &server{mgr: cluster.NewManager(), self: self, jobs: map[string]*job{}}
+	s := &server{mgr: cluster.NewManager(), self: self, jobs: map[string]*job{}, busy: map[string]bool{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +54,7 @@ func Serve(port int) (string, http.Handler, net.Listener, error) {
 	mux.HandleFunc("GET /api/clusters", s.listClusters)
 	mux.HandleFunc("POST /api/clusters", s.createCluster)
 	mux.HandleFunc("DELETE /api/clusters/{name}", s.deleteCluster)
+	mux.HandleFunc("GET /api/clusters/{name}/kubeconfig", s.kubeconfig)
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -60,7 +62,33 @@ func Serve(port int) (string, http.Handler, net.Listener, error) {
 		return "", nil, nil, err
 	}
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
-	return url, mux, ln, nil
+	return url, loopbackOnly(ln.Addr().String(), mux), ln, nil
+}
+
+// loopbackOnly rejects cross-origin and DNS-rebinding requests. The UI
+// hands out cluster-admin kubeconfigs, so any web page running in the
+// user's browser must not be able to reach the API: a Host header other
+// than the listener (DNS rebinding) or a non-loopback Origin (CSRF via
+// fetch) gets 403. curl and the served page itself are unaffected.
+func loopbackOnly(addr string, next http.Handler) http.Handler {
+	_, port, _ := net.SplitHostPort(addr)
+	allowedHosts := map[string]bool{
+		addr: true, "localhost:" + port: true, "[::1]:" + port: true,
+	}
+	allowedOrigins := map[string]bool{
+		"http://" + addr: true, "http://localhost:" + port: true, "http://[::1]:" + port: true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !allowedHosts[r.Host] {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !allowedOrigins[origin] {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -120,14 +148,7 @@ type createReq struct {
 	NoStorage  bool   `json:"noStorage"`
 }
 
-func sanitizeName(s string) bool {
-	for _, r := range s {
-		if !(r == '-' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-			return false
-		}
-	}
-	return s != ""
-}
+func sanitizeName(s string) bool { return cluster.ValidName(s) }
 
 func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	var req createReq
@@ -159,7 +180,11 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	if req.NoStorage {
 		args = append(args, "--no-storage")
 	}
-	id := s.startJob(args)
+	id, err := s.startJob(req.Name, args)
+	if err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, 202, map[string]string{"job": id})
 }
 
@@ -169,8 +194,28 @@ func (s *server) deleteCluster(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid name"})
 		return
 	}
-	id := s.startJob([]string{"delete", "cluster", "--name", name})
+	id, err := s.startJob(name, []string{"delete", "cluster", "--name", name})
+	if err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, 202, map[string]string{"job": id})
+}
+
+func (s *server) kubeconfig(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !sanitizeName(name) {
+		writeJSON(w, 400, map[string]string{"error": "invalid name"})
+		return
+	}
+	cfg, err := s.mgr.Kubeconfig(name)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=kiac-%s.kubeconfig", name))
+	_, _ = w.Write([]byte(cfg))
 }
 
 func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
@@ -187,9 +232,16 @@ func (s *server) getJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // startJob runs the kiac binary itself with args, streaming combined
-// output into an in-memory log the UI polls.
-func (s *server) startJob(args []string) string {
+// output into an in-memory log the UI polls. One in-flight job per
+// cluster name: a double-click cannot race two creates whose cleanup
+// would tear down each other's node VMs.
+func (s *server) startJob(name string, args []string) (string, error) {
 	s.mu.Lock()
+	if s.busy[name] {
+		s.mu.Unlock()
+		return "", fmt.Errorf("an operation on cluster %q is already running", name)
+	}
+	s.busy[name] = true
 	s.next++
 	id := strconv.Itoa(s.next)
 	j := &job{Status: "running"}
@@ -197,6 +249,11 @@ func (s *server) startJob(args []string) string {
 	s.mu.Unlock()
 
 	go func() {
+		defer func() {
+			s.mu.Lock()
+			delete(s.busy, name)
+			s.mu.Unlock()
+		}()
 		cmd := exec.Command(s.self, args...)
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
 		out, err := cmd.CombinedOutput()
@@ -210,5 +267,5 @@ func (s *server) startJob(args []string) string {
 		}
 		j.Status = "done"
 	}()
-	return id
+	return id, nil
 }

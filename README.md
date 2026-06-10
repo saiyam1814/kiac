@@ -2,7 +2,7 @@
 
 **kiac** runs local Kubernetes clusters where **every node is its own lightweight virtual machine**, powered by [apple/container](https://github.com/apple/container) and the [Containerization](https://github.com/apple/containerization) framework on Apple silicon.
 
-Think `kind`, but instead of sharing one Docker VM, each node boots in its own lightweight VM in about a second - the same idea Weave Ignite pioneered with Firecracker, now native on your Mac with zero extra software between you and the hypervisor.
+Think `kind`, but instead of sharing one Docker VM, each node's VM boots in about a second (a full cluster takes two to three minutes) - the same idea Weave Ignite pioneered with Firecracker, now native on your Mac with zero extra software between you and the hypervisor.
 
 ```
 $ kiac create cluster --name dev --workers 2

@@ -22,39 +22,71 @@ func kubeconfigPath() (string, error) {
 	return filepath.Join(home, ".kube", "config"), nil
 }
 
-// mergeKubeconfig rewrites the cluster's admin.conf to use kiac-<name>
-// entry names and the node's reachable IP, merges it into the user's
-// kubeconfig, and switches current-context. Returns the merged file path.
-func mergeKubeconfig(name, adminConf, serverIP string) (string, error) {
+// rewriteAdminConf renames admin.conf's first cluster/user/context to
+// kiac-<name> and points the server at the node's reachable IP.
+func rewriteAdminConf(name, adminConf, serverIP string) (cluster0, user0, context map[string]any, err error) {
 	entry := "kiac-" + name
 
 	var admin map[string]any
 	if err := yaml.Unmarshal([]byte(adminConf), &admin); err != nil {
-		return "", fmt.Errorf("parsing admin.conf: %w", err)
+		return nil, nil, nil, fmt.Errorf("parsing admin.conf: %w", err)
 	}
 
 	clusters, _ := admin["clusters"].([]any)
 	users, _ := admin["users"].([]any)
 	if len(clusters) == 0 || len(users) == 0 {
-		return "", fmt.Errorf("admin.conf missing clusters or users")
+		return nil, nil, nil, fmt.Errorf("admin.conf missing clusters or users")
 	}
 
-	cluster0, _ := clusters[0].(map[string]any)
+	cluster0, _ = clusters[0].(map[string]any)
 	clusterBody, _ := cluster0["cluster"].(map[string]any)
 	cluster0["name"] = entry
 	if clusterBody != nil {
 		clusterBody["server"] = fmt.Sprintf("https://%s:6443", serverIP)
 	}
 
-	user0, _ := users[0].(map[string]any)
+	user0, _ = users[0].(map[string]any)
 	user0["name"] = entry
 
-	context := map[string]any{
+	context = map[string]any{
 		"name": entry,
 		"context": map[string]any{
 			"cluster": entry,
 			"user":    entry,
 		},
+	}
+	return cluster0, user0, context, nil
+}
+
+// standaloneKubeconfig renders a self-contained kubeconfig for one
+// cluster, e.g. for download from the UI.
+func standaloneKubeconfig(name, adminConf, serverIP string) (string, error) {
+	cluster0, user0, context, err := rewriteAdminConf(name, adminConf, serverIP)
+	if err != nil {
+		return "", err
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion":      "v1",
+		"kind":            "Config",
+		"clusters":        []any{cluster0},
+		"users":           []any{user0},
+		"contexts":        []any{context},
+		"current-context": "kiac-" + name,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// mergeKubeconfig rewrites the cluster's admin.conf to use kiac-<name>
+// entry names and the node's reachable IP, merges it into the user's
+// kubeconfig, and switches current-context. Returns the merged file path.
+func mergeKubeconfig(name, adminConf, serverIP string) (string, error) {
+	entry := "kiac-" + name
+	cluster0, user0, context, err := rewriteAdminConf(name, adminConf, serverIP)
+	if err != nil {
+		return "", err
 	}
 
 	path, err := kubeconfigPath()
@@ -73,9 +105,14 @@ func mergeKubeconfig(name, adminConf, serverIP string) (string, error) {
 		if err := yaml.Unmarshal(raw, &dest); err != nil {
 			return "", fmt.Errorf("parsing existing kubeconfig %s: %w", path, err)
 		}
+		// Keep the FIRST pre-kiac state only: overwriting per create
+		// would replace the user's true original with one kiac already
+		// touched.
 		backup := path + ".kiac.bak"
-		if err := os.WriteFile(backup, raw, 0o600); err != nil {
-			return "", fmt.Errorf("writing kubeconfig backup: %w", err)
+		if _, err := os.Stat(backup); os.IsNotExist(err) {
+			if err := os.WriteFile(backup, raw, 0o600); err != nil {
+				return "", fmt.Errorf("writing kubeconfig backup: %w", err)
+			}
 		}
 	}
 

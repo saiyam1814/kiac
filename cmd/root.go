@@ -7,8 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is overridden at build time via -ldflags.
-var Version = "v0.1.0-dev"
+// Version is overridden at release time via -ldflags; the default keeps
+// `go install` builds honest about which release line they track.
+var Version = "v0.1.0"
 
 var rootCmd = &cobra.Command{
 	Use:   "kiac",

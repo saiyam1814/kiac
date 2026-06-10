@@ -33,8 +33,19 @@
   .cluster .nm{font-weight:700;font-size:15px}
   .cluster .nodes{color:var(--mid);font-size:13px;margin-top:3px}
   .badge{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 9px;background:var(--accent-tint);color:var(--accent);margin-left:8px;text-transform:uppercase}
+  .actions{display:flex;gap:8px}
   .del{background:none;border:1px solid var(--divider);color:#c0392b;border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
   .del:hover{border-color:#c0392b}
+  .connect{background:var(--accent);border:none;color:#fff;border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  .connect:hover{background:var(--accent-hover)}
+  dialog{border:none;border-radius:var(--radius);padding:26px;max-width:520px;width:92%;box-shadow:0 30px 80px -20px rgba(5,11,36,.4)}
+  dialog::backdrop{background:rgba(5,11,36,.35);backdrop-filter:blur(4px)}
+  dialog h3{font-size:16px;margin-bottom:6px}
+  dialog p{color:var(--mid);font-size:13px;margin-bottom:14px}
+  .cmd{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-family:"SF Mono","Roboto Mono",ui-monospace,monospace;font-size:13px}
+  .cmd code{flex:1;overflow-x:auto;white-space:nowrap}
+  .cmd button{border:none;background:#fff;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:var(--mid);cursor:pointer;box-shadow:0 1px 3px rgba(5,11,36,.1)}
+  dialog .close{margin-top:8px;background:none;border:1px solid var(--divider);border-radius:99px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
   pre{background:#0d1226;color:#c9cede;border-radius:12px;padding:18px;font-size:12.5px;line-height:1.7;max-height:340px;overflow:auto;font-family:"SF Mono","Roboto Mono",ui-monospace,monospace;white-space:pre-wrap}
   .empty{color:var(--mid);font-size:14px;padding:10px 0}
   #jobstate{font-size:13px;color:var(--mid);margin-bottom:10px}
@@ -72,6 +83,12 @@
     <div id="list"><div class="empty">Loading…</div></div>
   </div>
 </main>
+<dialog id="dlg">
+  <h3 id="dlg-title"></h3>
+  <p>The context is already in your kubeconfig - pick how you want to use it.</p>
+  <div id="dlg-cmds"></div>
+  <button class="close" onclick="document.getElementById('dlg').close()">Done</button>
+</dialog>
 <script>
 const $ = id => document.getElementById(id);
 async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
@@ -88,7 +105,10 @@ async function refresh() {
     <div class="cluster">
       <div><span class="nm">${c.name}</span><span class="badge">${(c.nodes||[]).length} node${(c.nodes||[]).length>1?'s':''}</span>
         <div class="nodes">${(c.nodes||[]).map(n => `${n.name} · ${n.status}`).join('<br>')}</div></div>
-      <button class="del" onclick="del('${c.name}')">Delete</button>
+      <div class="actions">
+        <button class="connect" onclick="connect('${c.name}')">Connect</button>
+        <button class="del" onclick="del('${c.name}')">Delete</button>
+      </div>
     </div>`).join('') : '<div class="empty">No clusters yet. Create one above - it takes about three minutes.</div>';
 }
 
@@ -119,6 +139,20 @@ $('f').addEventListener('submit', async e => {
   if (r.error) { alert(r.error); return; }
   watch(r.job, 'Creating "' + body.name + '"');
 });
+
+function connect(name) {
+  const ctx = 'kiac-' + name;
+  $('dlg-title').textContent = 'Connect to "' + name + '"';
+  $('dlg-cmds').innerHTML = [
+    ['Switch kubectl to this cluster', 'kubectl config use-context ' + ctx],
+    ['Or target it per command', 'kubectl get nodes --context ' + ctx],
+    ['See live resource usage', 'kubectl top nodes --context ' + ctx],
+  ].map(([label, cmd]) => `<p style="margin:0 0 4px">${label}</p>
+    <div class="cmd"><code>${cmd}</code><button onclick="navigator.clipboard.writeText('${cmd}');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1200)">Copy</button></div>`).join('')
+    + `<p style="margin:10px 0 4px">Or grab a standalone file for other tools (Lens, k9s, CI)</p>
+    <div class="cmd"><code>kiac-${name}.kubeconfig</code><button onclick="location.href='/api/clusters/${name}/kubeconfig'">Download</button></div>`;
+  $('dlg').showModal();
+}
 
 async function del(name) {
   if (!confirm('Delete cluster "' + name + '" and its node VMs?')) return;

@@ -38,6 +38,17 @@ func NewManager() *Manager { return &Manager{rt: runtime.New()} }
 
 func (m *Manager) Runtime() *runtime.Client { return m.rt }
 
+// ValidName reports whether a cluster name is safe for container names,
+// kubeconfig entries, and the UI: lowercase letters, digits, dashes.
+func ValidName(s string) bool {
+	for _, r := range s {
+		if !(r == '-' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func prefix(name string) string { return "kiac-" + name + "-" }
 
 // ControlPlane returns the control-plane container name for a cluster.
@@ -49,6 +60,9 @@ func worker(name string, i int) string { return fmt.Sprintf("%sworker-%d", prefi
 // reported through ui.Step so the caller stays a thin cobra shim.
 func (m *Manager) Create(cfg Config) error {
 	start := time.Now()
+	if !ValidName(cfg.Name) {
+		return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", cfg.Name)
+	}
 	cp := ControlPlane(cfg.Name)
 
 	existing, err := m.rt.List(prefix(cfg.Name))
@@ -214,11 +228,11 @@ func (m *Manager) Create(cfg Config) error {
 
 	ui.Successf("Cluster %q is ready in %s. Every node is its own lightweight VM.",
 		cfg.Name, time.Since(start).Round(time.Second))
+	ui.Infof("context kiac-%s merged into %s", cfg.Name, kubeconfigPath)
 	ui.Hintf("kubectl get nodes")
 	if !cfg.NoMetrics {
 		ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")
 	}
-	_ = kubeconfigPath
 	return nil
 }
 
@@ -281,12 +295,12 @@ spec:
 
 	if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 		"wait", "--for=condition=Available", "deployment/controller",
-		"-n", "metallb-system", "--timeout=300s"); err != nil {
+		"-n", "metallb-system", "--timeout=180s"); err != nil {
 		return fmt.Errorf("MetalLB controller did not become available: %w", err)
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < 40; attempt++ {
+	for attempt := 0; attempt < 18; attempt++ {
 		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
 			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
 		if lastErr == nil {
@@ -350,6 +364,20 @@ func (m *Manager) Delete(name string) error {
 	}
 	ui.Successf("Cluster %q deleted.", name)
 	return nil
+}
+
+// Kubeconfig renders a standalone kubeconfig for one cluster.
+func (m *Manager) Kubeconfig(name string) (string, error) {
+	cp := ControlPlane(name)
+	raw, err := m.rt.Exec(cp, "cat", adminConf)
+	if err != nil {
+		return "", fmt.Errorf("reading admin.conf from %s: %w", cp, err)
+	}
+	ip, err := m.rt.IP(cp)
+	if err != nil {
+		return "", err
+	}
+	return standaloneKubeconfig(name, raw, ip)
 }
 
 // Clusters lists cluster names derived from running kiac containers.

@@ -28,6 +28,9 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
 		}
+		if !cluster.ValidName(createCfg.Name) {
+			return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", createCfg.Name)
+		}
 		if createCfg.Image == "" {
 			img, err := cluster.ResolveImage(k8sVersion)
 			if err != nil {

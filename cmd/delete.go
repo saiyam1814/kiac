@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/saiyam1814/kiac/pkg/cluster"
 	"github.com/saiyam1814/kiac/pkg/ui"
 	"github.com/spf13/cobra"
@@ -18,6 +20,9 @@ var deleteClusterCmd = &cobra.Command{
 	Short: "Delete a cluster and its kubeconfig entries",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
+		if !cluster.ValidName(deleteName) {
+			return fmt.Errorf("invalid cluster name %q", deleteName)
+		}
 		return cluster.NewManager().Delete(deleteName)
 	},
 }
