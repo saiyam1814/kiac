@@ -212,7 +212,7 @@ func parseList(out, prefix string) ([]Info, error) {
 		info := Info{
 			Name:   firstString(row, "configuration.id", "id", "name"),
 			Image:  firstString(row, "configuration.image.reference", "image", "imageRef"),
-			Status: firstString(row, "status", "state"),
+			Status: firstString(row, "status.state", "status", "state"),
 		}
 		if info.Name == "" || !strings.HasPrefix(info.Name, prefix) {
 			continue

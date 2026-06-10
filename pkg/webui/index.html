@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kiac · clusters</title>
+<style>
+  :root {
+    --accent:#326CE5; --accent-hover:#4F83EA; --accent-tint:#E0EAFB;
+    --ink:#050B24; --mid:#828592; --divider:#E6E7E9; --bg:#EDEFF3; --radius:16px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{background:rgba(255,255,255,.8);backdrop-filter:blur(20px);border-bottom:1px solid var(--divider);padding:14px 26px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
+  header .hex{color:var(--accent);font-size:22px}
+  header b{font-size:18px}
+  header span{color:var(--mid);font-size:13px}
+  main{max-width:860px;margin:0 auto;padding:34px 20px;display:grid;gap:22px}
+  .panel{background:#fff;border-radius:var(--radius);padding:26px;box-shadow:0 1px 3px rgba(5,11,36,.06)}
+  h2{font-size:17px;margin-bottom:16px}
+  form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end}
+  label{font-size:12px;color:var(--mid);font-weight:600;display:block;margin-bottom:5px}
+  input,select{width:100%;padding:9px 11px;border:1px solid var(--divider);border-radius:10px;font-size:14px;background:#fff;font-family:inherit}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .checks{grid-column:1/-1;display:flex;gap:18px;flex-wrap:wrap;font-size:13.5px;color:var(--mid)}
+  .checks label{display:flex;align-items:center;gap:6px;margin:0;font-size:13.5px;font-weight:500}
+  .checks input{width:auto}
+  button.primary{grid-column:1/-1;background:var(--accent);color:#fff;border:none;border-radius:99px;padding:12px;font-size:15px;font-weight:600;cursor:pointer}
+  button.primary:hover{background:var(--accent-hover)}
+  button.primary:disabled{opacity:.5;cursor:default}
+  .cluster{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--divider)}
+  .cluster:last-child{border-bottom:none}
+  .cluster .nm{font-weight:700;font-size:15px}
+  .cluster .nodes{color:var(--mid);font-size:13px;margin-top:3px}
+  .badge{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 9px;background:var(--accent-tint);color:var(--accent);margin-left:8px;text-transform:uppercase}
+  .del{background:none;border:1px solid var(--divider);color:#c0392b;border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  .del:hover{border-color:#c0392b}
+  pre{background:#0d1226;color:#c9cede;border-radius:12px;padding:18px;font-size:12.5px;line-height:1.7;max-height:340px;overflow:auto;font-family:"SF Mono","Roboto Mono",ui-monospace,monospace;white-space:pre-wrap}
+  .empty{color:var(--mid);font-size:14px;padding:10px 0}
+  #jobstate{font-size:13px;color:var(--mid);margin-bottom:10px}
+  .ok{color:#1a9e55;font-weight:700}.bad{color:#c0392b;font-weight:700}
+</style>
+</head>
+<body>
+<header><span class="hex">⬢</span> <b>kiac</b> <span>Kubernetes in Apple Containers · local console</span></header>
+<main>
+  <div class="panel">
+    <h2>Create a cluster</h2>
+    <form id="f">
+      <div><label>Name</label><input id="name" value="dev" pattern="[a-z0-9-]+"></div>
+      <div><label>Workers</label><input id="workers" type="number" min="0" max="6" value="2"></div>
+      <div><label>Kubernetes</label><select id="version"></select></div>
+      <div><label>CNI</label><select id="cni"></select></div>
+      <div><label>Memory / node</label><input id="memory" value="3G"></div>
+      <div class="checks">
+        <label><input type="checkbox" id="lb" checked> LoadBalancer (MetalLB)</label>
+        <label><input type="checkbox" id="metrics" checked> metrics-server</label>
+        <label><input type="checkbox" id="storage" checked> local-path storage</label>
+      </div>
+      <button class="primary" id="go">Create cluster</button>
+    </form>
+  </div>
+
+  <div class="panel" id="jobpanel" style="display:none">
+    <h2>Activity</h2>
+    <div id="jobstate"></div>
+    <pre id="joblog"></pre>
+  </div>
+
+  <div class="panel">
+    <h2>Clusters</h2>
+    <div id="list"><div class="empty">Loading…</div></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
+
+async function loadMeta() {
+  const m = await j('/api/meta');
+  $('version').innerHTML = m.versions.map(v => `<option ${v===m.defaultVersion?'selected':''}>${v}</option>`).join('');
+  $('cni').innerHTML = m.cnis.map(c => `<option>${c}</option>`).join('');
+}
+
+async function refresh() {
+  const cs = await j('/api/clusters');
+  $('list').innerHTML = cs.length ? cs.map(c => `
+    <div class="cluster">
+      <div><span class="nm">${c.name}</span><span class="badge">${(c.nodes||[]).length} node${(c.nodes||[]).length>1?'s':''}</span>
+        <div class="nodes">${(c.nodes||[]).map(n => `${n.name} · ${n.status}`).join('<br>')}</div></div>
+      <button class="del" onclick="del('${c.name}')">Delete</button>
+    </div>`).join('') : '<div class="empty">No clusters yet. Create one above - it takes about three minutes.</div>';
+}
+
+let pollTimer;
+function watch(jobId, verb) {
+  $('jobpanel').style.display = 'block';
+  $('go').disabled = true;
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const job = await j('/api/jobs/' + jobId);
+    $('joblog').textContent = job.log || '(starting…)';
+    $('joblog').scrollTop = $('joblog').scrollHeight;
+    $('jobstate').innerHTML = job.status === 'running' ? verb + '…'
+      : job.status === 'done' ? '<span class="ok">✓ ' + verb + ' finished</span>'
+      : '<span class="bad">✗ ' + verb + ' failed</span>';
+    if (job.status !== 'running') { clearInterval(pollTimer); $('go').disabled = false; refresh(); }
+  }, 1200);
+}
+
+$('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    name: $('name').value.trim(), workers: +$('workers').value,
+    k8sVersion: $('version').value, cni: $('cni').value, memory: $('memory').value.trim(),
+    noLB: !$('lb').checked, noMetrics: !$('metrics').checked, noStorage: !$('storage').checked,
+  };
+  const r = await j('/api/clusters', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (r.error) { alert(r.error); return; }
+  watch(r.job, 'Creating "' + body.name + '"');
+});
+
+async function del(name) {
+  if (!confirm('Delete cluster "' + name + '" and its node VMs?')) return;
+  const r = await j('/api/clusters/' + name, { method: 'DELETE' });
+  if (r.error) { alert(r.error); return; }
+  watch(r.job, 'Deleting "' + name + '"');
+}
+
+loadMeta(); refresh(); setInterval(refresh, 10000);
+</script>
+</body>
+</html>

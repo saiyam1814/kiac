@@ -17,3 +17,8 @@ var metricsServerManifest string
 //
 //go:embed assets/metallb-native.yaml
 var metallbManifest string
+
+// Flannel/Calico/Cilium manifests are deliberately absent: the stock
+// node kernel ships without CONFIG_BRIDGE_NETFILTER, VXLAN, and eBPF
+// prerequisites, so they cannot start. Revisit when kiac supports
+// custom kernels via `container run --kernel`.

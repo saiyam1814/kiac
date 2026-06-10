@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/cluster"
@@ -27,15 +28,27 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
 		}
+		if createCfg.Image == "" {
+			img, err := cluster.ResolveImage(k8sVersion)
+			if err != nil {
+				return err
+			}
+			createCfg.Image = img
+		}
 		return cluster.NewManager().Create(createCfg)
 	},
 }
+
+var k8sVersion string
 
 func init() {
 	f := createClusterCmd.Flags()
 	f.StringVar(&createCfg.Name, "name", "kiac", "cluster name")
 	f.IntVar(&createCfg.Workers, "workers", 0, "number of worker nodes (control plane is untainted when 0)")
-	f.StringVar(&createCfg.Image, "image", cluster.DefaultNodeImage, "node image")
+	f.StringVar(&k8sVersion, "k8s-version", cluster.DefaultK8sVersion,
+		"Kubernetes version ("+strings.Join(cluster.SupportedVersions(), ", ")+")")
+	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
+	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, or none (custom kernels needed for flannel/calico/cilium)")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "4G", "memory per node VM")
 	f.BoolVar(&createCfg.NoMetrics, "no-metrics", false, "skip installing metrics-server")

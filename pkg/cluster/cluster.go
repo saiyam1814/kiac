@@ -13,10 +13,6 @@ import (
 	"github.com/saiyam1814/kiac/pkg/ui"
 )
 
-// DefaultNodeImage is the kindest/node build kiac boots by default. The
-// digest is pinned because node images are only tested at exact digests.
-const DefaultNodeImage = "docker.io/kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"
-
 const adminConf = "/etc/kubernetes/admin.conf"
 
 // Config describes a cluster to create.
@@ -26,6 +22,7 @@ type Config struct {
 	Image       string
 	CPUs        string
 	Memory      string
+	CNI         string
 	NoMetrics   bool
 	NoStorage   bool
 	NoLB        bool
@@ -127,11 +124,7 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
-	if err := ui.Step("Installing CNI (kindnet)", func() error {
-		_, err := m.rt.Exec(cp, "sh", "-euc",
-			`sed -e 's@{{ .PodSubnet }}@10.244.0.0/16@' /kind/manifests/default-cni.yaml | kubectl --kubeconfig `+adminConf+` apply -f -`)
-		return err
-	}); err != nil {
+	if err := m.installCNI(cp, cfg); err != nil {
 		m.cleanupOnFailure(cfg.Name)
 		return err
 	}
@@ -178,7 +171,9 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
-	if err := ui.Step("Waiting for nodes to be Ready", func() error {
+	if cfg.CNI == "none" {
+		ui.Infof("nodes stay NotReady until you install a CNI; skipping readiness wait")
+	} else if err := ui.Step("Waiting for nodes to be Ready", func() error {
 		_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 			"wait", "--for=condition=Ready", "nodes", "--all",
 			fmt.Sprintf("--timeout=%ds", int(cfg.WaitTimeout.Seconds())))
@@ -188,13 +183,17 @@ func (m *Manager) Create(cfg Config) error {
 		return err
 	}
 
-	if !cfg.NoLB {
+	if !cfg.NoLB && cfg.CNI != "none" {
+		// A missing LB pool degrades the cluster, it does not break it,
+		// so this never triggers teardown.
 		if err := ui.Step("Configuring LoadBalancer IP pool", func() error {
 			return m.configureLBPool(cp, cfg, nodes)
 		}); err != nil {
-			m.cleanupOnFailure(cfg.Name)
-			return err
+			ui.Infof("LoadBalancer pool not configured: %v", err)
+			ui.Infof("the cluster works; re-run pool setup later with: kiac delete/create, or apply an IPAddressPool manually")
 		}
+	} else if !cfg.NoLB {
+		ui.Infof("LoadBalancer pool deferred: apply an IPAddressPool after your CNI is up")
 	}
 
 	var kubeconfigPath string
@@ -221,6 +220,28 @@ func (m *Manager) Create(cfg Config) error {
 	}
 	_ = kubeconfigPath
 	return nil
+}
+
+// installCNI applies the selected pod network. kindnet ships inside the
+// node image; flannel is embedded with a host-gw backend (the node
+// kernel has no VXLAN). "none" skips installation for BYO CNIs like
+// Calico or Cilium, whose own installers handle kernel feature checks.
+func (m *Manager) installCNI(cp string, cfg Config) error {
+	switch cfg.CNI {
+	case "", "kindnet":
+		return ui.Step("Installing CNI (kindnet)", func() error {
+			_, err := m.rt.Exec(cp, "sh", "-euc",
+				`sed -e 's@{{ .PodSubnet }}@10.244.0.0/16@' /kind/manifests/default-cni.yaml | kubectl --kubeconfig `+adminConf+` apply -f -`)
+			return err
+		})
+	case "flannel", "calico", "cilium":
+		return fmt.Errorf("%s needs kernel features (br_netfilter, VXLAN, eBPF) that Apple's stock node kernel does not enable; use kindnet, or --cni none with a custom kernel (tracked on the roadmap)", cfg.CNI)
+	case "none":
+		ui.Infof("skipping CNI: install your own before nodes go Ready (note: the stock kernel lacks br_netfilter/VXLAN/eBPF)")
+		return nil
+	default:
+		return fmt.Errorf("unknown --cni %q (supported: kindnet, none)", cfg.CNI)
+	}
 }
 
 // configureLBPool points MetalLB at the cluster's own node IPs. Worker
@@ -258,18 +279,20 @@ spec:
   ipAddressPools: [kiac-node-ips]
 `, strings.Join(addrs, ", "))
 
-	_, _ = m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+	if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 		"wait", "--for=condition=Available", "deployment/controller",
-		"-n", "metallb-system", "--timeout=180s")
+		"-n", "metallb-system", "--timeout=300s"); err != nil {
+		return fmt.Errorf("MetalLB controller did not become available: %w", err)
+	}
 
 	var lastErr error
-	for attempt := 0; attempt < 30; attempt++ {
+	for attempt := 0; attempt < 40; attempt++ {
 		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
 			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
 		if lastErr == nil {
 			return nil
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 	return fmt.Errorf("MetalLB webhook never became ready: %w", lastErr)
 }

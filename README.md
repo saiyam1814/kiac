@@ -33,6 +33,7 @@ Cluster "dev" is ready in 81s. Every node is its own lightweight VM.
 - **PVCs that just bind.** A default StorageClass backed by local-path-provisioner is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
 - **Direct networking.** On macOS 26+ every node gets its own IP that is reachable from your Mac. Hit NodePorts directly - no port-mapping gymnastics.
 - **`type: LoadBalancer` works.** MetalLB ships by default with a pool of the cluster's node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
+- **A console when you want one.** `kiac ui` opens a local web console to create, watch, and delete clusters - same engine as the CLI.
 - **kind-compatible workflow.** `create cluster`, `delete cluster`, `load image`, kubeconfig contexts. Your muscle memory transfers.
 
 ## Requirements
@@ -60,8 +61,10 @@ git clone https://github.com/saiyam1814/kiac && cd kiac && make build
 
 ```bash
 kiac doctor                                  # check your setup
-kiac create cluster                          # single node, metrics-server included
+kiac create cluster                          # single node, K8s 1.36, everything included
 kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
+kiac create cluster --k8s-version 1.34       # pick your Kubernetes (1.32-1.36 pinned)
+kiac ui                                      # local web console to create/manage clusters
 kiac get clusters
 kiac get nodes --name dev
 container build -t myapp:dev .               # build with apple/container
@@ -77,7 +80,9 @@ Each cluster gets a kubeconfig context named `kiac-<name>` merged into your `~/.
 |---|---|---|
 | `--name` | `kiac` | cluster name |
 | `--workers` | `0` | worker count; control plane is untainted when 0 |
-| `--image` | `kindest/node:v1.34.0` (pinned digest) | node image |
+| `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 |
+| `--image` | resolved from `--k8s-version` | explicit node image override |
+| `--cni` | `kindnet` | pod network: `kindnet` or `none`. Flannel/Calico/Cilium need kernel features (br_netfilter, VXLAN, eBPF) missing from Apple's stock node kernel; custom kernel support is on the roadmap |
 | `--cpus` | `4` | vCPUs per node VM |
 | `--memory` | `4G` | memory per node VM |
 | `--no-metrics` | `false` | skip metrics-server |
@@ -112,6 +117,8 @@ kiac coexists peacefully with Docker Desktop, Rancher Desktop, kind, k3d, and fr
 - HA control planes
 - Per-node `--kernel` and resource overrides via a config file
 - Ingress helper
+- Custom node kernels (`--kernel`) to unlock Flannel, Calico, and Cilium
+- Built-in LoadBalancer controller to replace MetalLB (node-IP allocation needs no ARP speaker)
 
 ## License
 

@@ -5,8 +5,8 @@ import "testing"
 // container CLI 0.x ls --format json shape (nested configuration object).
 const lsV0 = `[{"status":"running","networks":[{"address":"192.168.64.2/24"}],"configuration":{"id":"kiac-dev-control-plane","image":{"reference":"docker.io/kindest/node:v1.34.0"}}},{"status":"running","configuration":{"id":"unrelated","image":{"reference":"nginx"}}}]`
 
-// container CLI 1.x flatter shape.
-const lsV1 = `[{"id":"kiac-dev-worker-1","image":"docker.io/kindest/node:v1.34.0","status":"stopped"}]`
+// container CLI 1.x shape: top-level id, status is an object with state.
+const lsV1 = `[{"id":"kiac-dev-worker-1","configuration":{"id":"kiac-dev-worker-1","image":{"reference":"docker.io/kindest/node:v1.34.0"}},"status":{"state":"stopped","networks":[{"ipv4Address":"192.168.65.13/24"}]}}]`
 
 func TestParseListShapes(t *testing.T) {
 	infos, err := parseList(lsV0, "kiac-dev-")
