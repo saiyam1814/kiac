@@ -23,7 +23,7 @@ brews:
       owner: saiyam1814
       name: homebrew-tap
     homepage: https://github.com/saiyam1814/kiac
-    description: "Kubernetes in Apple Containers - every node is its own microVM"
+    description: "Kubernetes in Apple Containers - every node is its own lightweight VM"
     license: MIT
     dependencies:
       - name: kubernetes-cli
