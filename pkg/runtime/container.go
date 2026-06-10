@@ -16,6 +16,8 @@ import (
 // Client wraps the apple/container CLI binary.
 type Client struct {
 	Bin string
+
+	capAddProbe *bool
 }
 
 func New() *Client { return &Client{Bin: "container"} }
@@ -89,9 +91,14 @@ type RunOpts struct {
 }
 
 // RunDetached boots a node VM. The kindest/node entrypoint brings up
-// systemd and containerd inside the VM.
+// systemd and containerd inside the VM. Nodes get the full capability
+// set (container CLI 1.0 tightened the default and the entrypoint needs
+// CAP_SYS_ADMIN); the VM boundary is the isolation, not capabilities.
 func (c *Client) RunDetached(o RunOpts) error {
 	args := []string{"run", "-d", "--name", o.Name}
+	if c.supportsCapAdd() {
+		args = append(args, "--cap-add", "ALL")
+	}
 	if o.CPUs != "" {
 		args = append(args, "--cpus", o.CPUs)
 	}
@@ -101,6 +108,17 @@ func (c *Client) RunDetached(o RunOpts) error {
 	args = append(args, o.Image)
 	_, err := c.run(args...)
 	return err
+}
+
+// supportsCapAdd probes once whether this container CLI knows --cap-add
+// (added in 1.0.0); 0.x grants a wider default set and lacks the flag.
+func (c *Client) supportsCapAdd() bool {
+	if c.capAddProbe == nil {
+		out, _ := c.run("run", "--help")
+		v := strings.Contains(out, "--cap-add")
+		c.capAddProbe = &v
+	}
+	return *c.capAddProbe
 }
 
 // Exec runs a command inside a node and returns combined output.

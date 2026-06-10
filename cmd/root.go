@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 virtual machine, powered by Apple's open-source container runtime
 (apple/container) on Apple silicon.
 
-Think kind, but each node boots in its own microVM with hardware-grade
+Think kind, but each node boots in its own lightweight VM with hardware-grade
 isolation, direct node networking from your Mac, and metrics-server
 working out of the box.`,
 	SilenceUsage:  true,

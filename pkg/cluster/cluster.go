@@ -27,6 +27,8 @@ type Config struct {
 	CPUs        string
 	Memory      string
 	NoMetrics   bool
+	NoStorage   bool
+	NoLB        bool
 	WaitTimeout time.Duration
 }
 
@@ -72,7 +74,7 @@ func (m *Manager) Create(cfg Config) error {
 		nodes = append(nodes, worker(cfg.Name, i))
 	}
 
-	if err := ui.Step(fmt.Sprintf("Booting %d microVM node(s)", len(nodes)), func() error {
+	if err := ui.Step(fmt.Sprintf("Booting %d node VM(s)", len(nodes)), func() error {
 		for _, n := range nodes {
 			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: cfg.Memory}); err != nil {
 				return err
@@ -145,9 +147,30 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
+	if !cfg.NoStorage {
+		if err := ui.Step("Installing storage (local-path-provisioner)", func() error {
+			_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+				"apply", "-f", "/kind/manifests/default-storage.yaml")
+			return err
+		}); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
+	}
+
 	if !cfg.NoMetrics {
 		if err := ui.Step("Installing metrics-server", func() error {
 			return m.rt.ExecStdin(cp, strings.NewReader(metricsServerManifest),
+				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
+		}); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
+	}
+
+	if !cfg.NoLB {
+		if err := ui.Step("Installing LoadBalancer (MetalLB)", func() error {
+			return m.rt.ExecStdin(cp, strings.NewReader(metallbManifest),
 				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
 		}); err != nil {
 			m.cleanupOnFailure(cfg.Name)
@@ -163,6 +186,15 @@ func (m *Manager) Create(cfg Config) error {
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
 		return err
+	}
+
+	if !cfg.NoLB {
+		if err := ui.Step("Configuring LoadBalancer IP pool", func() error {
+			return m.configureLBPool(cp, cfg, nodes)
+		}); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
 	}
 
 	var kubeconfigPath string
@@ -189,6 +221,57 @@ func (m *Manager) Create(cfg Config) error {
 	}
 	_ = kubeconfigPath
 	return nil
+}
+
+// configureLBPool points MetalLB at the cluster's own node IPs. Worker
+// IPs are pooled when workers exist (keeps control-plane ports like 6443
+// out of the LB surface); the control plane is pooled on single-node
+// clusters. The webhook needs a moment after rollout, so apply retries.
+func (m *Manager) configureLBPool(cp string, cfg Config, nodes []string) error {
+	pool := nodes
+	if cfg.Workers > 0 {
+		pool = nodes[1:]
+	}
+	var addrs []string
+	for _, n := range pool {
+		ip, err := m.rt.IP(n)
+		if err != nil {
+			return err
+		}
+		addrs = append(addrs, fmt.Sprintf("%q", ip+"/32"))
+	}
+
+	manifest := fmt.Sprintf(`apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: kiac-node-ips
+  namespace: metallb-system
+spec:
+  addresses: [%s]
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: kiac-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools: [kiac-node-ips]
+`, strings.Join(addrs, ", "))
+
+	_, _ = m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+		"wait", "--for=condition=Available", "deployment/controller",
+		"-n", "metallb-system", "--timeout=180s")
+
+	var lastErr error
+	for attempt := 0; attempt < 30; attempt++ {
+		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
+			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
+		if lastErr == nil {
+			return nil
+		}
+		time.Sleep(3 * time.Second)
+	}
+	return fmt.Errorf("MetalLB webhook never became ready: %w", lastErr)
 }
 
 // preflight validates the host before any VM is booted.

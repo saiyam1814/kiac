@@ -8,3 +8,12 @@ import _ "embed"
 //
 //go:embed assets/metrics-server.yaml
 var metricsServerManifest string
+
+// metallbManifest is the upstream MetalLB native manifest (v0.16.0).
+// kiac runs it in L2 mode with a pool of the cluster's own node IPs:
+// vmnet only delivers frames addressed to a VM's assigned IP, so floating
+// VIPs never reach the guest, while node IPs are host-reachable and
+// kube-proxy programs LoadBalancer ingress IPs into iptables.
+//
+//go:embed assets/metallb-native.yaml
+var metallbManifest string

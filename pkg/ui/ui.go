@@ -20,7 +20,7 @@ var (
 	green  = "\033[32m"
 	red    = "\033[31m"
 	cyan   = "\033[36m"
-	orange = "\033[38;5;208m"
+	accent = "\033[38;5;33m" // kubernetes blue
 )
 
 func isTTY() bool {
@@ -40,7 +40,7 @@ func c(code, s string) string {
 
 // Banner prints the product header once per command invocation.
 func Banner(version string) {
-	fmt.Printf("%s %s\n", c(bold+orange, "⬢ kiac"), c(dim, version+" · Kubernetes in Apple Containers"))
+	fmt.Printf("%s %s\n", c(bold+accent, "⬢ kiac"), c(dim, version+" · Kubernetes in Apple Containers"))
 }
 
 // Infof prints a dim informational line aligned with step output.
@@ -77,7 +77,7 @@ func Step(title string, fn func() error) error {
 					return
 				case <-time.After(90 * time.Millisecond):
 					frame := spinnerFrames[i%len(spinnerFrames)]
-					fmt.Printf("\r %s %s", c(orange, frame), title)
+					fmt.Printf("\r %s %s", c(accent, frame), title)
 					i++
 				}
 			}

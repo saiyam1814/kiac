@@ -2,19 +2,22 @@
 
 **kiac** runs local Kubernetes clusters where **every node is its own lightweight virtual machine**, powered by [apple/container](https://github.com/apple/container) and the [Containerization](https://github.com/apple/containerization) framework on Apple silicon.
 
-Think `kind`, but instead of sharing one Docker VM, each node boots in its own microVM in under a second - the same idea Weave Ignite pioneered with Firecracker, now native on your Mac with zero extra software between you and the hypervisor.
+Think `kind`, but instead of sharing one Docker VM, each node boots in its own lightweight VM in about a second - the same idea Weave Ignite pioneered with Firecracker, now native on your Mac with zero extra software between you and the hypervisor.
 
 ```
 $ kiac create cluster --name dev --workers 2
 ⬢ kiac v0.1.0 · Kubernetes in Apple Containers
  ✓ Preflight checks (0.3s)
  ✓ Pulling node image kindest/node:v1.34.0 (4.1s)
- ✓ Booting 3 microVM node(s) (9.8s)
+ ✓ Booting 3 node VM(s) (9.8s)
  ✓ Initializing Kubernetes control plane (32.1s)
  ✓ Joining 2 worker(s) (18.4s)
  ✓ Installing CNI (kindnet) (1.2s)
+ ✓ Installing storage (local-path-provisioner) (0.4s)
  ✓ Installing metrics-server (0.9s)
+ ✓ Installing LoadBalancer (MetalLB) (1.1s)
  ✓ Waiting for nodes to be Ready (14.0s)
+ ✓ Configuring LoadBalancer IP pool (3.2s)
  ✓ Writing kubeconfig (0.4s)
 
 Cluster "dev" is ready in 81s. Every node is its own lightweight VM.
@@ -27,7 +30,9 @@ Cluster "dev" is ready in 81s. Every node is its own lightweight VM.
 - **Real VM isolation per node.** apple/container maps each container to one lightweight VM on the Virtualization framework. Your "nodes" are not namespaces sharing a kernel - they are separate machines, like a real cluster.
 - **No Docker Desktop, no Lima, no QEMU.** One Swift-native runtime that ships from Apple, one Go binary from us.
 - **Metrics that just work.** kubelet and cAdvisor run inside a real Linux VM with real cgroups, and kiac installs metrics-server by default. `kubectl top nodes` works out of the box.
+- **PVCs that just bind.** A default StorageClass backed by local-path-provisioner is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
 - **Direct networking.** On macOS 26+ every node gets its own IP that is reachable from your Mac. Hit NodePorts directly - no port-mapping gymnastics.
+- **`type: LoadBalancer` works.** MetalLB ships by default with a pool of the cluster's node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
 - **kind-compatible workflow.** `create cluster`, `delete cluster`, `load image`, kubeconfig contexts. Your muscle memory transfers.
 
 ## Requirements
@@ -76,6 +81,8 @@ Each cluster gets a kubeconfig context named `kiac-<name>` merged into your `~/.
 | `--cpus` | `4` | vCPUs per node VM |
 | `--memory` | `4G` | memory per node VM |
 | `--no-metrics` | `false` | skip metrics-server |
+| `--no-storage` | `false` | skip the local-path default StorageClass |
+| `--no-lb` | `false` | skip MetalLB (`type: LoadBalancer` support) |
 | `--wait` | `5m` | node readiness timeout |
 
 ## How it works
@@ -84,7 +91,7 @@ Each cluster gets a kubeconfig context named `kiac-<name>` merged into your `~/.
 ┌─ your Mac (Apple silicon) ──────────────────────────────┐
 │  kiac CLI ──drives──▶ apple/container CLI               │
 │                          │                              │
-│   ┌──── microVM ────┐ ┌──── microVM ───┐ ┌── microVM ─┐ │
+│   ┌─── node VM ─────┐ ┌─── node VM ────┐ ┌── node VM ─┐ │
 │   │ control-plane   │ │ worker-1       │ │ worker-2   │ │
 │   │ systemd         │ │ systemd        │ │ systemd    │ │
 │   │ containerd      │ │ containerd     │ │ containerd │ │
@@ -104,7 +111,7 @@ kiac coexists peacefully with Docker Desktop, Rancher Desktop, kind, k3d, and fr
 - `container machine` backed nodes (WWDC26's persistent Linux environments)
 - HA control planes
 - Per-node `--kernel` and resource overrides via a config file
-- Ingress and LoadBalancer helpers
+- Ingress helper
 
 ## License
 

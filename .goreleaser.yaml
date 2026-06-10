@@ -1,0 +1,42 @@
+version: 2
+
+project_name: kiac
+
+builds:
+  - main: .
+    binary: kiac
+    goos: [darwin]
+    goarch: [arm64]
+    env: [CGO_ENABLED=0]
+    ldflags:
+      - -s -w -X github.com/saiyam1814/kiac/cmd.Version=v{{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - repository:
+      owner: saiyam1814
+      name: homebrew-tap
+    homepage: https://github.com/saiyam1814/kiac
+    description: "Kubernetes in Apple Containers - every node is its own microVM"
+    license: MIT
+    dependencies:
+      - name: kubernetes-cli
+    caveats: |
+      kiac needs apple/container 1.0+:
+        https://github.com/apple/container/releases
+      Then: kiac doctor
+
+release:
+  github:
+    owner: saiyam1814
+    name: kiac
+  draft: true
+
+changelog:
+  use: github-native

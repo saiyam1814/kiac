@@ -18,7 +18,7 @@ var createCmd = &cobra.Command{
 
 var createClusterCmd = &cobra.Command{
 	Use:   "cluster",
-	Short: "Create a Kubernetes cluster of microVM nodes",
+	Short: "Create a Kubernetes cluster of lightweight-VM nodes",
 	Example: `  kiac create cluster
   kiac create cluster --name dev --workers 2
   kiac create cluster --memory 8G --cpus 4`,
@@ -39,6 +39,8 @@ func init() {
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "4G", "memory per node VM")
 	f.BoolVar(&createCfg.NoMetrics, "no-metrics", false, "skip installing metrics-server")
+	f.BoolVar(&createCfg.NoStorage, "no-storage", false, "skip installing the local-path default StorageClass")
+	f.BoolVar(&createCfg.NoLB, "no-lb", false, "skip installing MetalLB (type: LoadBalancer support)")
 	f.DurationVar(&createCfg.WaitTimeout, "wait", 5*time.Minute, "timeout for nodes to become ready")
 	createCmd.AddCommand(createClusterCmd)
 }
