@@ -261,37 +261,43 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 // configureLBPool points MetalLB at the cluster's own node IPs. Worker
 // IPs are pooled when workers exist (keeps control-plane ports like 6443
 // out of the LB surface); the control plane is pooled on single-node
-// clusters. The webhook needs a moment after rollout, so apply retries.
+// clusters. Each IP gets its own pool with an L2Advertisement pinned to
+// the owning node: a speaker elected on any other node would answer ARP
+// for a live node IP with its own MAC, hijacking all node-to-node
+// traffic for that node (apiserver heartbeats included) and marking it
+// NotReady. The webhook needs a moment after rollout, so apply retries.
 func (m *Manager) configureLBPool(cp string, cfg Config, nodes []string) error {
 	pool := nodes
 	if cfg.Workers > 0 {
 		pool = nodes[1:]
 	}
-	var addrs []string
+	var docs []string
 	for _, n := range pool {
 		ip, err := m.rt.IP(n)
 		if err != nil {
 			return err
 		}
-		addrs = append(addrs, fmt.Sprintf("%q", ip+"/32"))
-	}
-
-	manifest := fmt.Sprintf(`apiVersion: metallb.io/v1beta1
+		docs = append(docs, fmt.Sprintf(`apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: kiac-node-ips
+  name: kiac-ip-%[1]s
   namespace: metallb-system
 spec:
-  addresses: [%s]
+  addresses: ["%[2]s/32"]
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: kiac-l2
+  name: kiac-l2-%[1]s
   namespace: metallb-system
 spec:
-  ipAddressPools: [kiac-node-ips]
-`, strings.Join(addrs, ", "))
+  ipAddressPools: [kiac-ip-%[1]s]
+  nodeSelectors:
+    - matchLabels:
+        kubernetes.io/hostname: %[1]s
+`, n, ip))
+	}
+	manifest := strings.Join(docs, "---\n")
 
 	if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 		"wait", "--for=condition=Available", "deployment/controller",
