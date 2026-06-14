@@ -1,3 +1,11 @@
 bin/
+dist/
 *.tar
 .DS_Store
+
+# tooling artifacts (HyperFrames skills, lockfiles) — not part of the product
+.agents/
+skills-lock.json
+
+# hyperframes video working dir (only final assets/ are committed)
+videos/

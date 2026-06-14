@@ -7,6 +7,8 @@
 <meta name="description" content="Local Kubernetes clusters where every node is its own lightweight virtual machine. Native on Apple silicon, powered by apple/container.">
 <meta property="og:title" content="kiac - Kubernetes in Apple Containers">
 <meta property="og:description" content="Every node is its own lightweight VM. kind-style clusters, native on Apple silicon, metrics and storage included.">
+<meta property="og:image" content="assets/banner.png">
+<link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg">
 <style>
   :root {
     --accent: #326CE5;
@@ -37,11 +39,11 @@
     border-bottom: 1px solid var(--divider);
   }
   .nav-inner {
-    max-width: 980px; margin: 0 auto; padding: 14px 22px;
+    max-width: 980px; margin: 0 auto; padding: 12px 22px;
     display: flex; align-items: center; justify-content: space-between;
   }
-  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 19px; text-decoration: none; color: var(--ink); }
-  .brand .hex { color: var(--accent); font-size: 22px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 19px; text-decoration: none; color: var(--ink); letter-spacing: -0.01em; }
+  .brand img { width: 26px; height: 26px; display: block; }
   .nav-links { display: flex; gap: 26px; align-items: center; }
   .nav-links a { text-decoration: none; color: var(--mid); font-size: 14px; transition: color .2s; }
   .nav-links a:hover { color: var(--ink); }
@@ -50,7 +52,7 @@
   }
   .nav-links a.gh:hover { background: #1a2140; }
 
-  .hero { max-width: 980px; margin: 0 auto; padding: 96px 22px 64px; text-align: center; }
+  .hero { max-width: 980px; margin: 0 auto; padding: 88px 22px 56px; text-align: center; }
   .pill {
     display: inline-block; font-size: 13px; font-weight: 600; color: var(--accent);
     background: var(--accent-tint); border-radius: 99px; padding: 6px 14px; margin-bottom: 24px;
@@ -86,9 +88,17 @@
     font-size: 12.5px; font-weight: 600; color: var(--mid); box-shadow: 0 1px 3px rgba(5,11,36,.08);
   }
   .copy:hover { color: var(--ink); }
+  .install-note { margin: 12px auto 0; font-size: 13px; color: var(--subtle); }
+  .install-note code { background: var(--bg-soft); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
+  .videowrap { max-width: 880px; margin: 64px auto 0; }
+  .videowrap video, .videowrap img {
+    width: 100%; border-radius: var(--radius); display: block;
+    box-shadow: 0 30px 80px -28px rgba(5,11,36,.30); border: 1px solid var(--divider);
+  }
 
   .terminal {
-    max-width: 760px; margin: 72px auto 0; border-radius: var(--radius); overflow: hidden;
+    max-width: 760px; margin: 28px auto 0; border-radius: var(--radius); overflow: hidden;
     box-shadow: 0 30px 80px -20px rgba(5,11,36,.35); text-align: left;
     background: #0d1226;
   }
@@ -108,7 +118,14 @@
   section { max-width: 980px; margin: 0 auto; padding: 90px 22px 0; }
   .kicker { color: var(--accent); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; }
   h2 { font-size: clamp(30px, 4.5vw, 44px); letter-spacing: -0.015em; margin-top: 10px; font-weight: 800; }
-  .lede { color: var(--mid); font-size: 18px; max-width: 620px; margin-top: 14px; }
+  .lede { color: var(--mid); font-size: 18px; max-width: 660px; margin-top: 14px; }
+
+  .diagram { width: 100%; margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--divider); display: block; }
+
+  .why-points { margin-top: 30px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .why-points .pt { padding: 4px 0; }
+  .why-points .pt b { display: block; font-size: 16px; margin-bottom: 4px; }
+  .why-points .pt p { color: var(--mid); font-size: 15px; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
   .card {
@@ -121,20 +138,11 @@
   .card p { color: var(--mid); font-size: 15px; }
   .card code { font-family: "SF Mono","Roboto Mono",ui-monospace,monospace; font-size: 13px; color: var(--ink); background: #fff; padding: 1px 6px; border-radius: 6px; }
 
-  table { width: 100%; border-collapse: collapse; margin-top: 40px; font-size: 15px; }
-  th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--divider); }
-  th { color: var(--mid); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; }
-  td:first-child { font-weight: 600; }
-  .yes { color: #1a9e55; font-weight: 700; }
-  .no { color: var(--subtle); }
-  .kiac-col { background: #F2F7FF; }
-
   footer {
     margin-top: 110px; border-top: 1px solid var(--divider); padding: 44px 22px 60px;
     text-align: center; color: var(--mid); font-size: 14px;
   }
   footer a { color: var(--ink); text-decoration: none; font-weight: 600; }
-  footer .hex { color: var(--accent); }
   @media (max-width: 600px) { .nav-links a:not(.gh) { display: none; } }
 </style>
 </head>
@@ -142,10 +150,10 @@
 
 <nav>
   <div class="nav-inner">
-    <a class="brand" href="#"><span class="hex">⬢</span> kiac</a>
+    <a class="brand" href="#"><img src="assets/logo-mark.svg" alt="kiac"> kiac</a>
     <div class="nav-links">
+      <a href="#why">Why</a>
       <a href="#features">Features</a>
-      <a href="#compare">Compare</a>
       <a href="#install">Install</a>
       <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
     </div>
@@ -155,14 +163,22 @@
 <div class="hero">
   <div class="pill">Built on apple/container 1.0</div>
   <h1>Kubernetes.<br><span class="grad">Every node, its own VM.</span></h1>
-  <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. No Docker Desktop. No QEMU. Metrics and storage included.</p>
+  <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. No Docker Desktop. No QEMU. Metrics, storage, and LoadBalancer included.</p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">Get started</a>
     <a class="btn btn-ghost" href="https://github.com/saiyam1814/kiac">View on GitHub</a>
   </div>
   <div class="install">
-    <code><span class="dollar">$</span> go install github.com/saiyam1814/kiac@latest</code>
-    <button class="copy" onclick="navigator.clipboard.writeText('go install github.com/saiyam1814/kiac@latest');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+    <code><span class="dollar">$</span> brew install saiyam1814/tap/kiac</code>
+    <button class="copy" onclick="navigator.clipboard.writeText('brew install saiyam1814/tap/kiac');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+  </div>
+  <p class="install-note">Prefer Go? <code>go install github.com/saiyam1814/kiac@latest</code></p>
+
+  <div class="videowrap">
+    <video autoplay loop muted playsinline poster="assets/banner.png">
+      <source src="assets/kiac-demo.mp4" type="video/mp4">
+      <img src="assets/banner.png" alt="kiac demo">
+    </video>
   </div>
 
   <div class="terminal">
@@ -171,36 +187,46 @@
   </div>
 </div>
 
-<section id="features">
-  <div class="kicker">Why kiac</div>
-  <h2>Batteries included. Actually.</h2>
-  <p class="lede">Everything you reach for in the first five minutes of a local cluster is already there.</p>
-  <div class="grid">
-    <div class="card"><div class="emoji">🔒</div><h3>Hardware-grade isolation</h3><p>Each node is one lightweight VM on Apple's Virtualization framework - real kernels, real cgroups, not namespaces sharing a daemon.</p></div>
-    <div class="card"><div class="emoji">📊</div><h3>Metrics out of the box</h3><p><code>kubectl top nodes</code> works the moment the cluster is up. metrics-server ships by default, preconfigured.</p></div>
-    <div class="card"><div class="emoji">💾</div><h3>PVCs that just bind</h3><p>A default StorageClass backed by local-path-provisioner is installed on create. Claim storage like on a real cluster.</p></div>
-    <div class="card"><div class="emoji">🌐</div><h3>Direct networking</h3><p>Every node gets an IP your Mac can reach. Hit NodePorts directly - no port-mapping flags, no tunnels.</p></div>
-    <div class="card"><div class="emoji">🧱</div><h3>Multi-node, day one</h3><p><code>--workers 2</code> gives you a real topology: scheduling, cross-node pod networking, node failures you can practice on.</p></div>
-    <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>MetalLB ships by default, pooled on node IPs. <code>type: LoadBalancer</code> gets a real EXTERNAL-IP your Mac can curl.</p></div>
-    <div class="card"><div class="emoji">🍎</div><h3>Native stack</h3><p>One Swift runtime from Apple, one Go binary from us. No Docker Desktop, no Lima, no QEMU in between.</p></div>
+<section id="why">
+  <div class="kicker">Why Apple containers</div>
+  <h2>Each container is its own VM.</h2>
+  <p class="lede">When Apple shipped <code>container</code> 1.0, the interesting part was underneath: every container boots a separate, minimal Linux VM on Apple's Virtualization framework. That is exactly the boundary a Kubernetes node wants.</p>
+  <img class="diagram" src="assets/apple-container-anatomy.png" alt="How one Apple container works">
+  <div class="why-points">
+    <div class="pt"><b>The image is the disk</b><p>The OCI image becomes an EXT4 root block device. No overlay mount on a shared host kernel.</p></div>
+    <div class="pt"><b>A dedicated kernel</b><p>Each container gets its own minimal, optimized Linux kernel, booting in about a second.</p></div>
+    <div class="pt"><b>vminitd is PID 1</b><p>A tiny Swift init launches your process, driven by the host over a gRPC API on vsock.</p></div>
+    <div class="pt"><b>Direct networking</b><p>virtio devices, no BIOS, and its own IP your Mac can reach. No port-forwarding.</p></div>
   </div>
 </section>
 
-<section id="compare">
-  <div class="kicker">Compare</div>
-  <h2>kind-style workflow, VM-grade nodes.</h2>
-  <table>
-    <thead><tr><th></th><th class="kiac-col">kiac</th><th>kind</th><th>k3d</th><th>minikube</th></tr></thead>
-    <tbody>
-      <tr><td>Node isolation</td><td class="kiac-col"><span class="yes">own VM each</span></td><td>shared VM</td><td>shared VM</td><td>one VM</td></tr>
-      <tr><td>Needs Docker Desktop / Lima</td><td class="kiac-col"><span class="yes">No</span></td><td>Yes</td><td>Yes</td><td>Usually</td></tr>
-      <tr><td>metrics-server by default</td><td class="kiac-col"><span class="yes">Yes</span></td><td class="no">No</td><td class="no">No</td><td>addon</td></tr>
-      <tr><td>Default StorageClass</td><td class="kiac-col"><span class="yes">Yes</span></td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-      <tr><td>type: LoadBalancer</td><td class="kiac-col"><span class="yes">Built in</span></td><td>extra tool</td><td>built in</td><td>tunnel</td></tr>
-      <tr><td>NodePort from host</td><td class="kiac-col"><span class="yes">Direct, no flags</span></td><td>port mappings</td><td>port mappings</td><td>tunnel</td></tr>
-      <tr><td>Apple silicon native</td><td class="kiac-col"><span class="yes">Yes</span></td><td>via Docker</td><td>via Docker</td><td>via driver</td></tr>
-    </tbody>
-  </table>
+<section id="isolation">
+  <div class="kicker">Real isolation</div>
+  <h2>The boundary is the hypervisor.</h2>
+  <p class="lede">Run "nodes" as Docker containers and they share one kernel, separated only by namespaces, a software boundary. With kiac the boundary between nodes is the hypervisor, the same one that separates virtual machines.</p>
+  <img class="diagram" src="assets/isolation.png" alt="Where the isolation boundary sits">
+  <div class="why-points">
+    <div class="pt"><b>Contained blast radius</b><p>A container escape that reaches a shared kernel reaches every node. A VM per node contains it to one.</p></div>
+    <div class="pt"><b>Independent failure domains</b><p>One kernel panic or runaway sysctl stays inside the VM that caused it, not the whole cluster.</p></div>
+    <div class="pt"><b>Real node failure</b><p>Stop a node VM and the control plane sees NotReady, evicts, and reschedules. Actually testable.</p></div>
+    <div class="pt"><b>Per-node kernel reality</b><p>Own /proc, /sys, modules, and sysctls. Node-level behavior is real, not simulated.</p></div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="kicker">Batteries included</div>
+  <h2>Usable the moment it is up.</h2>
+  <p class="lede">Everything you reach for in the first five minutes of a local cluster is already there.</p>
+  <div class="grid">
+    <div class="card"><div class="emoji">🔒</div><h3>Hardware-grade isolation</h3><p>Each node is one lightweight VM on Apple's Virtualization framework, with its own kernel and cgroups.</p></div>
+    <div class="card"><div class="emoji">📊</div><h3>Metrics out of the box</h3><p><code>kubectl top nodes</code> works the moment the cluster is up. metrics-server ships preconfigured.</p></div>
+    <div class="card"><div class="emoji">💾</div><h3>PVCs that just bind</h3><p>A default StorageClass backed by local-path-provisioner is installed on create. Claim storage like on a real cluster.</p></div>
+    <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>MetalLB ships by default, pooled on node IPs. <code>type: LoadBalancer</code> gets a real EXTERNAL-IP your Mac can curl.</p></div>
+    <div class="card"><div class="emoji">🌐</div><h3>Direct networking</h3><p>Every node gets an IP your Mac can reach. Hit NodePorts directly, no port-mapping flags, no tunnels.</p></div>
+    <div class="card"><div class="emoji">🧱</div><h3>Multi-node, day one</h3><p><code>--workers 2</code> gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.</p></div>
+    <div class="card"><div class="emoji">🖥️</div><h3>A console when you want one</h3><p><code>kiac ui</code> opens a local web console to create, watch, and delete clusters, same engine as the CLI.</p></div>
+    <div class="card"><div class="emoji">🍎</div><h3>Native stack</h3><p>One Swift runtime from Apple, one Go binary from us. No Docker Desktop, no Lima, no QEMU in between.</p></div>
+  </div>
 </section>
 
 <section id="install">
@@ -208,13 +234,13 @@
   <h2>Three commands to a cluster.</h2>
   <div class="grid">
     <div class="card"><h3>1 · Install the runtime</h3><p>Grab <a href="https://github.com/apple/container/releases" style="color:var(--accent);font-weight:600;text-decoration:none">apple/container 1.0</a> (signed pkg from Apple). Requires an Apple silicon Mac; macOS 26+ for multi-node.</p></div>
-    <div class="card"><h3>2 · Install kiac</h3><p><code>go install github.com/saiyam1814/kiac@latest</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
+    <div class="card"><h3>2 · Install kiac</h3><p><code>brew install saiyam1814/tap/kiac</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
     <div class="card"><h3>3 · Create</h3><p><code>kiac create cluster --workers 2</code><br><br>Kubernetes 1.32-1.36, then <code>kubectl get nodes</code> and you are flying.</p></div>
   </div>
 </section>
 
 <footer>
-  <p><span class="hex">⬢</span> <strong>kiac</strong> - Kubernetes in Apple Containers · MIT License</p>
+  <p><strong>kiac</strong> - Kubernetes in Apple Containers · MIT License</p>
   <p style="margin-top:10px">Built by <a href="https://github.com/saiyam1814">Saiyam Pathak</a> on apple/container and the kindest/node image.</p>
 </footer>
 
@@ -222,19 +248,19 @@
 const lines = [
   ['', '<span class="d">$</span> <span class="b">kiac create cluster --name dev --workers 2</span>'],
   [400, '<span class="o">⬢ kiac</span> <span class="d">v0.1.0 · Kubernetes in Apple Containers</span>'],
-  [600, ' <span class="ok">✓</span> Preflight checks <span class="d">(0.1s)</span>'],
-  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.34.0 <span class="d">(1.8s)</span>'],
-  [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(9.7s)</span>'],
-  [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(1m21s)</span>'],
-  [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(14.1s)</span>'],
-  [3600, ' <span class="ok">✓</span> Installing CNI (kindnet) <span class="d">(0.3s)</span>'],
-  [3900, ' <span class="ok">✓</span> Installing storage (local-path-provisioner) <span class="d">(0.4s)</span>'],
-  [4200, ' <span class="ok">✓</span> Installing metrics-server <span class="d">(0.2s)</span>'],
-  [4500, ' <span class="ok">✓</span> Installing LoadBalancer (MetalLB) <span class="d">(1.1s)</span>'],
-  [4600, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(35.4s)</span>'],
-  [4900, ' <span class="ok">✓</span> Writing kubeconfig <span class="d">(0.1s)</span>'],
+  [600, ' <span class="ok">✓</span> Preflight checks <span class="d">(0.3s)</span>'],
+  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.36.1 <span class="d">(8.4s)</span>'],
+  [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(9.8s)</span>'],
+  [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(49.6s)</span>'],
+  [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(13.5s)</span>'],
+  [3600, ' <span class="ok">✓</span> Installing CNI (kindnet) <span class="d">(0.4s)</span>'],
+  [3900, ' <span class="ok">✓</span> Installing storage (local-path-provisioner) <span class="d">(0.5s)</span>'],
+  [4200, ' <span class="ok">✓</span> Installing metrics-server <span class="d">(0.4s)</span>'],
+  [4500, ' <span class="ok">✓</span> Installing LoadBalancer (MetalLB) <span class="d">(0.6s)</span>'],
+  [4700, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(10.7s)</span>'],
+  [5000, ' <span class="ok">✓</span> Writing kubeconfig <span class="d">(0.2s)</span>'],
   [5400, ''],
-  [5400, '<span class="b">Cluster "dev" is ready. Every node is its own lightweight VM.</span>'],
+  [5400, '<span class="b">Cluster "dev" is ready in 2m26s. Every node is its own lightweight VM.</span>'],
   [5800, '  <span class="p">kubectl get nodes</span>'],
   [6000, '  <span class="p">kubectl top nodes</span>']
 ];

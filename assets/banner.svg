@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="kiac - Kubernetes in Apple Containers">
+  <defs>
+    <linearGradient id="hex" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F8BF0"/>
+      <stop offset="1" stop-color="#2D5FD0"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FBFCFE"/>
+      <stop offset="1" stop-color="#EEF3FB"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="400" fill="url(#bg)"/>
+
+  <!-- faint decorative hexagons -->
+  <g fill="none" stroke="#326CE5" stroke-width="2" opacity="0.10">
+    <path d="M1120 40 L1180 75 L1180 145 L1120 180 L1060 145 L1060 75 Z"/>
+    <path d="M1190 150 L1232 174 L1232 222 L1190 246 L1148 222 L1148 174 Z"/>
+    <path d="M70 300 L112 324 L112 372 L70 396 L28 372 L28 324 Z"/>
+  </g>
+
+  <!-- mark -->
+  <g transform="translate(96,108) scale(0.78)">
+    <path d="M120 30 L198 75 L198 165 L120 210 L42 165 L42 75 Z"
+          fill="url(#hex)" stroke="url(#hex)" stroke-width="20" stroke-linejoin="round"/>
+    <g stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" opacity="0.55">
+      <line x1="120" y1="88" x2="88" y2="150"/>
+      <line x1="120" y1="88" x2="152" y2="150"/>
+      <line x1="88" y1="150" x2="152" y2="150"/>
+    </g>
+    <circle cx="88" cy="150" r="13" fill="#FFFFFF"/>
+    <circle cx="152" cy="150" r="13" fill="#FFFFFF"/>
+    <circle cx="120" cy="88" r="17" fill="#FFFFFF"/>
+    <circle cx="120" cy="88" r="7" fill="#2D5FD0"/>
+  </g>
+
+  <!-- wordmark + tagline -->
+  <text x="320" y="180" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="104" font-weight="800" letter-spacing="-3" fill="#16202E">kiac</text>
+  <text x="326" y="232" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="30" font-weight="600" fill="#326CE5">Kubernetes in Apple Containers</text>
+  <text x="326" y="276" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="23" font-weight="400" fill="#5C6675">Every node is its own lightweight VM. Native on Apple silicon.</text>
+</svg>
