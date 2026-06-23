@@ -49,6 +49,11 @@ func ValidName(s string) bool {
 	return s != ""
 }
 
+// maxNodeNameLen is the Linux hostname limit; a node's container name is
+// also its hostname and its kubeadm node name, so all three stay in sync
+// only while the name fits here.
+const maxNodeNameLen = 63
+
 func prefix(name string) string { return "kiac-" + name + "-" }
 
 // ControlPlane returns the control-plane container name for a cluster.
@@ -64,6 +69,13 @@ func (m *Manager) Create(cfg Config) error {
 		return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", cfg.Name)
 	}
 	cp := ControlPlane(cfg.Name)
+	// A node's name is also its VM hostname, capped at 63 chars by Linux.
+	// Past that the VM fails to boot (or the hostname is truncated and the
+	// kubeadm node name no longer matches the VM), so reject it up front.
+	if len(cp) > maxNodeNameLen {
+		return fmt.Errorf("cluster name %q is too long: node name %q is %d chars, over the %d-char limit; use a name of %d chars or fewer",
+			cfg.Name, cp, len(cp), maxNodeNameLen, maxNodeNameLen-len("kiac--control-plane"))
+	}
 
 	existing, err := m.rt.List(prefix(cfg.Name))
 	if err == nil && len(existing) > 0 {
@@ -108,6 +120,7 @@ func (m *Manager) Create(cfg Config) error {
 	if err := ui.Step("Initializing Kubernetes control plane", func() error {
 		_, err := m.rt.Exec(cp, "kubeadm", "init",
 			"--pod-network-cidr=10.244.0.0/16",
+			"--node-name", cp,
 			"--ignore-preflight-errors=all")
 		return err
 	}); err != nil {
@@ -127,7 +140,11 @@ func (m *Manager) Create(cfg Config) error {
 			}
 			join = append(join, "--ignore-preflight-errors=all")
 			for i := 1; i <= cfg.Workers; i++ {
-				if _, err := m.rt.Exec(worker(cfg.Name, i), join...); err != nil {
+				w := worker(cfg.Name, i)
+				// Fresh slice per worker so each gets its own --node-name
+				// without aliasing the shared base via append.
+				args := append(append([]string{}, join...), "--node-name", w)
+				if _, err := m.rt.Exec(w, args...); err != nil {
 					return err
 				}
 			}
