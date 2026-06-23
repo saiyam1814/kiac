@@ -58,6 +58,6 @@ var getNodesCmd = &cobra.Command{
 }
 
 func init() {
-	getNodesCmd.Flags().StringVar(&getNodesName, "name", "kiac", "cluster name")
+	getNodesCmd.Flags().StringVar(&getNodesName, "name", "dev", "cluster name")
 	getCmd.AddCommand(getClustersCmd, getNodesCmd)
 }

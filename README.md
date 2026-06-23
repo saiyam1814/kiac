@@ -172,7 +172,7 @@ kiac delete cluster --name dev
 
 | Flag | Default | Description |
 |---|---|---|
-| `--name` | `kiac` | cluster name |
+| `--name` | `dev` | cluster name |
 | `--workers` | `0` | worker count; control plane is untainted when 0 |
 | `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 |
 | `--image` | resolved from `--k8s-version` | explicit node image override |

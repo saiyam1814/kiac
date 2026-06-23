@@ -28,6 +28,6 @@ var deleteClusterCmd = &cobra.Command{
 }
 
 func init() {
-	deleteClusterCmd.Flags().StringVar(&deleteName, "name", "kiac", "cluster name")
+	deleteClusterCmd.Flags().StringVar(&deleteName, "name", "dev", "cluster name")
 	deleteCmd.AddCommand(deleteClusterCmd)
 }

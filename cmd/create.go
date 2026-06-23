@@ -46,7 +46,7 @@ var k8sVersion string
 
 func init() {
 	f := createClusterCmd.Flags()
-	f.StringVar(&createCfg.Name, "name", "kiac", "cluster name")
+	f.StringVar(&createCfg.Name, "name", "dev", "cluster name")
 	f.IntVar(&createCfg.Workers, "workers", 0, "number of worker nodes (control plane is untainted when 0)")
 	f.StringVar(&k8sVersion, "k8s-version", cluster.DefaultK8sVersion,
 		"Kubernetes version ("+strings.Join(cluster.SupportedVersions(), ", ")+")")

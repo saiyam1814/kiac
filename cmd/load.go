@@ -34,6 +34,6 @@ pushing to a registry. Build first with: container build -t myapp .`,
 }
 
 func init() {
-	loadImageCmd.Flags().StringVar(&loadName, "name", "kiac", "cluster name")
+	loadImageCmd.Flags().StringVar(&loadName, "name", "dev", "cluster name")
 	loadCmd.AddCommand(loadImageCmd)
 }
