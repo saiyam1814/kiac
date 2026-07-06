@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>kiac - Kubernetes in Apple Containers</title>
-<meta name="description" content="Local Kubernetes clusters where every node is its own lightweight virtual machine. Native on Apple silicon, powered by apple/container.">
+<meta name="description" content="Local Kubernetes clusters where every node is its own lightweight virtual machine. Cilium and eBPF on a Mac, k3s in about 30 seconds, clusters that survive reboots. Native on Apple silicon, powered by apple/container.">
 <meta property="og:title" content="kiac - Kubernetes in Apple Containers">
-<meta property="og:description" content="Every node is its own lightweight VM. kind-style clusters, native on Apple silicon, metrics and storage included.">
+<meta property="og:description" content="Every node is its own lightweight VM. Cilium and eBPF on a Mac, k3s in ~30s, clusters that survive reboots. Storage, metrics, and LoadBalancer included.">
 <meta property="og:image" content="assets/banner.png">
 <link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg">
 <style>
@@ -122,6 +122,33 @@
 
   .diagram { width: 100%; margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--divider); display: block; }
 
+  .flavors { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
+  .flavor {
+    border: 1px solid var(--divider); border-radius: var(--radius); padding: 26px;
+    display: flex; flex-direction: column;
+    transition: transform .25s ease, box-shadow .25s ease;
+  }
+  .flavor:hover { transform: translateY(-3px); box-shadow: 0 18px 44px -24px rgba(5,11,36,.25); }
+  .flavor .stat { font-size: 25px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent); }
+  .flavor h3 { font-size: 18px; margin: 6px 0 8px; font-weight: 700; }
+  .flavor p { color: var(--mid); font-size: 14.5px; flex: 1; }
+  .flavor .cmd {
+    margin-top: 18px; display: flex; align-items: center; gap: 8px;
+    background: var(--bg-soft); border-radius: 11px; padding: 10px 12px;
+    font-family: "SF Mono", "Roboto Mono", ui-monospace, monospace; font-size: 12.5px;
+  }
+  .flavor .cmd code { flex: 1; overflow-x: auto; white-space: nowrap; color: var(--ink); }
+  .flavor .fine { margin-top: 10px; flex: 0; font-size: 12px; color: var(--subtle); }
+  .flavor .fine code { background: var(--bg-soft); padding: 1px 6px; border-radius: 5px; font-size: 11.5px; }
+
+  .numbers {
+    margin-top: 56px; background: var(--bg-soft); border-radius: var(--radius);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; padding: 28px 22px; text-align: center;
+  }
+  .numbers .n b { display: block; font-size: 25px; font-weight: 800; letter-spacing: -0.01em; }
+  .numbers .n span { font-size: 13px; color: var(--mid); }
+
   .why-points { margin-top: 30px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
   .why-points .pt { padding: 4px 0; }
   .why-points .pt b { display: block; font-size: 16px; margin-bottom: 4px; }
@@ -162,9 +189,9 @@
 </nav>
 
 <div class="hero">
-  <div class="pill">Built on apple/container 1.0</div>
+  <div class="pill">v0.3.0 · Built on apple/container 1.0</div>
   <h1>Kubernetes.<br><span class="grad">Every node, its own VM.</span></h1>
-  <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. No Docker Desktop. No QEMU. Metrics, storage, and LoadBalancer included.</p>
+  <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. Run Cilium and eBPF on a Mac. Get a k3s cluster in about 30 seconds. Keep your clusters across reboots. Storage, metrics, and LoadBalancer included.</p>
   <div class="cta-row">
     <a class="btn btn-primary" href="#install">Get started</a>
     <a class="btn btn-ghost" href="docs/index.html">Read the docs</a>
@@ -187,6 +214,41 @@
     <div class="term-body" id="term"></div>
   </div>
 </div>
+
+<section id="flavors">
+  <div class="kicker">Pick your flavor</div>
+  <h2>One binary, three ways to a cluster.</h2>
+  <p class="lede">The same VM-per-node foundation underneath. Choose the control plane and network stack that fits the job, then paste one line.</p>
+  <div class="flavors">
+    <div class="flavor">
+      <div class="stat">~1 min, full stack</div>
+      <h3>kubeadm · the default</h3>
+      <p>Real kubeadm on three nodes, usable on first boot: kindnet CNI, a default StorageClass, metrics-server, and kiac-lb handing out LoadBalancer IPs.</p>
+      <div class="cmd"><code>kiac create cluster --workers 2</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --workers 2');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
+    </div>
+    <div class="flavor">
+      <div class="stat">~30s · 3.7GB</div>
+      <h3>k3s · the featherweight</h3>
+      <p>rancher/k3s runs as PID 1 in every VM with a sqlite datastore. A 2-node cluster in about 30 seconds, around 3.7GB of host memory for the whole thing.</p>
+      <div class="cmd"><code>kiac create cluster --distro k3s --workers 1</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --distro k3s --workers 1');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
+    </div>
+    <div class="flavor">
+      <div class="stat">eBPF · 1GB/s</div>
+      <h3>Cilium · the heavyweight</h3>
+      <p>Boots nodes on a published, sha-pinned full kernel and drives the official Cilium installer. eBPF datapath, ~285MB/s cross-node pod traffic, ~1GB/s Mac-to-pod.</p>
+      <div class="cmd"><code>kiac create cluster --cni cilium --kernel full</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --cni cilium --kernel full');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
+      <p class="fine">Prereq: <code>brew install cilium-cli</code></p>
+    </div>
+  </div>
+
+  <div class="numbers">
+    <div class="n"><b>2s</b><span>LoadBalancer IPs assigned</span></div>
+    <div class="n"><b>~30s</b><span>k3s cluster up</span></div>
+    <div class="n"><b>1m37s</b><span>full Cilium stack</span></div>
+    <div class="n"><b>46s</b><span>resume after reboot</span></div>
+    <div class="n"><b>1GB/s</b><span>Mac-to-pod throughput</span></div>
+  </div>
+</section>
 
 <section id="why">
   <div class="kicker">Why Apple containers</div>
@@ -217,22 +279,17 @@
 <section id="features">
   <div class="kicker">Batteries included</div>
   <h2>Usable the moment it is up.</h2>
-  <p class="lede">Everything you reach for in the first five minutes of a local cluster is already there.</p>
+  <p class="lede">A default StorageClass, metrics-server, and node IPs your Mac can reach directly come standard on every cluster. Then it keeps going.</p>
   <div class="grid">
-    <div class="card"><div class="emoji">🔒</div><h3>Hardware-grade isolation</h3><p>Each node is one lightweight VM on Apple's Virtualization framework, with its own kernel and cgroups.</p></div>
-    <div class="card"><div class="emoji">📊</div><h3>Metrics out of the box</h3><p><code>kubectl top nodes</code> works the moment the cluster is up. metrics-server ships preconfigured.</p></div>
-    <div class="card"><div class="emoji">💾</div><h3>PVCs that just bind</h3><p>A default StorageClass backed by local-path-provisioner is installed on create. Claim storage like on a real cluster.</p></div>
     <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>kiac-lb ships by default: a tiny controller inside the control-plane VM assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds. No pods, no webhooks, no <code>&lt;pending&gt;</code>.</p></div>
-    <div class="card"><div class="emoji">🌐</div><h3>Direct networking</h3><p>Every node gets an IP your Mac can reach. Hit NodePorts directly, no port-mapping flags, no tunnels.</p></div>
-    <div class="card"><div class="emoji">🧱</div><h3>Multi-node, day one</h3><p><code>--workers 2</code> gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.</p></div>
-    <div class="card"><div class="emoji">⚡</div><h3>k3s in seconds</h3><p><code>--distro k3s</code> runs rancher/k3s as PID 1 in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.</p></div>
-    <div class="card"><div class="emoji">🐝</div><h3>Cilium on a real kernel</h3><p><code>--cni cilium --kernel full</code> boots nodes on a published, sha-pinned kernel (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. ~285MB/s cross-node, ~1GB/s Mac-to-pod.</p></div>
-    <div class="card"><div class="emoji">🔁</div><h3>Survives reboots</h3><p><code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals the control-plane IP everywhere: cert, kubeconfigs, kube-proxy. Idempotent.</p></div>
-    <div class="card"><div class="emoji">📈</div><h3>Observability built in</h3><p><code>--observability</code> installs Prometheus and Grafana on a real LoadBalancer IP, dashboards already provisioned.</p></div>
+    <div class="card"><div class="emoji">📈</div><h3>Observability built in</h3><p><code>--observability</code> installs Prometheus and Grafana on a real LoadBalancer IP, dashboards already provisioned. Works on kubeadm, k3s, and Cilium clusters.</p></div>
     <div class="card"><div class="emoji">🚪</div><h3>Gateway API built in</h3><p><code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway, so an HTTPRoute just works.</p></div>
+    <div class="card"><div class="emoji">🔁</div><h3>Survives reboots</h3><p><code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals the control-plane IP everywhere: cert, kubeconfigs, kube-proxy. Idempotent.</p></div>
     <div class="card"><div class="emoji">💥</div><h3>Node chaos you can trust</h3><p><code>kiac stop node</code> halts a real node VM: NotReady, eviction, rescheduling. <code>kiac start node</code> boots it back in.</p></div>
+    <div class="card"><div class="emoji">⚡</div><h3>k3s in seconds</h3><p><code>--distro k3s</code> runs rancher/k3s as PID 1 in every VM: sqlite datastore, a 2-node cluster in about 30 seconds, about 3.7GB of host memory total.</p></div>
+    <div class="card"><div class="emoji">🐝</div><h3>Cilium on a real kernel</h3><p><code>--cni cilium --kernel full</code> boots nodes on a published, sha-pinned kernel (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. ~285MB/s cross-node, ~1GB/s Mac-to-pod.</p></div>
     <div class="card"><div class="emoji">📄</div><h3>Declarative clusters</h3><p><code>kiac create cluster --config cluster.yaml</code> describes the whole cluster in one file; explicit flags override it.</p></div>
-    <div class="card"><div class="emoji">🖥️</div><h3>A console when you want one</h3><p><code>kiac ui</code> opens a local dashboard: cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links.</p></div>
+    <div class="card"><div class="emoji">🖥️</div><h3>A console when you want one</h3><p><code>kiac ui</code> opens a local dashboard: cluster cards, live resource bars, node stop/start buttons, a per-cluster kubectl console, Grafana and Gateway links.</p></div>
     <div class="card"><div class="emoji">🍎</div><h3>Native stack</h3><p>One Swift runtime from Apple, one Go binary from us. No Docker Desktop, no Lima, no QEMU in between.</p></div>
   </div>
 </section>
@@ -258,17 +315,17 @@ const lines = [
   ['', '<span class="d">$</span> <span class="b">kiac create cluster --name dev --workers 2</span>'],
   [400, '<span class="o">⬢ kiac</span> <span class="d">v0.3.0 · Kubernetes in Apple Containers</span>'],
   [600, ' <span class="ok">✓</span> Preflight checks <span class="d">(0.3s)</span>'],
-  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.36.1 <span class="d">(8.4s)</span>'],
-  [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(9.8s)</span>'],
-  [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(49.6s)</span>'],
-  [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(13.5s)</span>'],
+  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.36.1 <span class="d">(4.6s)</span>'],
+  [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(6.8s)</span>'],
+  [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(24.3s)</span>'],
+  [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(9.1s)</span>'],
   [3600, ' <span class="ok">✓</span> Installing CNI (kindnet) <span class="d">(0.4s)</span>'],
   [3900, ' <span class="ok">✓</span> Installing addons (storage, metrics-server) <span class="d">(0.8s)</span>'],
   [4300, ' <span class="ok">✓</span> Installing LoadBalancer (kiac-lb) <span class="d">(0.4s)</span>'],
-  [4700, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(10.7s)</span>'],
+  [4700, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(9.7s)</span>'],
   [5000, ' <span class="ok">✓</span> Writing kubeconfig <span class="d">(0.2s)</span>'],
   [5400, ''],
-  [5400, '<span class="b">Cluster "dev" is ready in 2m26s. Every node is its own lightweight VM.</span>'],
+  [5400, '<span class="b">Cluster "dev" is ready in 58s. Every node is its own lightweight VM.</span>'],
   [5800, '  <span class="p">kubectl get nodes</span>'],
   [6000, '  <span class="p">kubectl top nodes</span>']
 ];
