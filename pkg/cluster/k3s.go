@@ -397,15 +397,38 @@ func (m *Manager) installGatewayK3s(cp string) error {
 }
 
 // waitK3sSvcLBIP polls a Service until servicelb publishes a
-// LoadBalancer ingress IP for it.
+// LoadBalancer ingress IP for it. servicelb (klipper) advertises EVERY
+// node's IP; the addon pods are pinned to the kiac.io/lb-primary node,
+// and only that node's IP delivers pod-locally (a frame entering
+// another node is NATed across vmnet's slow forwarding path, ~100x
+// worse for bulk transfers), so the primary's IP is preferred over
+// ingress[0] when it is among the advertised set.
 func (m *Manager) waitK3sSvcLBIP(cp, namespace, svc string, timeout time.Duration) (string, error) {
+	primaryOut, _ := m.k3sKubectl(cp, "get", "nodes",
+		"-l", "kiac.io/lb-primary=true",
+		"-o", "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}")
+	// Dual-stack nodes list an IPv6 InternalIP too; the vmnet addresses
+	// kiac hands out are IPv4, so match on the first IPv4-looking entry.
+	primaryIP := ""
+	for _, a := range strings.Fields(primaryOut) {
+		if strings.Count(a, ".") == 3 {
+			primaryIP = a
+			break
+		}
+	}
 	deadline := time.Now().Add(timeout)
 	for {
 		out, err := m.k3sKubectl(cp, "get", "svc", "-n", namespace, svc,
-			"-o", "jsonpath={.status.loadBalancer.ingress[0].ip}")
+			"-o", "jsonpath={range .status.loadBalancer.ingress[*]}{.ip}{\" \"}{end}")
 		if err == nil {
-			if ip := strings.TrimSpace(out); ip != "" {
-				return ip, nil
+			ips := strings.Fields(out)
+			if len(ips) > 0 {
+				for _, ip := range ips {
+					if primaryIP != "" && ip == primaryIP {
+						return ip, nil
+					}
+				}
+				return ips[0], nil
 			}
 		}
 		if time.Now().After(deadline) {
