@@ -139,9 +139,11 @@
       <div class="full"><label>Name</label><input id="name" value="dev" pattern="[a-z0-9-]+"></div>
       <div><label>Workers</label><input id="workers" type="number" min="0" max="6" value="2"></div>
       <div><label>Kubernetes</label><select id="version"></select></div>
+      <div><label>Distro</label><select id="distro"></select></div>
+      <div><label>CNI</label><select id="cni"></select></div>
       <div><label>CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
-      <div><label>Memory / node</label><input id="memory" value="4G"></div>
-      <div class="full"><label>CNI</label><select id="cni"></select></div>
+      <div><label>Memory / node</label><input id="memory" value="2G"></div>
+      <div class="full" id="cni-note" style="display:none;font-size:12px;color:var(--mid);margin-top:-6px"></div>
       <div class="checks">
         <label><input type="checkbox" id="lb" checked> LoadBalancer <small>kiac-lb</small></label>
         <label><input type="checkbox" id="metrics" checked> metrics-server</label>
@@ -183,6 +185,19 @@ async function loadMeta() {
   const m = await j('/api/meta');
   $('version').innerHTML = m.versions.map(v => `<option ${v===m.defaultVersion?'selected':''}>${esc(v)}</option>`).join('');
   $('cni').innerHTML = m.cnis.map(c => `<option>${esc(c)}</option>`).join('');
+  $('distro').innerHTML = (m.distros || ['kubeadm']).map(d => `<option>${esc(d)}</option>`).join('');
+  const syncForm = () => {
+    const k3s = $('distro').value === 'k3s';
+    const cil = !k3s && $('cni').value === 'cilium';
+    $('cni').disabled = k3s;
+    const note = $('cni-note');
+    if (k3s) { note.textContent = 'k3s always runs kindnet; servicelb, local-path, and metrics-server come bundled.'; note.style.display = 'block'; }
+    else if (cil) { note.textContent = 'Cilium downloads the full node kernel once (~40MB) and needs the cilium CLI: brew install cilium-cli.'; note.style.display = 'block'; }
+    else { note.style.display = 'none'; }
+  };
+  $('distro').addEventListener('change', syncForm);
+  $('cni').addEventListener('change', syncForm);
+  syncForm();
 }
 
 function ago(iso) {
@@ -292,7 +307,7 @@ $('f').addEventListener('submit', async e => {
   e.preventDefault();
   const body = {
     name: $('name').value.trim(), workers: +$('workers').value,
-    k8sVersion: $('version').value, cni: $('cni').value,
+    k8sVersion: $('version').value, distro: $('distro').value, cni: $('cni').value,
     cpus: $('cpus').value.trim(), memory: $('memory').value.trim(),
     noLB: !$('lb').checked, noMetrics: !$('metrics').checked, noStorage: !$('storage').checked,
     observability: $('observability').checked, gateway: $('gateway').checked,

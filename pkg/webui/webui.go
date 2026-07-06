@@ -134,7 +134,8 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"versions":       cluster.SupportedVersions(),
 		"defaultVersion": cluster.DefaultK8sVersion,
-		"cnis":           []string{"kindnet", "none"},
+		"cnis":           []string{"kindnet", "cilium", "none"},
+		"distros":        []string{"kubeadm", "k3s"},
 	})
 }
 
@@ -372,6 +373,7 @@ type createReq struct {
 	Name          string `json:"name"`
 	Workers       int    `json:"workers"`
 	K8sVersion    string `json:"k8sVersion"`
+	Distro        string `json:"distro"`
 	CNI           string `json:"cni"`
 	CPUs          string `json:"cpus"`
 	Memory        string `json:"memory"`
@@ -394,13 +396,27 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "name must be lowercase letters, digits, and dashes"})
 		return
 	}
+	switch req.Distro {
+	case "", "kubeadm", "k3s":
+	default:
+		writeJSON(w, 400, map[string]string{"error": "distro must be kubeadm or k3s"})
+		return
+	}
 	args := []string{"create", "cluster", "--name", req.Name,
 		"--workers", strconv.Itoa(req.Workers)}
 	if req.K8sVersion != "" {
 		args = append(args, "--k8s-version", req.K8sVersion)
 	}
-	if req.CNI != "" {
+	if req.Distro == "k3s" {
+		// The k3s path always runs kindnet; the CLI rejects --cni here.
+		args = append(args, "--distro", "k3s")
+	} else if req.CNI != "" {
 		args = append(args, "--cni", req.CNI)
+		if req.CNI == "cilium" {
+			// Cilium needs the full kernel; 'full' downloads the
+			// published sha-pinned build once and caches it.
+			args = append(args, "--kernel", "full")
+		}
 	}
 	if req.CPUs != "" {
 		args = append(args, "--cpus", req.CPUs)
