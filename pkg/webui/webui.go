@@ -4,6 +4,7 @@
 package webui
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -23,9 +24,19 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
-// adminConf mirrors pkg/cluster: kubectl always runs inside the
-// control-plane node against the admin kubeconfig kubeadm wrote there.
-const adminConf = "/etc/kubernetes/admin.conf"
+// hostKubectl runs the host's kubectl against a cluster's merged
+// kubeconfig context. This works for every distro (kubeadm keeps its
+// kubeconfig at /etc/kubernetes/admin.conf, k3s at
+// /etc/rancher/k3s/k3s.yaml, but the merged host context kiac-<name>
+// exists for both), unlike exec'ing kubectl inside the control-plane
+// VM. A timeout guards against a stopped cluster hanging the UI poll.
+func hostKubectl(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	full := append([]string{"--context", "kiac-" + name}, args...)
+	out, err := exec.CommandContext(ctx, "kubectl", full...).CombinedOutput()
+	return string(out), err
+}
 
 type job struct {
 	mu     sync.Mutex
@@ -68,6 +79,7 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/clusters/{name}/addons", s.addons)
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/stop", s.nodeAction("stop"))
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/start", s.nodeAction("start"))
+	mux.HandleFunc("POST /api/clusters/{name}/kubectl", s.kubectlConsole)
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
 	return mux
 }
@@ -187,7 +199,7 @@ func (s *server) createdAt(name string) string {
 		return c
 	}
 	cp := cluster.ControlPlane(name)
-	out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
+	out, err := hostKubectl(name,
 		"get", "node", cp, "-o", "jsonpath={.metadata.creationTimestamp}")
 	if err != nil {
 		return ""
@@ -236,8 +248,7 @@ func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid name"})
 		return
 	}
-	out, err := s.mgr.Runtime().Exec(cluster.ControlPlane(name),
-		"kubectl", "--kubeconfig", adminConf, "top", "nodes", "--no-headers")
+	out, err := hostKubectl(name, "top", "nodes", "--no-headers")
 	rows := []nodeMetrics{}
 	if err == nil {
 		rows = parseTopNodes(out)
@@ -280,23 +291,81 @@ func (s *server) addons(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid name"})
 		return
 	}
-	cp := cluster.ControlPlane(name)
 	res := map[string]string{"grafana": "", "gateway": ""}
-	if out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
-		"-n", "kiac-observability", "get", "svc", "grafana",
-		"-o", "jsonpath={.status.loadBalancer.ingress[0].ip}:{.spec.ports[0].port}"); err == nil {
-		if v := strings.TrimSpace(out); hostPortRe.MatchString(v) {
-			res["grafana"] = v
+	// servicelb on k3s advertises every node's IP; prefer the
+	// lb-primary node's (the addon pods are pinned there, and only
+	// pod-local delivery avoids vmnet's slow forwarded path).
+	primary := ""
+	if out, err := hostKubectl(name, "get", "nodes", "-l", "kiac.io/lb-primary=true",
+		"-o", "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}"); err == nil {
+		for _, a := range strings.Fields(out) {
+			if ipv4Re.MatchString(a) {
+				primary = a
+				break
+			}
 		}
 	}
-	if out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
-		"-n", "kiac-gateway", "get", "svc",
+	pick := func(ips []string) string {
+		var first string
+		for _, ip := range ips {
+			if !ipv4Re.MatchString(ip) {
+				continue
+			}
+			if ip == primary {
+				return ip
+			}
+			if first == "" {
+				first = ip
+			}
+		}
+		return first
+	}
+	if out, err := hostKubectl(name, "-n", "kiac-observability", "get", "svc", "grafana",
+		"-o", "jsonpath={range .status.loadBalancer.ingress[*]}{.ip} {end}|{.spec.ports[0].port}"); err == nil {
+		parts := strings.SplitN(strings.TrimSpace(out), "|", 2)
+		if len(parts) == 2 {
+			if ip := pick(strings.Fields(parts[0])); ip != "" {
+				if v := ip + ":" + strings.TrimSpace(parts[1]); hostPortRe.MatchString(v) {
+					res["grafana"] = v
+				}
+			}
+		}
+	}
+	if out, err := hostKubectl(name, "-n", "kiac-gateway", "get", "svc",
 		"-o", "jsonpath={.items[*].status.loadBalancer.ingress[*].ip}"); err == nil {
-		if f := strings.Fields(out); len(f) > 0 && ipv4Re.MatchString(f[0]) {
-			res["gateway"] = f[0]
+		if ip := pick(strings.Fields(out)); ip != "" {
+			res["gateway"] = ip
 		}
 	}
 	writeJSON(w, 200, res)
+}
+
+// kubectlConsole runs one host kubectl command against the cluster's
+// context for the UI's embedded console. Not a shell: the args array is
+// passed verbatim to the kubectl binary, so nothing is interpolated.
+// Same trust boundary as the rest of the UI (loopback-only, and the UI
+// can already create and delete whole clusters); the output cap keeps a
+// verbose command from ballooning the response, and hostKubectl's
+// timeout kills long-runners like `logs -f`.
+func (s *server) kubectlConsole(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !sanitizeName(name) {
+		writeJSON(w, 400, map[string]string{"error": "invalid name"})
+		return
+	}
+	var req struct {
+		Args []string `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Args) == 0 {
+		writeJSON(w, 400, map[string]string{"error": "args required"})
+		return
+	}
+	out, err := hostKubectl(name, req.Args...)
+	const maxOut = 256 << 10
+	if len(out) > maxOut {
+		out = out[:maxOut] + "\n... (output truncated)"
+	}
+	writeJSON(w, 200, map[string]any{"output": out, "ok": err == nil})
 }
 
 type createReq struct {

@@ -93,6 +93,22 @@
   .cmd code{flex:1;overflow-x:auto;white-space:nowrap}
   .cmd button{border:none;background:#fff;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:var(--mid);cursor:pointer;box-shadow:0 1px 3px rgba(5,11,36,.1)}
   dialog .close{margin-top:8px;background:none;border:1px solid var(--divider);border-radius:99px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
+  /* kubectl console drawer */
+  #console{position:fixed;left:0;right:0;bottom:0;z-index:60;background:#0d1226;color:#c9cede;
+    box-shadow:0 -12px 40px rgba(5,11,36,.35);border-top:1px solid #232a4a;
+    display:flex;flex-direction:column;height:42vh;min-height:220px}
+  .con-head{display:flex;align-items:center;gap:12px;padding:8px 14px;background:#161c36;font-size:13px}
+  .con-title{font-weight:600;color:#e8ecf5}
+  .con-title b{color:#7eb8ff}
+  .con-hint{color:#5d6486;font-size:12px;margin-left:auto}
+  .con-close{border:none;background:none;color:#5d6486;font-size:14px;cursor:pointer;padding:2px 6px}
+  .con-close:hover{color:#fff}
+  #con-out{flex:1;overflow-y:auto;margin:0;padding:12px 14px;font-family:var(--mono);font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-all}
+  #con-out .c-cmd{color:#7eb8ff;font-weight:600}
+  #con-out .c-err{color:#ff8a80}
+  .con-row{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid #232a4a}
+  .con-prompt{font-family:var(--mono);font-size:12.5px;color:#34d399;font-weight:700}
+  #con-in{flex:1;background:none;border:none;outline:none;color:#e8ecf5;font-family:var(--mono);font-size:12.5px}
 </style>
 </head>
 <body>
@@ -137,6 +153,19 @@
   <div id="dlg-cmds"></div>
   <button class="close" onclick="document.getElementById('dlg').close()">Done</button>
 </dialog>
+
+<div id="console" style="display:none">
+  <div class="con-head">
+    <span class="con-title">kubectl console · <b id="con-cluster"></b></span>
+    <span class="con-hint">Enter runs · ↑↓ history · Esc closes</span>
+    <button class="con-close" onclick="closeConsole()">✕</button>
+  </div>
+  <pre id="con-out"></pre>
+  <div class="con-row">
+    <span class="con-prompt">kubectl</span>
+    <input id="con-in" autocomplete="off" spellcheck="false" placeholder="get pods -A">
+  </div>
+</div>
 <script>
 const $ = id => document.getElementById(id);
 async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
@@ -195,6 +224,7 @@ function card(c) {
       </div>
       <div class="chips">${chips}</div>
       <div class="cactions">
+        <button class="btn sm ghost" onclick="openConsole('${c.name}')">Console</button>
         <button class="btn sm go" onclick="connect('${c.name}')">Connect</button>
         <button class="btn sm danger" onclick="del('${c.name}')">Delete</button>
       </div>
@@ -292,6 +322,62 @@ async function del(name) {
   if (r.error) { alert(r.error); return; }
   watch(r.job, 'Deleting "' + name + '"');
 }
+
+/* ---- kubectl console drawer ---- */
+const con = { name: null, hist: [], hi: -1 };
+
+function openConsole(name) {
+  con.name = name; con.hi = con.hist.length;
+  $('con-cluster').textContent = name;
+  $('console').style.display = 'flex';
+  $('con-in').focus();
+}
+function closeConsole() { $('console').style.display = 'none'; con.name = null; }
+
+// splitArgs tokenizes a command line with single/double-quote support;
+// tokens go to the server as an argv array, never through a shell.
+function splitArgs(s) {
+  const out = []; let cur = '', q = null;
+  for (const ch of s) {
+    if (q) { if (ch === q) q = null; else cur += ch; }
+    else if (ch === '"' || ch === "'") q = ch;
+    else if (/\s/.test(ch)) { if (cur) { out.push(cur); cur = ''; } }
+    else cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function conAppend(html) {
+  const o = $('con-out');
+  o.insertAdjacentHTML('beforeend', html);
+  o.scrollTop = o.scrollHeight;
+}
+
+async function conRun(line) {
+  let l = line.trim();
+  if (!l) return;
+  if (l.startsWith('kubectl ')) l = l.slice(8);          // tolerate a typed prefix
+  const args = splitArgs(l);
+  con.hist.push(line); con.hi = con.hist.length;
+  conAppend(`<span class="c-cmd">kubectl ${esc(l)}</span>\n`);
+  const name = con.name;
+  try {
+    const r = await j(`/api/clusters/${name}/kubectl`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args }),
+    });
+    conAppend(`<span class="${r.ok ? '' : 'c-err'}">${esc(r.output || (r.error || ''))}</span>\n`);
+  } catch (e) { conAppend(`<span class="c-err">${esc(String(e))}</span>\n`); }
+}
+
+$('con-in').addEventListener('keydown', e => {
+  const inp = e.target;
+  if (e.key === 'Enter') { const v = inp.value; inp.value = ''; conRun(v); }
+  else if (e.key === 'ArrowUp') { if (con.hi > 0) { con.hi--; inp.value = con.hist[con.hi] || ''; e.preventDefault(); } }
+  else if (e.key === 'ArrowDown') { if (con.hi < con.hist.length) { con.hi++; inp.value = con.hist[con.hi] || ''; e.preventDefault(); } }
+  else if (e.key === 'Escape') closeConsole();
+});
 
 loadMeta(); refresh(); setInterval(refresh, 5000);
 </script>

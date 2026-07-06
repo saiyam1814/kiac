@@ -19,6 +19,15 @@
 # Consumer: Cilium agent datapath (all modes).
 CONFIG_BPF=y
 CONFIG_BPF_SYSCALL=y
+# BPF_EVENTS depends on TRACING plus a probe-event backend
+# ((KPROBE_EVENTS || UPROBE_EVENTS) in kernel/trace/Kconfig); without
+# these, olddefconfig silently drops it and the CI guard fails the
+# build. Cilium attaches to kprobes/tracepoints for several features.
+CONFIG_FTRACE=y
+CONFIG_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
+CONFIG_UPROBES=y
+CONFIG_UPROBE_EVENTS=y
 CONFIG_BPF_EVENTS=y
 # JIT is mandatory for Cilium and absent from Apple's base config file
 # (their build relies on olddefconfig defaults); pinned explicitly.
