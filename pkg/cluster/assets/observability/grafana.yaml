@@ -192,13 +192,10 @@ metadata:
   namespace: kiac-observability
   labels:
     app: grafana
-  # The MetalLB pool holds one /32 per worker; sharing lets Grafana and
-  # the Traefik gateway coexist on a single-worker cluster. Port 3000
-  # keeps it disjoint from Traefik's 80/443 (sharing requires no overlap).
-  # The kiac-primary pool keeps the IP on the node the pod is pinned to.
-  annotations:
-    metallb.io/allow-shared-ip: kiac
-    metallb.io/address-pool: kiac-primary
+  # kiac-lb shares one node IP between Grafana (3000) and the Traefik
+  # gateway (80/443) because their port sets are disjoint, so both fit a
+  # single-worker cluster. The kiac.io/lb-primary nodeSelector above
+  # keeps the pod on the node kiac-lb prefers, so delivery is pod-local.
 spec:
   type: LoadBalancer
   selector:

@@ -12,13 +12,14 @@ const obsNamespace = "kiac-observability"
 
 // installObservability deploys the built-in observability stack:
 // Prometheus, Grafana, kube-state-metrics, and node-exporter, from
-// manifests embedded in the binary (same pattern as MetalLB in
+// manifests embedded in the binary (same pattern as metrics-server in
 // assets.go). Grafana is exposed as a type LoadBalancer Service with a
 // provisioned Prometheus datasource and default dashboards, so
 // `--observability` yields a working Grafana URL with zero
-// configuration. Runs after the LB pool so the Service can get an
-// EXTERNAL-IP immediately; errors degrade the cluster (caller logs and
-// continues) rather than tearing it down.
+// configuration. Runs after the LB primary node is labeled so kiac-lb
+// can give the Service an EXTERNAL-IP on that node immediately; errors
+// degrade the cluster (caller logs and continues) rather than tearing
+// it down.
 func (m *Manager) installObservability(cp string, cfg Config) error {
 	if err := ui.Step("Installing observability (Prometheus + Grafana)", func() error {
 		manifest := strings.Join(observabilityManifests(), "\n---\n")
@@ -42,7 +43,7 @@ func (m *Manager) installObservability(cp string, cfg Config) error {
 				}
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("grafana Service never got a LoadBalancer IP (no MetalLB pool?); check: kubectl get svc -n %s grafana", obsNamespace)
+				return fmt.Errorf("grafana Service never got a LoadBalancer IP (is kiac-lb running? journalctl -u kiac-lb on the control plane); check: kubectl get svc -n %s grafana", obsNamespace)
 			}
 			time.Sleep(3 * time.Second)
 		}

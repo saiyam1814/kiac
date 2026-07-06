@@ -71,7 +71,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🔒 **Hardware-grade isolation** — each node is one lightweight VM with its own kernel and cgroups, not namespaces sharing a daemon.
 - 📊 **Metrics out of the box** — `kubectl top nodes` works the moment the cluster is up. metrics-server ships preconfigured.
 - 💾 **PVCs that just bind** — a default StorageClass (local-path-provisioner) is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
-- ⚖️ **`type: LoadBalancer` works** — MetalLB ships by default, pooled on node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
+- ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default, assigning node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
 - 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
 - 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
@@ -125,7 +125,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
  ✓ Installing CNI (kindnet) (0.4s)
  ✓ Installing storage (local-path-provisioner) (0.5s)
  ✓ Installing metrics-server (0.4s)
- ✓ Installing LoadBalancer (MetalLB) (0.6s)
+ ✓ Installing LoadBalancer (kiac-lb) (0.3s)
  ✓ Waiting for nodes to be Ready (10.7s)
  ✓ Configuring LoadBalancer IP pool (3.2s)
  ✓ Writing kubeconfig (0.2s)
@@ -200,7 +200,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--memory` | `4G` | memory per node VM |
 | `--no-metrics` | `false` | skip metrics-server |
 | `--no-storage` | `false` | skip the local-path default StorageClass |
-| `--no-lb` | `false` | skip MetalLB (`type: LoadBalancer` support) |
+| `--no-lb` | `false` | skip kiac-lb (`type: LoadBalancer` support) |
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values |
@@ -212,13 +212,12 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
   <img src="assets/architecture.png" alt="How kiac builds a cluster" width="100%">
 </p>
 
-kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, and MetalLB by default. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
+kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, and the built-in kiac-lb LoadBalancer by default. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
 
 ## Roadmap
 
 - **Custom node kernels** (`--kernel`) to unlock Flannel, Calico, Cilium, and eBPF
 - **Persistent clusters** backed by `container machine` (WWDC26 persistent Linux environments), so a cluster survives a reboot
-- **Built-in LoadBalancer controller** to replace MetalLB (node-IP allocation needs no ARP speaker)
 - **HA control planes**
 
 ## Contributing

@@ -200,12 +200,6 @@ func (m *Manager) Create(cfg Config) error {
 				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
 		}})
 	}
-	if !cfg.NoLB {
-		addons = append(addons, addon{"MetalLB", func() error {
-			return m.rt.ExecStdin(cp, strings.NewReader(metallbManifest),
-				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
-		}})
-	}
 	if len(addons) > 0 {
 		var names []string
 		for _, a := range addons {
@@ -224,6 +218,17 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
+	// kiac-lb is not a pod: it is a tiny systemd service inside the
+	// control-plane VM driving the node's own kubectl, so it needs no
+	// image pulls, RBAC, or webhook waits and assigns EXTERNAL-IPs
+	// within seconds of enable --now.
+	if !cfg.NoLB {
+		if err := m.installKiacLB(cp); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
+	}
+
 	if cfg.CNI == "none" {
 		ui.Infof("nodes stay NotReady until you install a CNI; skipping readiness wait")
 	} else if err := ui.Step("Waiting for nodes to be Ready", func() error {
@@ -236,21 +241,20 @@ func (m *Manager) Create(cfg Config) error {
 		return err
 	}
 
-	if !cfg.NoLB && cfg.CNI != "none" {
-		// A missing LB pool degrades the cluster, it does not break it,
-		// so this never triggers teardown.
-		if err := ui.Step("Configuring LoadBalancer IP pool", func() error {
-			return m.configureLBPool(cp, cfg, nodes)
+	if cfg.CNI != "none" {
+		// A missing label degrades addon placement (Grafana/Traefik pods
+		// pin to it with a nodeSelector, see labelLBPrimary), it does not
+		// break the cluster, so this never triggers teardown.
+		if err := ui.Step("Labeling LoadBalancer primary node", func() error {
+			return m.labelLBPrimary(cp, cfg, nodes)
 		}); err != nil {
-			ui.Infof("LoadBalancer pool not configured: %v", err)
-			ui.Infof("the cluster works; re-run pool setup later with: kiac delete/create, or apply an IPAddressPool manually")
+			ui.Infof("LB primary node not labeled: %v", err)
+			ui.Infof("the cluster works; label manually with: kubectl label node <node> kiac.io/lb-primary=true")
 		}
-	} else if !cfg.NoLB {
-		ui.Infof("LoadBalancer pool deferred: apply an IPAddressPool after your CNI is up")
 	}
 
-	// Optional addons ride after the LB pool: both expose Services of
-	// type LoadBalancer and want an EXTERNAL-IP assignable immediately.
+	// Optional addons ride after the primary label: both expose Services
+	// of type LoadBalancer and want an EXTERNAL-IP assignable immediately.
 	// Failures degrade the cluster rather than tearing it down.
 	if cfg.Observability && cfg.CNI != "none" {
 		if err := m.installObservability(cp, cfg); err != nil {
@@ -309,87 +313,6 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 	default:
 		return fmt.Errorf("unknown --cni %q (supported: kindnet, none)", cfg.CNI)
 	}
-}
-
-// configureLBPool points MetalLB at the cluster's own node IPs. Worker
-// IPs are pooled when workers exist (keeps control-plane ports like 6443
-// out of the LB surface); the control plane is pooled on single-node
-// clusters. Each IP gets its own pool with an L2Advertisement pinned to
-// the owning node: a speaker elected on any other node would answer ARP
-// for a live node IP with its own MAC, hijacking all node-to-node
-// traffic for that node (apiserver heartbeats included) and marking it
-// NotReady. The webhook needs a moment after rollout, so apply retries.
-//
-// The first pooled node is the PRIMARY: its pool is named kiac-primary
-// (a stable name static manifests can request via the
-// metallb.io/address-pool annotation) and the node is labeled
-// kiac.io/lb-primary=true (so those manifests can co-schedule their
-// pods onto it with a nodeSelector). Traffic that enters one node and
-// gets NATed to a pod on another crosses vmnet's slow forwarding path
-// (~100x worse for bulk transfers), so bundled addons like Grafana and
-// Traefik pin both their LB IP and their pods to the primary node,
-// keeping delivery pod-local.
-func (m *Manager) configureLBPool(cp string, cfg Config, nodes []string) error {
-	pool := nodes
-	if cfg.Workers > 0 {
-		pool = nodes[1:]
-	}
-	var docs []string
-	for i, n := range pool {
-		ip, err := m.rt.IP(n)
-		if err != nil {
-			return err
-		}
-		poolName := "kiac-ip-" + n
-		if i == 0 {
-			poolName = "kiac-primary"
-			if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
-				"label", "node", n, "kiac.io/lb-primary=true", "--overwrite"); err != nil {
-				return err
-			}
-		}
-		docs = append(docs, fmt.Sprintf(`apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: %[3]s
-  namespace: metallb-system
-spec:
-  addresses: ["%[2]s/32"]
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: kiac-l2-%[1]s
-  namespace: metallb-system
-spec:
-  ipAddressPools: [%[3]s]
-  nodeSelectors:
-    - matchLabels:
-        kubernetes.io/hostname: %[1]s
-`, n, ip, poolName))
-	}
-	manifest := strings.Join(docs, "---\n")
-
-	if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
-		"wait", "--for=condition=Available", "deployment/controller",
-		"-n", "metallb-system", "--timeout=180s"); err != nil {
-		return fmt.Errorf("MetalLB controller did not become available: %w", err)
-	}
-
-	// Available lags actual webhook serving: the endpoint must exist and
-	// kube-proxy must program it, which on a loaded machine trails the
-	// deployment condition by minutes. Retries are cheap and idempotent,
-	// so the window is generous (36 x 5s on top of the wait above).
-	var lastErr error
-	for attempt := 0; attempt < 36; attempt++ {
-		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
-			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
-		if lastErr == nil {
-			return nil
-		}
-		time.Sleep(5 * time.Second)
-	}
-	return fmt.Errorf("MetalLB webhook never became ready: %w", lastErr)
 }
 
 // preflight validates the host before any VM is booted.

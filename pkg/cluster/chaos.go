@@ -3,7 +3,6 @@ package cluster
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
@@ -37,9 +36,12 @@ func (m *Manager) StopNode(name, node string) error {
 }
 
 // StartNode boots a previously stopped node VM back into the cluster.
-// It is safe to re-run on an already-running node: the boot is skipped
-// and only the MetalLB pool re-sync happens, which is the natural retry
-// when the first sync raced MetalLB's own recovery from the outage.
+// It is safe to re-run on an already-running node: the boot is simply
+// skipped. vmnet may hand the VM a different IP on restart; the kubelet
+// re-registers itself with the new address and kiac-lb (see lb.go)
+// notices that any LoadBalancer ingress IP pinned to the old address is
+// no longer an eligible node IP and re-points it on its next pass, so
+// there is no pool state to resync here.
 func (m *Manager) StartNode(name, node string) error {
 	infos, target, err := m.findNode(name, node)
 	if err != nil {
@@ -52,72 +54,16 @@ func (m *Manager) StartNode(name, node string) error {
 		}
 	}
 	if running {
-		ui.Infof("node %s is already running; re-syncing its MetalLB pool", target)
+		ui.Infof("node %s is already running", target)
 	} else if err := ui.Step(fmt.Sprintf("Starting node %s", target), func() error {
 		return m.rt.Start(target)
 	}); err != nil {
 		return err
 	}
-	// vmnet may hand the VM a different IP on restart. The kubelet
-	// re-registers itself with the new address, but the MetalLB
-	// per-node pool pins the old one, leaving a stale VIP nothing
-	// routes to. Failure only degrades LoadBalancer coverage.
-	poolName := "kiac-ip-" + target
-	if target == worker(name, 1) || (target == ControlPlane(name) && len(infos) == 1) {
-		poolName = "kiac-primary"
-	}
-	if err := m.resyncNodePool(name, target, poolName); err != nil {
-		ui.Infof("MetalLB pool not re-synced for %s: %v", target, err)
-		ui.Hintf("safe to retry once the cluster settles: kiac start node %s --name %s", strings.TrimPrefix(target, prefix(name)), name)
-	}
 	ui.Successf("Node %s started.", target)
 	ui.Hintf("watch it rejoin: kubectl get nodes -w")
+	ui.Hintf("LoadBalancer IPs re-point automatically if the node came back with a new address")
 	return nil
-}
-
-// resyncNodePool rewrites the restarted node's IPAddressPool with its
-// current IP. A cluster without MetalLB, or a node outside the pool
-// (the control plane when workers exist), is detected by the pool
-// object's absence and skipped silently.
-func (m *Manager) resyncNodePool(name, target, poolName string) error {
-	cp := ControlPlane(name)
-	if err := m.rt.WaitReady(target, 2*time.Minute); err != nil {
-		return err
-	}
-	ip, err := m.rt.IP(target)
-	if err != nil {
-		return err
-	}
-	out, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
-		"get", "ipaddresspool", poolName, "-n", "metallb-system", "-o", "name")
-	if err != nil {
-		if strings.Contains(out, "NotFound") || strings.Contains(out, "doesn't have a resource type") {
-			return nil
-		}
-		return err
-	}
-	manifest := fmt.Sprintf(`apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: %[1]s
-  namespace: metallb-system
-spec:
-  addresses: ["%[2]s/32"]
-`, poolName, ip)
-	// The MetalLB webhook itself may be recovering from the very outage
-	// this command is healing (its pod can live on the restarted node),
-	// so the apply retries while the cluster settles.
-	var lastErr error
-	for attempt := 0; attempt < 24; attempt++ {
-		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
-			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
-		if lastErr == nil {
-			ui.Infof("MetalLB pool for %s now %s/32", target, ip)
-			return nil
-		}
-		time.Sleep(5 * time.Second)
-	}
-	return lastErr
 }
 
 // findNode lists the cluster's node containers and resolves node

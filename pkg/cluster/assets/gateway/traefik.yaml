@@ -117,12 +117,10 @@ metadata:
   namespace: kiac-gateway
   labels:
     app: traefik
-  # Shares a node IP with Grafana (port 3000) when both addons are on;
-  # the pool has only one /32 per worker. Ports must stay disjoint.
-  # The kiac-primary pool keeps the IP on the node the pod is pinned to.
-  annotations:
-    metallb.io/allow-shared-ip: kiac
-    metallb.io/address-pool: kiac-primary
+  # Shares a node IP with Grafana (port 3000) when both addons are on:
+  # kiac-lb lets Services share an IP while their port sets stay
+  # disjoint. The kiac.io/lb-primary nodeSelector above keeps the pod on
+  # the node kiac-lb prefers, so delivery is pod-local.
 spec:
   type: LoadBalancer
   selector:

@@ -18,6 +18,6 @@ wait: 5m             # timeout for nodes to become Ready
 addons:
   metrics: true          # metrics-server (kubectl top nodes/pods)
   storage: true          # local-path default StorageClass
-  loadBalancer: true     # MetalLB, Services of type LoadBalancer
+  loadBalancer: true     # kiac-lb, Services of type LoadBalancer
   observability: false   # Prometheus + Grafana + node-exporter
   gateway: false         # Gateway API CRDs + Traefik

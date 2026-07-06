@@ -84,10 +84,13 @@ func (c *Client) SystemStart() error {
 
 // RunOpts describes one node VM.
 type RunOpts struct {
-	Name   string
-	Image  string
-	CPUs   string
-	Memory string
+	Name       string
+	Image      string
+	CPUs       string
+	Memory     string
+	Env        []string // KEY=VALUE pairs, passed as -e flags
+	Entrypoint string   // overrides the image entrypoint when non-empty
+	Args       []string // command arguments appended after the image
 }
 
 // RunDetached boots a node VM. The kindest/node entrypoint brings up
@@ -105,7 +108,14 @@ func (c *Client) RunDetached(o RunOpts) error {
 	if o.Memory != "" {
 		args = append(args, "--memory", o.Memory)
 	}
+	for _, e := range o.Env {
+		args = append(args, "-e", e)
+	}
+	if o.Entrypoint != "" {
+		args = append(args, "--entrypoint", o.Entrypoint)
+	}
 	args = append(args, o.Image)
+	args = append(args, o.Args...)
 	_, err := c.run(args...)
 	return err
 }

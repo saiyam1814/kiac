@@ -1,7 +1,7 @@
 # LoadBalancer example: nginx behind a Service of type LoadBalancer.
 #
 # Demonstrates that a kiac cluster hands out real, routable EXTERNAL-IPs
-# with zero configuration. MetalLB ships by default (drop --no-lb to
+# with zero configuration. kiac-lb ships by default (drop --no-lb to
 # disable) and its pool holds the node VM IPs, so the address you get
 # back is reachable straight from your Mac. No tunnels, no port
 # forwarding.
@@ -54,7 +54,7 @@ metadata:
   labels:
     app: web
 spec:
-  # MetalLB assigns an IP from the per-node pool; kubectl get svc web
+  # kiac-lb assigns a node IP (preferring the pod's node); kubectl get svc web
   # shows it under EXTERNAL-IP.
   type: LoadBalancer
   selector:

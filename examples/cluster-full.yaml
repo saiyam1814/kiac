@@ -50,7 +50,7 @@ addons:
   # PVCs bind with no extra setup (see examples/statefulset.yaml).
   storage: true
 
-  # MetalLB with a per-node IP pool: Services of type LoadBalancer get
+  # kiac-lb assigns node IPs: Services of type LoadBalancer get
   # real EXTERNAL-IPs reachable from your Mac (see
   # examples/loadbalancer.yaml). Required by observability and gateway.
   loadBalancer: true

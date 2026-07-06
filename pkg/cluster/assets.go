@@ -9,14 +9,10 @@ import _ "embed"
 //go:embed assets/metrics-server.yaml
 var metricsServerManifest string
 
-// metallbManifest is the upstream MetalLB native manifest (v0.16.0).
-// kiac runs it in L2 mode with a pool of the cluster's own node IPs:
-// vmnet only delivers frames addressed to a VM's assigned IP, so floating
-// VIPs never reach the guest, while node IPs are host-reachable and
-// kube-proxy programs LoadBalancer ingress IPs into iptables.
-//
-//go:embed assets/metallb-native.yaml
-var metallbManifest string
+// LoadBalancer support has no manifest: kiac-lb (see lb.go) runs as a
+// systemd service inside the control-plane VM, not as pods, because the
+// only host-reachable LoadBalancer addresses under vmnet are the node
+// IPs themselves and kube-proxy programs ingress IPs into iptables.
 
 // Flannel/Calico/Cilium manifests are deliberately absent: the stock
 // node kernel ships without CONFIG_BRIDGE_NETFILTER, VXLAN, and eBPF

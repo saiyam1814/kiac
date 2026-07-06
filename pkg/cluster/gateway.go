@@ -10,11 +10,11 @@ import (
 
 // installGateway deploys built-in Gateway API support: the Gateway API
 // CRDs plus Traefik v3 as the bundled implementation, from manifests
-// embedded in the binary (same pattern as MetalLB in assets.go).
+// embedded in the binary (same pattern as metrics-server in assets.go).
 // Traefik runs as a single Deployment exposed via a type LoadBalancer
 // Service, and a default GatewayClass + Gateway are created, so
 // `--gateway` lets `kubectl apply` of an HTTPRoute work with zero
-// configuration. Requires the LB pool (cfg.NoLB must be false to get an
+// configuration. Requires kiac-lb (cfg.NoLB must be false to get an
 // EXTERNAL-IP). Steps report through ui.Step like the rest of Create.
 func (m *Manager) installGateway(cp string, cfg Config) error {
 	if cfg.NoLB {
@@ -66,7 +66,7 @@ func (m *Manager) installGateway(cp string, cfg Config) error {
 }
 
 // waitGatewayAddress polls the Traefik Service for its LoadBalancer
-// ingress. The Service IP rather than Gateway status is polled: MetalLB
+// ingress. The Service IP rather than Gateway status is polled: kiac-lb
 // assigns it first, and Traefik copies it into the Gateway afterwards,
 // so the Service is the earliest reliable signal that traffic can flow.
 func (m *Manager) waitGatewayAddress(cp string, timeout time.Duration) (string, error) {

@@ -1,0 +1,111 @@
+# Builds the kiac "full" node kernel: kernel.org 6.12.x with
+# apple/containerization's arm64 base config plus kernel/config-full
+# (VXLAN, GENEVE, br_netfilter, eBPF JIT + BTF, WireGuard, ...) so
+# Cilium/Calico/flannel can run inside kiac node VMs.
+#
+# Output format: uncompressed arch/arm64/boot/Image. That is what
+# Containerization boots on arm64: its kernel/build.sh copies
+# arch/arm64/boot/Image and names it vmlinux-arm64, and the Kata
+# default kernel that `container` 1.0.0 ships is the same format
+# (`file` reports "Linux kernel ARM64 boot executable Image").
+#
+# Bumping the kernel is a config change: update KERNEL_VERSION and
+# KERNEL_SHA256 below, then refresh the checksum pinned in
+# pkg/cluster/kernel.go after the release is published.
+name: kernel-build
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "kernel-v*"
+
+permissions:
+  contents: write # release asset upload on tag builds
+
+env:
+  # 6.12.28 matches the Kata default kernel `container` 1.0.0 boots
+  # (vmlinux-6.12.28-153), minimizing guest ABI drift for vminitd.
+  KERNEL_VERSION: "6.12.28"
+  KERNEL_SHA256: "e8a099182562aecff781de72ce769461e706d97af42d740dff20eb450dd5771e"
+  # apple/containerization ref providing the base kernel config. Its
+  # config targets 6.18.5; `make olddefconfig` reconciles it against
+  # 6.12.x, and the assert step below catches anything that gets
+  # dropped. The config is additionally pinned by checksum.
+  CONTAINERIZATION_REF: "0.35.0"
+  BASE_CONFIG_SHA256: "cc6cc583a69d4297be50e8fb3a255fe3da2d1cb0aa9c98a9ae4db605505de1cc"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch pinned base config from apple/containerization
+        run: |
+          curl -fSsL -o config-base \
+            "https://raw.githubusercontent.com/apple/containerization/${CONTAINERIZATION_REF}/kernel/config-arm64"
+          echo "${BASE_CONFIG_SHA256}  config-base" | sha256sum -c -
+
+      - name: Download kernel source
+        run: |
+          curl -fSsL -o linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz"
+          echo "${KERNEL_SHA256}  linux.tar.xz" | sha256sum -c -
+
+      # Hermetic toolchain: everything version-sensitive (gcc, pahole
+      # for BTF, kconfig tooling) runs inside a pinned container, not
+      # on the runner image. dwarves provides pahole, required once
+      # CONFIG_DEBUG_INFO_BTF=y (Apple's builder image lacks it).
+      - name: Build kernel Image in container
+        run: |
+          docker run --rm \
+            -v "$PWD:/w" -w /w \
+            -e KERNEL_VERSION="${KERNEL_VERSION}" \
+            ubuntu:24.04 bash -euxc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                bc bison flex gcc make xz-utils libelf-dev libssl-dev \
+                dwarves python3 ca-certificates kmod cpio
+              mkdir -p /kbuild
+              tar -xf linux.tar.xz -C /kbuild --strip-components=1
+              cd /kbuild
+              ./scripts/kconfig/merge_config.sh -m /w/config-base /w/kernel/config-full
+              make ARCH=arm64 olddefconfig
+              # olddefconfig silently drops options whose dependencies
+              # are unmet; a kernel missing any of these would boot but
+              # break the CNIs this build exists for, so fail loudly.
+              while read -r opt; do
+                grep -qx "${opt}" .config || { echo "MISSING ${opt} after olddefconfig"; exit 1; }
+              done < <(grep "^CONFIG_" /w/kernel/config-full)
+              make ARCH=arm64 -j"$(nproc)" LOCALVERSION="-kiac-full" Image
+              cp arch/arm64/boot/Image "/w/kiac-kernel-${KERNEL_VERSION}-full"
+            '
+
+      - name: Checksum
+        run: |
+          sha256sum "kiac-kernel-${KERNEL_VERSION}-full" \
+            | tee "kiac-kernel-${KERNEL_VERSION}-full.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiac-kernel-${{ env.KERNEL_VERSION }}-full
+          path: |
+            kiac-kernel-${{ env.KERNEL_VERSION }}-full
+            kiac-kernel-${{ env.KERNEL_VERSION }}-full.sha256
+          if-no-files-found: error
+
+      # Tag builds publish release assets; pkg/cluster/kernel.go pins
+      # the sha256 printed above and downloads from this release.
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/kernel-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" --notes "kiac full node kernel ${KERNEL_VERSION} (arm64 Image, monolithic, CNI-ready)" || true
+          gh release upload "$tag" \
+            "kiac-kernel-${KERNEL_VERSION}-full" \
+            "kiac-kernel-${KERNEL_VERSION}-full.sha256" \
+            --clobber

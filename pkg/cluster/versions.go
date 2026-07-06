@@ -52,3 +52,47 @@ func SupportedVersions() []string {
 	sort.Sort(sort.Reverse(sort.StringSlice(out)))
 	return out
 }
+
+// k3sImages pins the newest rancher/k3s build of each Kubernetes minor
+// to its multi-arch manifest digest (linux/arm64 included); like
+// nodeImages, k3s images are only tested at exact digests.
+// Refresh with: hub.docker.com/v2/repositories/rancher/k3s/tags
+var k3sImages = map[string]string{
+	"1.32": "docker.io/rancher/k3s:v1.32.13-k3s1@sha256:7534b63e02277917f77c584ed5532b31562c760d6bb8fe88059002e9bdeee033",
+	"1.33": "docker.io/rancher/k3s:v1.33.13-k3s1@sha256:523cfdf26aaef2c3164eefa30a61f5f1dca86d1cf3f1d38beae62ac65905a3ab",
+	"1.34": "docker.io/rancher/k3s:v1.34.9-k3s1@sha256:9c162556657a38e394d1f944081388ae7c0b85ec29134c509583083e287f804e",
+	"1.35": "docker.io/rancher/k3s:v1.35.6-k3s1@sha256:9d6b9c15e8031c1aea7dd7f0cdc019f5e74a23c53b9eada564b7a8dc94efc14c",
+	"1.36": "docker.io/rancher/k3s:v1.36.2-k3s1@sha256:6a47cea22c4b834d4ba72c89d291696b79ebe406251f90b446e4dff03513dd87",
+}
+
+// ResolveK3sImage maps a Kubernetes version to a pinned rancher/k3s
+// image, mirroring ResolveImage. Full patch versions outside the pin
+// table fall back to the matching -k3s1 tag, unpinned.
+func ResolveK3sImage(version string) (string, error) {
+	v := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	parts := strings.Split(v, ".")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid Kubernetes version %q (want e.g. %s)", version, DefaultK8sVersion)
+	}
+	minor := parts[0] + "." + parts[1]
+	if img, ok := k3sImages[minor]; ok && len(parts) == 2 {
+		return img, nil
+	}
+	if len(parts) == 3 {
+		if img, ok := k3sImages[minor]; ok && strings.Contains(img, ":v"+v+"-k3s") {
+			return img, nil
+		}
+		return "docker.io/rancher/k3s:v" + v + "-k3s1", nil
+	}
+	return "", fmt.Errorf("no pinned k3s image for Kubernetes %q (k3s-supported minors: %s)", version, strings.Join(SupportedK3sVersions(), ", "))
+}
+
+// SupportedK3sVersions lists minors with a pinned k3s image, newest first.
+func SupportedK3sVersions() []string {
+	out := make([]string, 0, len(k3sImages))
+	for v := range k3sImages {
+		out = append(out, v)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	return out
+}
