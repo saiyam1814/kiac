@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>k3s distro · kiac docs</title>
+<meta name="description" content="kiac create cluster --distro k3s: rancher/k3s as PID 1 per VM, what k3s bundles, why kiac swaps flannel for kindnet, and the footprint numbers.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a class="on" href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Distros &amp; kernels</div>
+  <h1>k3s distro</h1>
+  <p class="lede">The same one-VM-per-node clusters, built on <code>rancher/k3s</code> instead of kubeadm: a single binary as PID 1 in every VM, an sqlite datastore, and a 2-node cluster ready in well under a minute.</p>
+
+  <pre><code>kiac create cluster --distro k3s --name dev --workers 1</code></pre>
+
+  <h2 id="how">How it differs from the kubeadm path</h2>
+  <p>The default distro boots <code>kindest/node</code> images (systemd, containerd, kubeadm) and initializes the cluster with <code>kubeadm init</code>/<code>join</code>. With <code>--distro k3s</code>, each VM boots a pinned <code>rancher/k3s</code> image and runs the k3s binary directly as PID 1: no systemd in the VM, no separate etcd, no kubeadm. The server keeps its state in sqlite, workers join as k3s agents over the standard <code>K3S_URL</code>/<code>K3S_TOKEN</code> mechanism, and the kubeconfig merges into <code>~/.kube/config</code> as <code>kiac-&lt;name&gt;</code>, exactly like the kubeadm path.</p>
+  <p>Kubernetes versions work the same way: minors 1.32 through 1.36 map to digest-pinned <code>rancher/k3s</code> images (1.36 default), selected with the same <code>--k8s-version</code> flag:</p>
+  <pre><code>kiac create cluster --distro k3s --k8s-version 1.34</code></pre>
+
+  <h2 id="bundled">What k3s bundles, and what kiac does with it</h2>
+  <p>k3s ships its own batteries, so on this path kiac installs none of its usual addons and maps its flags onto k3s's <code>--disable</code> switches instead:</p>
+  <table>
+    <tr><th>Piece</th><th>On the k3s path</th><th>Opt out</th></tr>
+    <tr><td>Storage</td><td>k3s's bundled local-path provisioner (default StorageClass)</td><td><code>--no-storage</code></td></tr>
+    <tr><td>Metrics</td><td>k3s's bundled metrics-server; <code>kubectl top nodes</code> works natively</td><td><code>--no-metrics</code></td></tr>
+    <tr><td>LoadBalancer</td><td>k3s's bundled servicelb (klipper), which backs <code>type: LoadBalancer</code> with node IPs natively; kiac-lb is not installed</td><td><code>--no-lb</code></td></tr>
+    <tr><td>Ingress</td><td>k3s's bundled Traefik is <b>disabled</b>: it would fight the <code>--gateway</code> addon's Traefik for ports 80 and 443</td><td>always off</td></tr>
+    <tr><td>Network policy</td><td>k3s's network-policy controller is disabled; it only works against the flannel bridge kiac removes (see below)</td><td>always off</td></tr>
+  </table>
+  <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. servicelb assigns their LoadBalancer IPs, and kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, so the printed URL is always an IP that delivers traffic to a local pod.</p>
+
+  <h2 id="kindnet">Why kindnet replaces flannel</h2>
+  <p>k3s normally brings flannel as its CNI. kiac starts the server with <code>--flannel-backend=none</code> and applies <b>kindnet</b> instead, for a kernel reason:</p>
+  <ul>
+    <li>Apple's stock node kernel has no VXLAN, so flannel's default backend cannot form an overlay in the first place.</li>
+    <li>Even flannel's host-gw backend wires pods onto a <code>cni0</code> bridge, and the kernel also lacks <code>br_netfilter</code>. On a bridge without it, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and every same-node service call times out.</li>
+    <li>kindnet uses a routed PTP (veth pair) topology instead of a bridge, so all pod traffic stays visible to iptables. It is the same CNI the kubeadm path uses, configured for k3s's default <code>10.42.0.0/16</code> pod CIDR.</li>
+  </ul>
+  <p>kindnet's config references the upstream <code>ptp</code> CNI plugin, which k3s's own multicall binary does not implement. kiac downloads the official containernetworking plugins release (v1.7.1, sha256-verified, cached once under <code>~/.kiac/</code>) and streams the needed binaries into every node VM.</p>
+  <p>Because the CNI is fixed on this path, <code>--cni</code> is a kubeadm-only flag; passing it with <code>--distro k3s</code> is an error.</p>
+
+  <h2 id="footprint">Footprint</h2>
+  <p>Measured on Apple silicon with the default sizing (4 vCPUs per node, 4G control plane, 2G workers):</p>
+  <ul>
+    <li>A 2-node k3s cluster (server + 1 agent) is Ready in roughly <b>22 to 54 seconds</b>, image pull excluded.</li>
+    <li>Host memory for the whole 2-node cluster sits around <b>3.7GB RSS</b> idle.</li>
+  </ul>
+  <p>That makes <code>--distro k3s</code> the fastest way to a disposable cluster, while the kubeadm path stays the closer match for clusters you operate with kubeadm in production.</p>
+
+  <h2 id="limits">Honest trade-offs</h2>
+  <ul>
+    <li><b>No <code>kiac resume</code> yet.</b> The <a href="persistence.html">reboot-healing flow</a> rewrites kubeadm's files and is kubeadm-only today. After a Mac reboot, delete and recreate a k3s cluster; it comes back in under a minute.</li>
+    <li><b>No <code>--cni cilium</code>.</b> The Cilium path (and <code>--kernel</code> pairing) is a kubeadm-path feature; see <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
+    <li><b>sqlite, single server.</b> There is one k3s server; workers are agents. Control-plane HA is out of scope for a laptop cluster.</li>
+    <li>servicelb advertises <em>every</em> node's IP for a LoadBalancer Service. Any of them answers, but only the IP of a node hosting the pod delivers without crossing vmnet's slow forwarded path; kiac and the <a href="dashboard.html">dashboard</a> prefer the primary node's IP for that reason.</li>
+  </ul>
+
+  <div class="note"><b>Where next?</b>
+  <a href="networking.html">Networking</a> explains the vmnet fast/slow path story behind the kindnet and servicelb choices. <a href="cli-reference.html">CLI reference</a> lists every <code>create</code> flag.</div>
+
+  <div class="pn">
+    <a href="cli-reference.html"><span>Previous</span>CLI reference</a>
+    <a class="next" href="cilium.html"><span>Next</span>Cilium &amp; the full kernel</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

@@ -286,7 +286,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	ui.Successf("k3s cluster %q is ready in %s. Every node is its own lightweight VM.",
 		cfg.Name, time.Since(start).Round(time.Second))
 	ui.Infof("context kiac-%s merged into %s", cfg.Name, kubeconfigPath)
-	ui.Infof("k3s bundles local-path storage, servicelb, and metrics-server; kiac's MetalLB is not used")
+	ui.Infof("k3s bundles local-path storage, servicelb, and metrics-server; kiac-lb is not needed here")
 	ui.Hintf("kubectl get nodes")
 	if !cfg.NoMetrics {
 		ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")

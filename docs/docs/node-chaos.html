@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Node chaos · kiac docs</title>
-<meta name="description" content="kiac stop node and start node: real node failure with NotReady detection, rescheduling, and MetalLB IP re-sync.">
+<meta name="description" content="kiac stop node and start node: real node failure with NotReady detection, rescheduling, and self-healing LoadBalancer IPs.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -29,12 +29,17 @@
     <a href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a class="on" href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -65,26 +70,27 @@ kubectl get events --sort-by=.lastTimestamp   <span class="c"># NodeNotReady, Ta
   <h2 id="start">Starting it again</h2>
   <pre><code>kiac start node worker-1 --name dev
 kubectl get nodes -w    <span class="c"># watch it rejoin</span></code></pre>
-  <p>The VM boots, the kubelet re-registers, and the node returns to <code>Ready</code>. Two behaviors worth knowing:</p>
-  <h3 id="ip-resync">MetalLB IP re-sync</h3>
-  <p>vmnet may hand the VM a <b>different IP</b> on restart. The kubelet re-registers itself with the new address automatically, but the MetalLB per-node <code>IPAddressPool</code> (<code>kiac-ip-&lt;node&gt;</code>) would still pin the old one, leaving LoadBalancer Services pointing at an address nothing routes to. So <code>kiac start node</code> finishes by rewriting that node's pool with its current IP, retrying while the cluster settles (the MetalLB webhook itself may be recovering from the very outage being healed).</p>
-  <p>If the re-sync fails, kiac says so and the failure only degrades LoadBalancer coverage, nothing else.</p>
+  <p>The VM boots, the kubelet re-registers, and the node returns to <code>Ready</code>. Behaviors worth knowing:</p>
+  <h3 id="ip-heal">LoadBalancer IPs heal themselves</h3>
+  <p>vmnet may hand the VM a <b>different IP</b> on restart. The kubelet re-registers itself with the new address automatically, and kiac-lb notices on its next pass (~3s) that any LoadBalancer ingress IP pinned to the old address no longer belongs to an eligible node, and re-points it. There is no pool state to rebuild and nothing for you to run; see <a href="networking.html#loadbalancer">Networking</a>.</p>
   <h3 id="idempotent">Idempotent start</h3>
-  <p><code>kiac start node</code> on an already-running node skips the boot and just re-runs the MetalLB pool re-sync. That makes it the natural retry whenever the first sync raced MetalLB's own recovery:</p>
+  <p><code>kiac start node</code> on an already-running node just says so and exits; it is safe to run any time:</p>
   <pre><code>kiac start node worker-1 --name dev    <span class="c"># safe to run again any time</span></code></pre>
+  <h3 id="host-tcp">One known limitation</h3>
+  <p>After a stop/start cycle, apple/container 1.0 has a vmnet issue where the restarted VM serves in-cluster traffic normally but <b>TCP from your Mac to that specific VM is dropped</b>. Other nodes' IPs are unaffected, and a full reboot plus <a href="persistence.html">kiac resume</a> does not hit this. Details and workarounds in <a href="troubleshooting.html#restarted-node-tcp">Troubleshooting</a>.</p>
 
   <h2 id="ideas">Failure drills to try</h2>
   <ul>
     <li>Deploy 6 replicas across 2 workers, stop one worker, and time how long until all 6 serve traffic again.</li>
     <li>Put a PVC-backed pod on a node and stop that node: local-path volumes are node-local, so watch the pod stay Pending and reason about why.</li>
-    <li>Stop the node that holds the EXTERNAL-IP of a LoadBalancer Service and watch what happens to traffic; then start it and confirm the IP re-sync.</li>
+    <li>Stop the node that holds the EXTERNAL-IP of a LoadBalancer Service: traffic fails until the node goes NotReady, then kiac-lb re-points the IP to a surviving node on its next pass.</li>
     <li>On a 3-node cluster, stop the control plane and observe that workloads keep serving while <code>kubectl</code> fails: the data plane outlives the control plane.</li>
   </ul>
-  <p>The <a href="dashboard.html">dashboard</a> has per-node Stop/Start buttons that shell out to these same commands.</p>
+  <p>The <a href="dashboard.html">dashboard</a> has per-node Stop/Start buttons that shell out to these same commands. For the whole-cluster outage a Mac reboot causes, see <a href="persistence.html">Reboots &amp; resume</a>.</p>
 
   <div class="pn">
     <a href="gateway-api.html"><span>Previous</span>Gateway API</a>
-    <a class="next" href="dashboard.html"><span>Next</span>Dashboard (kiac ui)</a>
+    <a class="next" href="persistence.html"><span>Next</span>Reboots &amp; resume</a>
   </div>
 </main>
 </div>

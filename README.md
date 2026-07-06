@@ -71,14 +71,17 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🔒 **Hardware-grade isolation** — each node is one lightweight VM with its own kernel and cgroups, not namespaces sharing a daemon.
 - 📊 **Metrics out of the box** — `kubectl top nodes` works the moment the cluster is up. metrics-server ships preconfigured.
 - 💾 **PVCs that just bind** — a default StorageClass (local-path-provisioner) is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
-- ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default, assigning node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
+- ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default: a tiny systemd loop inside the control-plane VM assigns node IPs to Services in about two seconds, shares one IP across Services when ports don't collide, and heals itself after node restarts. No pods, no webhooks, no `<pending>`, no tunnels.
 - 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
+- ⚡ **Two distros** — kubeadm on `kindest/node` by default, or `--distro k3s` for `rancher/k3s` as PID 1 in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.
+- 🐝 **Cilium and eBPF, one flag pair** — `--cni cilium --kernel full` downloads a published, sha-pinned kernel build (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. Cross-node pod traffic runs at ~285MB/s and Mac-to-pod at ~1GB/s on Cilium's vxlan datapath.
+- 🔁 **Clusters survive reboots** — `kiac resume cluster` restarts the VMs after a host reboot and heals the control-plane IP everywhere it is pinned (apiserver cert, kubeconfigs, kube-proxy). Idempotent, and verified across a vmnet subnet change in 46 seconds.
 - 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
 - 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
-- 🖥️ **A console when you want one** — `kiac ui` opens a local web console, now with cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, and a create form. Same engine as the CLI.
+- 🖥️ **A console when you want one** — `kiac ui` opens a local web console: cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, a create form, and a per-cluster kubectl Console drawer (loopback-only, no shell). Works on every distro. Same engine as the CLI.
 - 🍎 **Native stack** — one Swift runtime from Apple, one Go binary from us. Coexists with Docker Desktop, kind, and k3d; never touches the Docker socket.
 
 ## Quickstart
@@ -116,24 +119,35 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 ```
 
 ```text
-⬢ kiac v0.2.0 · Kubernetes in Apple Containers
+⬢ kiac v0.3.0 · Kubernetes in Apple Containers
  ✓ Preflight checks (0.3s)
  ✓ Pulling node image kindest/node:v1.36.1 (8.4s)
  ✓ Booting 3 node VM(s) (9.8s)
  ✓ Initializing Kubernetes control plane (49.6s)
  ✓ Joining 2 worker(s) (13.5s)
  ✓ Installing CNI (kindnet) (0.4s)
- ✓ Installing storage (local-path-provisioner) (0.5s)
- ✓ Installing metrics-server (0.4s)
- ✓ Installing LoadBalancer (kiac-lb) (0.3s)
+ ✓ Installing addons (storage, metrics-server) (0.5s)
+ ✓ Installing LoadBalancer (kiac-lb) (1.1s)
  ✓ Waiting for nodes to be Ready (10.7s)
- ✓ Configuring LoadBalancer IP pool (3.2s)
+ ✓ Labeling LoadBalancer primary node (0.3s)
  ✓ Writing kubeconfig (0.2s)
 
-Cluster "dev" is ready in 2m26s. Every node is its own lightweight VM.
+Cluster "dev" is ready in 1m35s. Every node is its own lightweight VM.
 ```
 
 The kubeconfig is merged into `~/.kube/config` as context `kiac-dev` (your existing config is backed up to `~/.kube/config.kiac.bak` the first time).
+
+### Pick a flavor
+
+```bash
+# k3s nodes: rancher/k3s as PID 1 in every VM, a 2-node cluster in under a minute
+kiac create cluster --name quick --distro k3s --workers 1
+
+# Cilium with eBPF on the full node kernel (needs the Cilium CLI: brew install cilium-cli)
+kiac create cluster --name ebpf --workers 2 --cni cilium --kernel full
+```
+
+`--kernel full` downloads a published, sha-pinned kernel build once (cached in `~/.kiac/kernels`) and boots every node on it. A full Cilium cluster with `--observability --gateway` comes up in about 1m37s.
 
 ### Turn everything on
 
@@ -141,7 +155,7 @@ The kubeconfig is merged into `~/.kube/config` as context `kiac-dev` (your exist
 kiac create cluster --name dev --workers 2 --observability --gateway
 ```
 
-One command later you have Grafana at port 3000 on a real LoadBalancer IP (anonymous admin, local-only, two dashboards already provisioned) and a Gateway serving HTTP on port 80, also on a LoadBalancer IP. Point an HTTPRoute at `parentRefs: [{name: kiac, namespace: kiac-gateway}]` and it routes with zero extra setup; see [`examples/httproute.yaml`](examples/httproute.yaml).
+One command later you have Grafana at port 3000 on a real LoadBalancer IP (anonymous admin, local-only, two dashboards already provisioned) and a Gateway serving HTTP on port 80, also on a LoadBalancer IP. Point an HTTPRoute at `parentRefs: [{name: kiac, namespace: kiac-gateway}]` and it routes with zero extra setup; see [`examples/httproute.yaml`](examples/httproute.yaml). The same two flags work on kubeadm, k3s, and Cilium clusters.
 
 ### See the isolation pay off
 
@@ -173,17 +187,22 @@ kiac doctor --fix                            # ...and auto-start the container s
 kiac create cluster                          # single node, everything included
 kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 kiac create cluster --k8s-version 1.34       # pick your Kubernetes (1.32-1.36 pinned)
+kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datastore, up in under a minute
+kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
-kiac ui                                      # local web console to create/manage clusters
+kiac ui                                      # local web console: manage clusters, kubectl Console per cluster
 kiac get clusters                            # -o wide for versions/age, -o json for scripts
 kiac get nodes --name dev
 kiac stop node worker-1 --name dev           # real node failure: NotReady, eviction, rescheduling
 kiac start node worker-1 --name dev          # node rejoins; idempotent
+kiac resume cluster --name dev               # bring a cluster back after a host reboot; idempotent
 container build -t myapp:dev .               # build with apple/container
 kiac load image myapp:dev --name dev         # push it into every node
 kiac completion zsh                          # bash|zsh|fish|powershell; see kiac completion -h
 kiac delete cluster --name dev
 ```
+
+One honest caveat: after `kiac stop node` + `kiac start node`, an apple/container 1.0 vmnet issue drops new TCP connections from your Mac to that one restarted VM. In-cluster traffic keeps working, and reboot plus `kiac resume` is unaffected. Details and workarounds live in the docs troubleshooting page.
 
 Full guides and command reference live on the [docs site](https://saiyam1814.github.io/kiac/).
 
@@ -193,17 +212,20 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 |---|---|---|
 | `--name` | `dev` | cluster name |
 | `--workers` | `0` | worker count; control plane is untainted when 0 |
-| `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 |
+| `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 (both distros) |
+| `--distro` | `kubeadm` | `kubeadm` (kindest/node) or `k3s` (rancher/k3s: sqlite datastore, bundled servicelb, local-path, and metrics-server; `--cni` does not apply, kiac applies kindnet) |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
-| `--cni` | `kindnet` | pod network: `kindnet` or `none` (Flannel/Calico/Cilium need kernel features missing from Apple's stock node kernel; custom kernels are on the roadmap) |
+| `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), or `none` to bring your own |
+| `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--cpus` | `4` | vCPUs per node VM |
-| `--memory` | `4G` | memory per node VM |
+| `--memory` | `2G` | memory per worker VM (idle workers use a few hundred MB) |
+| `--cp-memory` | `4G` | memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon) |
 | `--no-metrics` | `false` | skip metrics-server |
 | `--no-storage` | `false` | skip the local-path default StorageClass |
 | `--no-lb` | `false` | skip kiac-lb (`type: LoadBalancer` support) |
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
-| `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values |
+| `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--distro` and `--kernel` are flags only for now) |
 | `--wait` | `5m` | node readiness timeout |
 
 ## How it works
@@ -212,13 +234,14 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
   <img src="assets/architecture.png" alt="How kiac builds a cluster" width="100%">
 </p>
 
-kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, and the built-in kiac-lb LoadBalancer by default. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
+kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, and the built-in kiac-lb LoadBalancer by default. With `--distro k3s` the same VMs run `rancher/k3s` as PID 1 instead, and `--kernel full` boots every node on a published kernel build with the features overlay and eBPF CNIs need. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
 
 ## Roadmap
 
-- **Custom node kernels** (`--kernel`) to unlock Flannel, Calico, Cilium, and eBPF
-- **Persistent clusters** backed by `container machine` (WWDC26 persistent Linux environments), so a cluster survives a reboot
+- **Persistence backed by `container machine`** (WWDC26 persistent Linux environments): `kiac resume` already brings a cluster back after a reboot, and machine-backed VMs would make that instant
 - **HA control planes**
+- **One-flag Calico and Flannel** on the full kernel
+- **Hubble UI** for Cilium clusters
 
 ## Contributing
 

@@ -59,11 +59,11 @@ var createClusterCmd = &cobra.Command{
 			}
 			return cluster.NewManager().Create(createCfg)
 		case "k3s":
-			// k3s brings its own flannel (host-gw backend, chosen for
-			// the VXLAN-less node kernel); kiac's CNI choice is a
-			// kubeadm-path concept.
+			// The k3s path always runs kindnet (flannel is disabled:
+			// its bridge breaks same-node service traffic on a kernel
+			// without br_netfilter), so --cni has nothing to select.
 			if cmd.Flags().Changed("cni") {
-				return fmt.Errorf("--cni applies to --distro kubeadm only; k3s bundles flannel (host-gw)")
+				return fmt.Errorf("--cni applies to --distro kubeadm only; kiac installs kindnet on k3s")
 			}
 			if createCfg.Image == "" {
 				img, err := cluster.ResolveK3sImage(k8sVersion)
@@ -96,7 +96,7 @@ func init() {
 	f.StringVar(&createDistro, "distro", "kubeadm",
 		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage, servicelb, and metrics-server)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
-	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, or none (bring your own; pair with --kernel full for cilium/calico/flannel)")
+	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")

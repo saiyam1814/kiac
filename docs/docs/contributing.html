@@ -29,12 +29,17 @@
     <a href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -68,9 +73,10 @@ make lint           <span class="c"># go vet ./...</span>
     <tr><th>Path</th><th>What lives there</th></tr>
     <tr><td><code>cmd/</code></td><td>cobra commands; deliberately thin shims over pkg/cluster</td></tr>
     <tr><td><code>pkg/cluster/</code></td><td>cluster lifecycle: create, delete, addons, chaos, kubeconfig, status</td></tr>
-    <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, MetalLB, observability, gateway), versions pinned</td></tr>
+    <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, observability, gateway, k3s kindnet), versions pinned</td></tr>
     <tr><td><code>pkg/runtime/</code></td><td>wrapper around the apple/container CLI</td></tr>
     <tr><td><code>pkg/webui/</code></td><td>the local dashboard: Go handlers + one embedded HTML file</td></tr>
+    <tr><td><code>kernel/</code></td><td>the full node kernel: kconfig fragment; built by the kernel-build CI workflow</td></tr>
     <tr><td><code>docs/</code></td><td>this website (GitHub Pages serves the <code>docs/</code> directory)</td></tr>
     <tr><td><code>examples/</code></td><td>example configs like <code>cluster.yaml</code></td></tr>
   </table>

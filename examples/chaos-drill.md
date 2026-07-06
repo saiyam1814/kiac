@@ -111,11 +111,13 @@ replica on worker-1 goes `Terminating`, and the Deployment schedules a
 replacement on a surviving node. You are back to 3 running replicas
 without touching anything.
 
-Note what else happened: each node contributes its own VM IP to the
-MetalLB pool as a `/32`, so any LoadBalancer Service that was assigned
-worker-1's address is dark while the VM is off. That is honest failure
-too; it comes back in step 4. From the host side, `kiac get nodes
---name dev` shows the stopped VM, and `kiac get clusters` drops to
+Note what else happened: kiac-lb hands out node VM IPs to LoadBalancer
+Services, so any Service that was assigned worker-1's address goes
+dark with the VM. That is honest failure too, and it heals itself:
+once the node flips to `NotReady`, its IP stops being eligible and
+kiac-lb re-points the Service at a surviving node on its next pass (it
+runs every few seconds). From the host side, `kiac get nodes --name
+dev` shows the stopped VM, and `kiac get clusters` drops to
 `3/4 running`.
 
 ## 4. Bring the node back
@@ -126,10 +128,18 @@ kubectl get nodes -w
 ```
 
 The VM boots, the kubelet reconnects, and the node returns to `Ready`.
-VMs can come back with a different IP; kiac resyncs the node's MetalLB
-pool to the new address automatically (you will see the `/32` pool
-update in the output). `kiac start node` is idempotent: running it
-against a node that is already up just re-syncs the pool.
+VMs can come back with a different IP; the kubelet re-registers with
+the new address, and kiac-lb notices that any LoadBalancer ingress IP
+still pinned to the old address is no longer an eligible node IP and
+re-points it on its next pass. Nothing to resync by hand. `kiac start
+node` is idempotent: running it against a node that is already up is a
+no-op.
+
+One known limitation to be honest about: after a stop/start of a
+single node, TCP from your Mac to that VM's new IP can be dropped by a
+vmnet issue in apple/container 1.0. In-cluster traffic (what this
+drill exercises) is unaffected, and a full host restart followed by
+`kiac resume` does not hit it; see [resume-drill.md](resume-drill.md).
 
 The rescheduled pods stay where they landed; Kubernetes does not
 rebalance on its own. Delete one (`kubectl delete pod <name>`) and the

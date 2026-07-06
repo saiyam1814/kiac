@@ -30,7 +30,10 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 
 | Example | What it shows |
 | --- | --- |
+| [cilium-cluster.md](cilium-cluster.md) | Cilium as the CNI in one command with `--kernel full`: prereqs, `cilium status`, Gateway API routing, and a cross-node throughput demo with a 20MB fetch. |
+| [k3s-cluster.md](k3s-cluster.md) | k3s as the node distro: what k3s bundles, what kiac changes, the PVC and LoadBalancer examples running on it unchanged, and the footprint. |
 | [chaos-drill.md](chaos-drill.md) | Step-by-step node-failure drill: spread an app across workers, `kiac stop node`, watch eviction and reschedule, `kiac start node`, watch the rejoin. |
+| [resume-drill.md](resume-drill.md) | Reboot-survival drill: stop the container system, see `0/3 stopped` in `kiac get clusters`, bring it all back with `kiac resume`, curl the app again. |
 | [cluster.yaml](cluster.yaml) | Minimal `--config` file for `kiac create cluster`. |
 | [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, all addons on including observability and gateway. |
 

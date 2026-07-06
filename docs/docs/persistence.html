@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reboots &amp; resume · kiac docs</title>
+<meta name="description" content="kiac resume cluster: how clusters survive host reboots, what gets healed (certs, kubeconfigs, kube-proxy), and why it is safe to re-run.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a class="on" href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Day two</div>
+  <h1>Reboots &amp; resume</h1>
+  <p class="lede">Clusters survive host reboots. One command boots the node VMs back up and heals everything a fresh set of IPs breaks.</p>
+
+  <pre><code>kiac resume cluster --name dev</code></pre>
+
+  <h2 id="what-a-reboot-does">What a reboot actually does to a cluster</h2>
+  <p>Rebooting your Mac (or running <code>container system stop</code>) halts every node VM. The VMs' disks persist, so nothing is lost, but two things change on the next boot:</p>
+  <ul>
+    <li>The container service reports every node as <code>stopped</code>; <code>kiac get clusters</code> shows <code>0/N stopped</code>.</li>
+    <li>vmnet hands out <b>fresh IPs</b>. Node addresses are not stored anywhere; every boot gets the next free one.</li>
+  </ul>
+  <p>Worker addresses heal themselves (each kubelet re-detects its IP and re-registers). The control-plane address does not: it is baked into the apiserver's serving certificate, every kubeconfig, the static pod manifests, the workers' kubelet configs, and the kube-proxy ConfigMap. Come back on a new IP and all of them disagree with reality.</p>
+
+  <h2 id="resume">kiac resume cluster</h2>
+  <pre><code>kiac get clusters
+<span class="o">NAME  STATUS
+dev   0/3 stopped</span>
+
+kiac resume cluster --name dev
+<span class="o"> ✓ Preflight checks
+ ✓ Booting 3 node VM(s)
+control-plane IP changed 192.168.64.2 -&gt; 192.168.64.5; healing certs and kubeconfigs
+ ✓ Healing control-plane files
+ ✓ Pointing worker kubelets at the control plane
+ ✓ Waiting for the API server
+ ✓ Re-pointing kube-proxy and cluster-info
+ ✓ Waiting for nodes to be Ready
+ ✓ Writing kubeconfig</span></code></pre>
+  <p>What each step heals when the control-plane IP changed:</p>
+  <ul>
+    <li><b>Control-plane files</b>: the old IP is rewritten to the new one across <code>admin.conf</code>, <code>super-admin.conf</code>, the scheduler, controller-manager, and kubelet configs, and the four static pod manifests. The apiserver serving certificate is regenerated for the new address when needed, and the kubelet restarts to pick everything up.</li>
+    <li><b>Workers</b>: each worker's <code>kubelet.conf</code> is pointed at the new control-plane address and its kubelet restarted.</li>
+    <li><b>In-cluster state</b>: the <code>kube-proxy</code> ConfigMap (its pods crash-loop against the old address until then) is rewritten and the daemonset restarted, along with <code>kube-public/cluster-info</code>.</li>
+    <li><b>Your kubeconfig</b>: the <code>kiac-&lt;name&gt;</code> context is re-merged with the new server address.</li>
+    <li><b>LoadBalancer IPs</b>: nothing to do explicitly. kiac-lb reads the healed <code>admin.conf</code> on every pass, so any Service ingress IP pinned to a dead address is re-pointed within seconds. See <a href="networking.html#loadbalancer">Networking</a>.</li>
+  </ul>
+  <p>One expected oddity: the control-plane VM may die once during its first boot after an IP change (an artifact of the node image's own IP fixup). resume detects that, boots it again, and says so; it is part of the normal flow, not a failure.</p>
+  <p>Measured end to end: a 3-node cluster resumed and Ready in <b>46 seconds</b>, verified even across a vmnet subnet change where every address moved.</p>
+
+  <h2 id="idempotent">Idempotent by design</h2>
+  <p>Every healing step is a no-op once applied, so <code>kiac resume cluster</code> is safe to run at any time:</p>
+  <ul>
+    <li>On a <b>running cluster</b>, it degenerates to a status check plus no-op heals.</li>
+    <li>After a <b>partial failure</b> (say, the Mac went to sleep mid-resume), re-running it is the retry; the worker heal even matches <em>any</em> previous address, so a resume that died halfway stays repairable.</li>
+    <li>When the IPs happen to come back <b>unchanged</b>, it is just start + wait.</li>
+  </ul>
+  <pre><code>kiac resume cluster --name dev --wait 10m   <span class="c"># loaded machine? give it longer</span></code></pre>
+
+  <h2 id="survives">What survives a reboot</h2>
+  <ul>
+    <li>All Kubernetes objects (etcd's data directory is on the control-plane VM's persistent disk).</li>
+    <li>PVC data: local-path volumes are directories on node disks, which persist.</li>
+    <li>Images loaded with <code>kiac load image</code>: they live in each node's containerd store.</li>
+    <li>The kiac-lb systemd unit: it is enabled in the VM, so it comes back with the node.</li>
+  </ul>
+
+  <h2 id="limits">Limits, honestly</h2>
+  <ul>
+    <li><b>kubeadm clusters only.</b> resume heals kubeadm's files; <a href="k3s.html">k3s clusters</a> should be deleted and recreated after a reboot (they build in under a minute).</li>
+    <li><b><code>--cni none</code> clusters</b> never report nodes Ready, so the final readiness wait warns instead of failing; the VMs and apiserver are still up.</li>
+    <li><b>resume is not <code>start node</code>.</b> A single node stopped with <code>kiac stop node</code> just needs <a href="node-chaos.html">kiac start node</a>; resume is for the whole-cluster outage a reboot causes (though running it in that state is harmless).</li>
+  </ul>
+
+  <div class="pn">
+    <a href="node-chaos.html"><span>Previous</span>Node chaos</a>
+    <a class="next" href="dashboard.html"><span>Next</span>Dashboard (kiac ui)</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

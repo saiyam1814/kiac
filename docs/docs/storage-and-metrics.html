@@ -29,12 +29,17 @@
     <a href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -46,6 +51,9 @@
   <div class="kicker">Core concepts</div>
   <h1>Storage &amp; metrics</h1>
   <p class="lede">Two things every local cluster needs on day one, installed by default and removable with a flag.</p>
+
+  <div class="note"><b>On the k3s distro</b>
+  <a href="k3s.html">--distro k3s</a> clusters get the same two defaults from k3s's own bundles (local-path storage and metrics-server), and the same <code>--no-storage</code>/<code>--no-metrics</code> flags turn them off. Everything on this page applies to both distros.</div>
 
   <h2 id="storage">Default StorageClass: local-path</h2>
   <p>Every cluster gets a default StorageClass backed by <b>local-path-provisioner</b> (the same manifest the kind project ships inside the <code>kindest/node</code> image). PersistentVolumeClaims bind without any setup, so StatefulSets and <code>volumeClaimTemplates</code> work immediately:</p>

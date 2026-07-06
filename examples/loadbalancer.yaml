@@ -2,9 +2,9 @@
 #
 # Demonstrates that a kiac cluster hands out real, routable EXTERNAL-IPs
 # with zero configuration. kiac-lb ships by default (drop --no-lb to
-# disable) and its pool holds the node VM IPs, so the address you get
-# back is reachable straight from your Mac. No tunnels, no port
-# forwarding.
+# disable) and assigns node VM IPs, so the address you get back is
+# reachable straight from your Mac. No tunnels, no port forwarding.
+# (On --distro k3s clusters the bundled servicelb does the same job.)
 #
 # Run it:
 #

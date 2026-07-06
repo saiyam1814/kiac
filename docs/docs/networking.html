@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Networking · kiac docs</title>
-<meta name="description" content="How kiac networking works: vmnet, node IPs, the kindnet CNI, the node kernel story, and MetalLB LoadBalancers.">
+<meta name="description" content="How kiac networking works: vmnet fast and slow paths, node IPs, the kindnet CNI, the node kernel story, and the kiac-lb LoadBalancer.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -29,12 +29,17 @@
     <a href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -61,39 +66,50 @@ kiac-dev-worker-2        Ready    &lt;none&gt;          v1.36.1   192.168.64.4</
     <li>Node IPs are assigned by vmnet and can change when a VM restarts (see <a href="node-chaos.html">Node chaos</a> for how kiac handles that).</li>
     <li>Multi-node VM-to-VM networking over vmnet needs macOS 26+.</li>
   </ul>
-  <p>Pods use the flat <code>10.244.0.0/16</code> pod network (the CIDR kiac passes to <code>kubeadm init</code>), routed between nodes by the CNI.</p>
+  <p>Pods use a flat pod network routed between nodes by the CNI: <code>10.244.0.0/16</code> on the kubeadm path (the CIDR kiac passes to <code>kubeadm init</code>), <code>10.42.0.0/16</code> on the <a href="k3s.html">k3s path</a>.</p>
+
+  <h2 id="fast-slow">vmnet's fast path and slow path</h2>
+  <p>One more vmnet fact shapes performance: <b>frames addressed to a VM's own IP are delivered fast; packets forwarded between VMs are not.</b> Traffic that has to be routed or NATed from one node VM to another crosses vmnet's forwarded path, which is dramatically slower for bulk transfers.</p>
+  <p>kiac works with that grain everywhere:</p>
+  <ul>
+    <li><b>Routed CNIs</b> (kindnet) send cross-node pod traffic as pod-addressed packets, which vmnet must forward. Fine for control traffic and most dev work; slow for bulk cross-node transfers.</li>
+    <li><b>Addon placement</b>: kiac labels one node <code>kiac.io/lb-primary</code> and pins the bundled Grafana and Traefik pods there, and kiac-lb prefers assigning a Service the IP of a node that hosts one of its ready endpoints. Traffic entering a node is then delivered to a local pod instead of being NATed across the slow path.</li>
+    <li><b>Cilium's overlay avoids it entirely</b>: with <code>--cni cilium --kernel full</code>, cross-node pod traffic is vxlan-encapsulated in node-IP-addressed packets, which ride the fast path (~285MB/s pod-to-pod cross-node, ~1GB/s Mac-to-pod measured). See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
+  </ul>
 
   <h2 id="kernel">The kernel story, and why kindnet</h2>
-  <p>Each node runs Apple's minimal, optimized Linux kernel (6.12 series). It is a monolithic build tuned for fast boot: there is no module loading, and it ships without several features that mainstream CNIs assume:</p>
+  <p>By default each node runs Apple's minimal, optimized Linux kernel (6.12 series). It is a monolithic build tuned for fast boot: there is no module loading, and it ships without several features that mainstream CNIs assume:</p>
   <ul>
-    <li><b>No <code>br_netfilter</code></b> (<code>CONFIG_BRIDGE_NETFILTER</code>): bridged traffic cannot be steered through iptables.</li>
-    <li><b>No VXLAN</b>: overlay networks like Flannel's default backend cannot form.</li>
-    <li><b>No eBPF prerequisites</b>: Cilium's datapath cannot load.</li>
+    <li><b>No <code>br_netfilter</code></b> (<code>CONFIG_BRIDGE_NETFILTER</code>): traffic crossing a bridge cannot be steered through iptables, which silently breaks same-node Service traffic for any bridge-based CNI.</li>
+    <li><b>No VXLAN or Geneve</b>: overlay networks like Flannel's default backend cannot form.</li>
+    <li><b>No eBPF prerequisites</b> (BPF JIT, BTF): Cilium's datapath cannot load.</li>
   </ul>
-  <p><b>kindnet</b> needs none of that. It ships inside the <code>kindest/node</code> image and uses plain L3 routes between node IPs, which is exactly what the vmnet topology provides. That makes it the default and currently the only bundled CNI:</p>
-  <pre><code>kiac create cluster --cni kindnet   <span class="c"># default</span>
-kiac create cluster --cni none      <span class="c"># bring your own; nodes stay NotReady until you install one</span></code></pre>
-  <p>Asking for <code>--cni flannel</code>, <code>calico</code>, or <code>cilium</code> fails fast with an explanation rather than half-installing something that cannot start. Custom node kernels (via <code>container run --kernel</code>) are on the roadmap and will unlock these.</p>
+  <p><b>kindnet</b> needs none of that. It ships inside the <code>kindest/node</code> image and uses a routed PTP (veth) topology with plain L3 routes between node IPs, which is exactly what the vmnet topology provides. That makes it the default:</p>
+  <pre><code>kiac create cluster --cni kindnet                <span class="c"># default</span>
+kiac create cluster --cni cilium --kernel full   <span class="c"># Cilium on the full kernel; see the Cilium page</span>
+kiac create cluster --cni none                   <span class="c"># bring your own; nodes stay NotReady until you install one</span></code></pre>
+  <p>kindnet even runs on <a href="k3s.html">--distro k3s</a>: kiac disables k3s's bundled flannel outright, because flannel bridges pods onto <code>cni0</code> and, on a kernel without <code>br_netfilter</code>, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and times out. kindnet's routed topology has no bridge, so the problem never exists. (<code>--cni</code> itself is a kubeadm-path flag; the k3s path always gets kindnet.)</p>
+  <p>Asking for <code>--cni flannel</code> or <code>calico</code> still fails fast with an explanation rather than half-installing something that cannot start. To run them anyway, boot the full kernel and bring your own manifests: <code>--kernel full --cni none</code>.</p>
   <div class="warn"><b>Honest trade-off</b>
-  If your work depends on NetworkPolicy enforcement via Calico or Cilium's eBPF datapath, kiac's stock kernel cannot run it today. kindnet gives you real cross-node pod networking, not policy engines.</div>
+  On the stock kernel, kindnet gives you real cross-node pod networking, not a policy engine: NetworkPolicy is not enforced, and bulk cross-node throughput rides vmnet's slow forwarded path. Both limits lift with <a href="cilium.html">--cni cilium --kernel full</a>.</div>
 
-  <h2 id="loadbalancer">LoadBalancer: MetalLB on node IPs</h2>
-  <p>kiac installs MetalLB (v0.16.0) by default and points it at the cluster's own node IPs. This is unusual and deliberate:</p>
+  <h2 id="loadbalancer">LoadBalancer: kiac-lb on node IPs</h2>
+  <p>kiac installs <b>kiac-lb</b> by default on kubeadm clusters. It is deliberately not a controller deployment: it is a small systemd service <em>inside the control-plane VM</em> that assigns node IPs to Services of <code>type: LoadBalancer</code> by patching their status with the node's own kubectl. No pods, no images, no RBAC, no webhooks to wait for; a Service gets its EXTERNAL-IP within a couple of seconds.</p>
+  <p>Why node IPs and nothing else: <b>vmnet only delivers frames addressed to a VM's assigned IP.</b> Floating virtual IPs (the classic MetalLB model, which earlier kiac releases used) can never receive traffic here, so node IPs are the only addresses that are both host-reachable and deliverable. kube-proxy programs LoadBalancer ingress IPs into iptables on every node, so a Service bound to a node IP answers on the real port, no NodePort mapping to remember.</p>
+  <p>How kiac-lb assigns an IP, on every pass of its ~3s loop:</p>
   <ul>
-    <li><b>vmnet only delivers frames addressed to a VM's assigned IP.</b> A classic MetalLB setup that floats extra virtual IPs would announce addresses no VM ever receives traffic for. Node IPs are the only addresses that are both host-reachable and deliverable.</li>
-    <li>kube-proxy programs LoadBalancer ingress IPs into iptables on every node, so a Service bound to a node IP answers on it just like a NodePort, but on the real port.</li>
+    <li><b>Eligible nodes</b>: Ready workers. The control-plane IP is used only on single-node clusters, keeping ports like 6443 off the LB surface.</li>
+    <li><b>Preference order</b>: a node hosting a ready endpoint of the Service (delivery stays pod-local, avoiding the slow forwarded path), then the <code>kiac.io/lb-primary</code> node, then any eligible node.</li>
+    <li><b>IP sharing</b>: Services share one node IP whenever their port sets are disjoint. The built-in addons do exactly this: Grafana (port 3000) and the Traefik gateway (80/443) ride a single worker IP on single-worker clusters.</li>
+    <li><b>Self-healing</b>: a Service whose ingress IP stopped belonging to an eligible node (node stopped, or back from a restart with a new vmnet address) is re-pointed on the next pass; there is no pool state to rebuild. This is what makes LoadBalancers "just work" through <a href="node-chaos.html">node chaos</a> and <a href="persistence.html">kiac resume</a>.</li>
   </ul>
-  <p>The pool layout, configured automatically at create time:</p>
-  <ul>
-    <li>One <code>IPAddressPool</code> per worker node, each holding that node's IP as a single <code>/32</code> (named <code>kiac-ip-&lt;node&gt;</code> in <code>metallb-system</code>).</li>
-    <li>On a cluster with workers, only worker IPs are pooled; the control-plane IP stays out of the pool so ports like 6443 never collide with a Service. Single-node clusters pool the control-plane IP.</li>
-    <li>Each pool's <code>L2Advertisement</code> is pinned to its owning node via a <code>kubernetes.io/hostname</code> selector. Without the pin, a MetalLB speaker on another node could answer ARP for a live node IP and hijack that node's traffic, API server heartbeats included.</li>
-  </ul>
-  <pre><code>kubectl get ipaddresspools -n metallb-system
-kubectl expose deployment web --port=80 --type=LoadBalancer
-kubectl get svc web    <span class="c"># EXTERNAL-IP is one of your worker node IPs</span></code></pre>
-  <p>Because the pool is one <code>/32</code> per worker, Services can share an IP when their ports do not overlap, using MetalLB's <code>metallb.io/allow-shared-ip</code> annotation. The built-in addons do exactly this: Grafana (port 3000) and the Traefik gateway (80/443) share one node IP on single-worker clusters.</p>
-  <p>Skip the whole stack with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>
+  <pre><code>kubectl expose deployment web --port=80 --type=LoadBalancer
+kubectl get svc web    <span class="c"># EXTERNAL-IP is one of your worker node IPs, assigned in ~2s</span>
+
+<span class="c"># the controller's logs, from inside the control-plane VM</span>
+container exec kiac-dev-control-plane journalctl -u kiac-lb</code></pre>
+  <p>On <a href="k3s.html">--distro k3s</a>, k3s's bundled servicelb (klipper) backs <code>type: LoadBalancer</code> instead, natively on node IPs; kiac-lb is not installed there.</p>
+  <p>Skip the whole thing with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>
 
   <div class="pn">
     <a href="getting-started.html"><span>Previous</span>Getting started</a>

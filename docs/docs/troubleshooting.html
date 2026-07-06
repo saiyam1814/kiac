@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Troubleshooting · kiac docs</title>
-<meta name="description" content="Common kiac failures and their fixes: doctor --fix, cluster already exists, reboots, pending EXTERNAL-IPs, and more.">
+<meta name="description" content="Common kiac failures and their fixes: doctor --fix, cluster already exists, reboots and resume, pending EXTERNAL-IPs, cilium prerequisites, and more.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -29,12 +29,17 @@
     <a href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a class="on" href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -54,19 +59,19 @@ kiac doctor --fix  <span class="c"># also starts the container system service if
 
   <h2 id="cluster-exists">"cluster already exists"</h2>
   <pre><code><span class="o">Error: cluster "dev" already exists; delete it first with: kiac delete cluster --name dev</span></code></pre>
-  <p>Node VMs from a previous create (even stopped ones) still carry the cluster's name. Delete and recreate:</p>
-  <pre><code>kiac delete cluster --name dev
+  <p>Node VMs from a previous create (even stopped ones) still carry the cluster's name. If you want the old cluster back, resume it; if not, delete and recreate:</p>
+  <pre><code>kiac resume cluster --name dev     <span class="c"># bring the existing cluster back</span>
+<span class="c"># or</span>
+kiac delete cluster --name dev
 kiac create cluster --name dev --workers 2</code></pre>
-  <p>This is also the fix after a reboot, see below.</p>
 
   <h2 id="reboot">After a reboot: clusters show 0/N</h2>
   <pre><code>kiac get clusters
 <span class="o">NAME  STATUS
 dev   0/3 stopped</span></code></pre>
-  <p>A Mac reboot does not preserve running lightweight VMs: the container service forgets them, so every node of every cluster is gone. <code>0/N stopped</code> is that signal. Clusters do not survive reboots today; delete and recreate:</p>
-  <pre><code>kiac delete cluster --name dev
-kiac create cluster --name dev --workers 2</code></pre>
-  <p>Persistent clusters (backed by <code>container machine</code>) are on the roadmap. Until then, treat clusters as cheap and disposable, and keep the definition in a <a href="config-file.html">config file</a> so recreating is one command.</p>
+  <p>A reboot (or <code>container system stop</code>) halts every node VM; their disks persist. <code>0/N stopped</code> is the signal to resume:</p>
+  <pre><code>kiac resume cluster --name dev</code></pre>
+  <p>resume boots the VMs and heals everything the fresh vmnet IPs broke: apiserver cert, kubeconfigs, worker kubelets, and kube-proxy. It is idempotent, so re-running after a partial failure is the retry. The full story is on <a href="persistence.html">Reboots &amp; resume</a>. Two caveats: it heals <b>kubeadm clusters only</b> (recreate <a href="k3s.html">k3s clusters</a>; they build in under a minute), and expect the control-plane VM to die and be rebooted once during resume after an IP change; that is part of the normal flow.</p>
 
   <h2 id="create-fails">Create fails partway</h2>
   <p>kiac tears down the half-created node VMs automatically (you will see <code>cleaned up partial cluster "dev"</code>), so just fix the cause and re-run. Common causes:</p>
@@ -78,20 +83,44 @@ kiac create cluster --name dev --workers 2</code></pre>
 
   <h2 id="pending-ip">LoadBalancer EXTERNAL-IP stays &lt;pending&gt;</h2>
   <ul>
-    <li>Created with <code>--no-lb</code>? MetalLB is not installed; there is nothing to assign IPs.</li>
-    <li>Check the pools exist: <code>kubectl get ipaddresspools -n metallb-system</code>. If the pool step failed at create time, kiac says so in the create output (the cluster still works otherwise).</li>
+    <li>Created with <code>--no-lb</code>? Nothing is installed to assign IPs.</li>
+    <li>On kubeadm clusters, kiac-lb assigns IPs within seconds. If a Service stays pending, read the controller's logs from inside the control-plane VM: <code>container exec kiac-dev-control-plane journalctl -u kiac-lb</code>. A "no conflict-free node IP" line means every eligible node IP already has that Service's ports claimed.</li>
+    <li>On <a href="k3s.html">k3s clusters</a>, k3s's bundled servicelb assigns the IPs after pulling its klipper-lb pod image inside the VM, so the first Service can take a minute or two; its pods are the <code>svclb-*</code> pods in <code>kube-system</code>.</li>
     <li>For Grafana specifically: <code>kubectl get svc -n kiac-observability grafana</code>; for the gateway: <code>kubectl get svc -n kiac-gateway traefik</code>.</li>
-    <li>After stopping and starting a node, its IP may have changed; <code>kiac start node &lt;node&gt; --name &lt;cluster&gt;</code> re-syncs the MetalLB pool and is safe to re-run. See <a href="node-chaos.html">Node chaos</a>.</li>
+    <li>A node that was stopped or restarted is handled automatically: kiac-lb re-points any ingress IP that stopped being an eligible node IP on its next pass (~3s). See <a href="networking.html#loadbalancer">Networking</a>.</li>
   </ul>
 
   <h2 id="top-unknown">kubectl top shows &lt;unknown&gt;</h2>
   <p>metrics-server needs about 60 seconds after cluster creation for its first scrape. If it never resolves, check the metrics-server pod in <code>kube-system</code>.</p>
 
-  <h2 id="cni-error">"flannel/calico/cilium needs kernel features"</h2>
-  <pre><code><span class="o">Error: cilium needs kernel features (br_netfilter, VXLAN, eBPF) that Apple's stock
-node kernel does not enable; use kindnet, or --cni none with a custom kernel
-(tracked on the roadmap)</span></code></pre>
-  <p>Not a bug: Apple's minimal node kernel ships without those features. kindnet is the supported CNI today; the full story is in <a href="networking.html">Networking</a>.</p>
+  <h2 id="cilium-prereqs">Cilium preflight errors</h2>
+  <p>Both Cilium prerequisites are checked before any VM boots, so these cost seconds, not minutes:</p>
+  <pre><code><span class="o">Error: --cni cilium needs the full node kernel: add --kernel full (or a --kernel path)</span>
+<span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span></code></pre>
+  <p>The fixes are literal: add <code>--kernel full</code>, and <code>brew install cilium-cli</code>. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
+
+  <h2 id="cni-error">"flannel/calico needs kernel features"</h2>
+  <pre><code><span class="o">Error: flannel needs kernel features the stock node kernel does not enable; use
+--cni cilium with --kernel full, or --cni none to bring your own</span></code></pre>
+  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle flannel or Calico manifests. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
+
+  <h2 id="kernel-download">Kernel downloads and the ~/.kiac cache</h2>
+  <p><code>--kernel full</code> downloads the published kernel release asset (about 15MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
+  <ul>
+    <li>A <code>sha256 mismatch</code> error means the download was corrupted (or the cache tampered with); the file is discarded, just re-run.</li>
+    <li>Deleting <code>~/.kiac</code> is always safe; kiac re-downloads and re-verifies on the next create.</li>
+    <li>Offline? The first <code>--kernel full</code> or <code>--distro k3s</code> create needs the network once; after that the cache serves.</li>
+  </ul>
+
+  <h2 id="restarted-node-tcp">Restarted node VM unreachable from the Mac</h2>
+  <p>Known limitation in apple/container 1.0's vmnet handling: after <code>kiac stop node</code> + <code>kiac start node</code>, the restarted VM serves <b>in-cluster</b> traffic normally, but <b>host-to-that-VM</b> TCP connections are dropped. Symptoms: pods on the node are fine and other nodes reach it, but curling a NodePort or LoadBalancer IP on that specific node from your Mac hangs.</p>
+  <ul>
+    <li>Traffic through the other nodes' IPs is unaffected; kiac-lb prefers pod-local IPs, so re-creating the pod on another node (or just deleting the pod and letting it reschedule) usually restores host access.</li>
+    <li>A full reboot plus <code>kiac resume cluster</code> does <b>not</b> hit this; it is specific to restarting a single VM while the container system service keeps running.</li>
+  </ul>
+
+  <h2 id="slow-bulk">Cross-node bulk transfers are slow</h2>
+  <p>Expected on routed CNIs (kindnet): cross-node pod traffic takes vmnet's slow forwarded path. Control traffic and ordinary dev workloads are fine; bulk data transfers are where it shows. <code>--cni cilium --kernel full</code> avoids it entirely via the vxlan overlay (~285MB/s cross-node measured). See <a href="networking.html#fast-slow">Networking</a>.</p>
 
   <h2 id="gateway-no-lb">"--gateway needs the built-in LoadBalancer"</h2>
   <p><code>--gateway</code> exposes Traefik through a <code>type: LoadBalancer</code> Service, so it cannot be combined with <code>--no-lb</code>. Drop <code>--no-lb</code>.</p>

@@ -29,12 +29,17 @@
     <a class="on" href="config-file.html">Config file</a>
     <a href="cli-reference.html">CLI reference</a>
   </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
     <a href="dashboard.html">Dashboard (kiac ui)</a>
     <a href="troubleshooting.html">Troubleshooting</a>
   </div>
@@ -57,14 +62,14 @@ k8sVersion: "1.36"   <span class="c"># Kubernetes minor ("1.36") or exact patch 
 <span class="c"># image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion</span>
 cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
 cpus: "4"            <span class="c"># vCPUs per node VM (quote it: YAML reads bare 4 as a number)</span>
-memory: 4G           <span class="c"># memory per node VM</span>
+memory: 4G           <span class="c"># memory per worker VM</span>
 wait: 5m             <span class="c"># timeout for nodes to become Ready</span>
 
 <span class="c"># Addons are positive toggles; omitted keys keep the defaults shown.</span>
 addons:
   metrics: true          <span class="c"># metrics-server (kubectl top nodes/pods)</span>
   storage: true          <span class="c"># local-path default StorageClass</span>
-  loadBalancer: true     <span class="c"># MetalLB, Services of type LoadBalancer</span>
+  loadBalancer: true     <span class="c"># kiac-lb, Services of type LoadBalancer</span>
   observability: false   <span class="c"># Prometheus + Grafana + node-exporter</span>
   gateway: false         <span class="c"># Gateway API CRDs + Traefik</span></code></pre>
 
@@ -77,7 +82,8 @@ addons:
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
-    <tr><td><code>memory</code></td><td>string</td><td><code>4G</code></td><td><code>--memory</code></td></tr>
+    <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>
+    <tr><td><code>cpMemory</code></td><td>string</td><td><code>4G</code></td><td><code>--cp-memory</code> (control-plane VM)</td></tr>
     <tr><td><code>wait</code></td><td>duration string (<code>5m</code>, <code>90s</code>)</td><td><code>5m</code></td><td><code>--wait</code></td></tr>
     <tr><td><code>addons.metrics</code></td><td>bool</td><td><code>true</code></td><td><code>--no-metrics</code> (inverted)</td></tr>
     <tr><td><code>addons.storage</code></td><td>bool</td><td><code>true</code></td><td><code>--no-storage</code> (inverted)</td></tr>
@@ -91,6 +97,7 @@ addons:
     <li>Addon keys are positive (<code>storage: true</code>) even though the flags are negative (<code>--no-storage</code>); kiac maps between them.</li>
     <li>Quote <code>cpus</code>: YAML parses a bare <code>4</code> as a number, and the field is a string.</li>
     <li>An empty file is valid and means "all defaults".</li>
+    <li><code>--distro</code> and <code>--kernel</code> are <b>not config file keys yet</b>; pass them on the command line (they compose with <code>--config</code> for everything else).</li>
   </ul>
 
   <h2 id="precedence">Precedence</h2>

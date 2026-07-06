@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cilium &amp; the full kernel · kiac docs</title>
+<meta name="description" content="kiac create cluster --cni cilium --kernel full: prerequisites, what the full kernel adds, the vmnet performance story, and a full HTTPRoute walkthrough.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a class="on" href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Distros &amp; kernels</div>
+  <h1>Cilium &amp; the full kernel</h1>
+  <p class="lede">Apple's stock node kernel cannot run Cilium. kiac ships a published, sha-pinned kernel build that can, and one flag pair boots your nodes on it and drives the official Cilium installer.</p>
+
+  <pre><code>kiac create cluster --name dev --workers 2 --cni cilium --kernel full</code></pre>
+
+  <h2 id="prereqs">Prerequisites</h2>
+  <table>
+    <tr><th>Requirement</th><th>Detail</th></tr>
+    <tr><td><code>cilium</code> CLI on your Mac</td><td><code>brew install cilium-cli</code>. kiac drives the official installer; if the binary is missing, create fails with exactly that hint <em>before</em> any VM boots.</td></tr>
+    <tr><td><code>--kernel full</code> (or a <code>--kernel</code> path)</td><td>Cilium's eBPF datapath needs kernel features the stock node kernel lacks; <code>--cni cilium</code> without a kernel is refused up front rather than producing agents in a crash loop.</td></tr>
+    <tr><td>kubeadm distro</td><td>This is the default; <code>--cni</code> (and with it the Cilium path) does not apply to <a href="k3s.html">--distro k3s</a>.</td></tr>
+  </table>
+
+  <h2 id="kernel">What --kernel full is</h2>
+  <p>Node VMs normally boot the runtime's default kernel: a minimal, monolithic build with no module loading and no VXLAN, <code>br_netfilter</code>, or eBPF JIT. <code>--kernel full</code> swaps in a kernel kiac builds in CI (<code>.github/workflows/kernel-build.yml</code>) from two pinned inputs: Apple's containerization base config and kiac's <code>kernel/config-full</code> fragment. On top of the base it enables:</p>
+  <ul>
+    <li><b>VXLAN and Geneve</b>: overlay datapaths (Cilium's tunnel mode, flannel's vxlan backend).</li>
+    <li><b>br_netfilter and nf_tables</b>: bridged traffic steered through iptables/nftables, which bridge-based CNIs assume.</li>
+    <li><b>BPF JIT and BTF</b>: the eBPF machinery Cilium's datapath loads.</li>
+    <li><b>WireGuard</b> and <b>kprobes</b>: transparent encryption and the tracing hooks tools like Hubble and Tetragon build on.</li>
+  </ul>
+  <p>The kernel stays monolithic with zero loadable modules, matching Apple's model, and its version (6.12.28) matches the kernel apple/container 1.0.0 boots by default, minimizing guest ABI drift.</p>
+  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 15MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
+  <pre><code>kiac create cluster --kernel full                 <span class="c"># full kernel, default kindnet CNI</span>
+kiac create cluster --kernel full --cni cilium    <span class="c"># full kernel + Cilium</span>
+kiac create cluster --kernel full --cni none      <span class="c"># full kernel, bring your own CNI</span></code></pre>
+
+  <h2 id="performance">The performance story</h2>
+  <p>vmnet, the macOS network kiac nodes live on, has a fast path and a slow path. Frames addressed to a VM's own IP are delivered fast; packets that have to be forwarded between VMs (as routed CNIs like kindnet do for bulk cross-node pod traffic) take a much slower path.</p>
+  <p>Cilium's vxlan tunnel datapath sidesteps this: cross-node pod traffic is encapsulated in packets addressed to the destination <em>node's</em> IP, which rides the fast path. Measured on this stack:</p>
+  <ul>
+    <li>Cross-node pod-to-pod bulk transfer: <b>~285MB/s</b>.</li>
+    <li>Mac-to-pod: <b>~1GB/s</b>.</li>
+  </ul>
+  <p>On the stock kernel with a routed CNI, the same bulk transfers crawl through vmnet's forwarded path. The full <a href="networking.html">Networking</a> page tells the fast/slow path story in detail.</p>
+  <p>Cilium also brings real <b>NetworkPolicy enforcement</b> to kiac clusters, which kindnet does not do; the eBPF datapath is the actual production datapath, not a simulation.</p>
+
+  <h2 id="walkthrough">Full walkthrough</h2>
+  <p><b>1. Install the prerequisite and create the cluster.</b> The addon flags compose: this exact command (Cilium + observability + Gateway API) builds the whole stack in about 1m37s on an M-series machine, kernel download included on the first run.</p>
+  <pre><code>brew install cilium-cli
+kiac create cluster --name dev --workers 2 --cni cilium --kernel full --observability --gateway</code></pre>
+  <p>The kernel is fetched and verified before anything boots (cached after the first run), the VMs boot on it, and the <code>Installing CNI (Cilium)</code> step runs <code>cilium install --wait</code> against the new cluster.</p>
+  <p><b>2. Check Cilium.</b> The same CLI kiac used is yours to drive:</p>
+  <pre><code>cilium status --wait
+kubectl get nodes -o wide           <span class="c"># all Ready on the Cilium datapath</span>
+kubectl -n kube-system get pods -l k8s-app=cilium</code></pre>
+  <p><b>3. Deploy something and route to it.</b> With <code>--gateway</code> on, the Gateway API CRDs, Traefik, and a default Gateway (<code>kiac</code> in <code>kiac-gateway</code>) are already accepted, so an HTTPRoute is all you write:</p>
+  <pre><code>kubectl create deployment web --image=nginx
+kubectl expose deployment web --port=80
+
+cat &lt;&lt;'EOF' | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+spec:
+  parentRefs:
+    - name: kiac
+      namespace: kiac-gateway
+  hostnames: ["web.local"]
+  rules:
+    - backendRefs:
+        - name: web
+          port: 80
+EOF</code></pre>
+  <p><b>4. Curl it from your Mac.</b></p>
+  <pre><code>GW=$(kubectl get svc traefik -n kiac-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -H "Host: web.local" http://$GW/
+<span class="o">&lt;!DOCTYPE html&gt; ... Welcome to nginx! ...</span></code></pre>
+  <p><b>5. Try a NetworkPolicy.</b> Something kindnet clusters cannot do:</p>
+  <pre><code>cat &lt;&lt;'EOF' | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-web
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  policyTypes: [Ingress]
+EOF
+curl -m 3 -H "Host: web.local" http://$GW/   <span class="c"># times out: Cilium enforces the policy</span>
+kubectl delete networkpolicy deny-web</code></pre>
+  <p>With <code>--observability</code> on, Grafana is on its own LoadBalancer IP (port 3000) next to the gateway; the create output prints both URLs.</p>
+
+  <h2 id="details">Operational details</h2>
+  <ul>
+    <li>Both prerequisites are checked before any VM boots, so a missing <code>cilium</code> binary or kernel costs seconds, not minutes.</li>
+    <li>The kernel cache lives at <code>~/.kiac/kernels/</code>; deleting it just triggers a fresh verified download next time.</li>
+    <li><code>--cni flannel</code> and <code>--cni calico</code> are not wired up: they fail fast with a pointer to <code>--cni cilium</code> or <code>--cni none</code> (bring your own on the full kernel).</li>
+    <li><code>--kernel</code> and <code>--distro</code> are CLI flags only for now; they are not <a href="config-file.html">config file</a> keys yet.</li>
+  </ul>
+
+  <div class="pn">
+    <a href="k3s.html"><span>Previous</span>k3s distro</a>
+    <a class="next" href="observability.html"><span>Next</span>Observability</a>
+  </div>
+</main>
+</div>
+</body>
+</html>
