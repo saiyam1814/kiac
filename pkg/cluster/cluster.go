@@ -6,6 +6,7 @@ package cluster
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +86,17 @@ func (m *Manager) Create(cfg Config) error {
 	existing, err := m.rt.List(prefix(cfg.Name))
 	if err == nil && len(existing) > 0 {
 		return fmt.Errorf("cluster %q already exists; delete it first with: kiac delete cluster --name %s", cfg.Name, cfg.Name)
+	}
+
+	// Fail cilium prerequisites before any VM boots, not minutes later
+	// when the CNI step runs.
+	if cfg.CNI == "cilium" {
+		if cfg.Kernel == "" {
+			return fmt.Errorf("--cni cilium needs the full node kernel: add --kernel full (or a --kernel path)")
+		}
+		if _, err := exec.LookPath("cilium"); err != nil {
+			return fmt.Errorf("--cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli")
+		}
 	}
 
 	if err := ui.Step("Preflight checks", func() error { return m.preflight() }); err != nil {
@@ -295,9 +307,9 @@ func (m *Manager) Create(cfg Config) error {
 }
 
 // installCNI applies the selected pod network. kindnet ships inside the
-// node image; flannel is embedded with a host-gw backend (the node
-// kernel has no VXLAN). "none" skips installation for BYO CNIs like
-// Calico or Cilium, whose own installers handle kernel feature checks.
+// node image; cilium requires the full custom kernel (--kernel full)
+// and the cilium CLI on the host; "none" skips installation for other
+// BYO CNIs.
 func (m *Manager) installCNI(cp string, cfg Config) error {
 	switch cfg.CNI {
 	case "", "kindnet":
@@ -306,14 +318,54 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 				`sed -e 's@{{ .PodSubnet }}@10.244.0.0/16@' /kind/manifests/default-cni.yaml | kubectl --kubeconfig `+adminConf+` apply -f -`)
 			return err
 		})
-	case "flannel", "calico", "cilium":
-		return fmt.Errorf("%s needs kernel features (br_netfilter, VXLAN, eBPF) that Apple's stock node kernel does not enable; use kindnet, or --cni none with a custom kernel (tracked on the roadmap)", cfg.CNI)
+	case "cilium":
+		return m.installCilium(cp, cfg)
+	case "flannel", "calico":
+		return fmt.Errorf("%s needs kernel features the stock node kernel does not enable; use --cni cilium with --kernel full, or --cni none to bring your own", cfg.CNI)
 	case "none":
 		ui.Infof("skipping CNI: install your own before nodes go Ready (note: the stock kernel lacks br_netfilter/VXLAN/eBPF)")
 		return nil
 	default:
-		return fmt.Errorf("unknown --cni %q (supported: kindnet, none)", cfg.CNI)
+		return fmt.Errorf("unknown --cni %q (supported: kindnet, cilium, none)", cfg.CNI)
 	}
+}
+
+// installCilium drives the host's cilium CLI (the official installer)
+// against a temporary kubeconfig for the new cluster. Cilium's eBPF
+// datapath needs the full custom kernel; the stock node kernel has no
+// BPF JIT, VXLAN, or br_netfilter, so this path refuses to proceed
+// without one rather than produce agents in a crash loop. Bonus of the
+// vxlan tunnel datapath: cross-node pod traffic rides node-IP-addressed
+// packets, which take vmnet's fast path (~285MB/s measured) instead of
+// the slow forwarded path that punishes routed CNIs.
+func (m *Manager) installCilium(cp string, cfg Config) error {
+	if cfg.Kernel == "" {
+		return fmt.Errorf("--cni cilium needs the full node kernel: add --kernel full (or a --kernel path)")
+	}
+	if _, err := exec.LookPath("cilium"); err != nil {
+		return fmt.Errorf("--cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli")
+	}
+	return ui.Step("Installing CNI (Cilium)", func() error {
+		raw, err := m.rt.Exec(cp, "cat", adminConf)
+		if err != nil {
+			return err
+		}
+		ip, err := m.rt.IP(cp)
+		if err != nil {
+			return err
+		}
+		kubeconfig, err := writeTempKubeconfig(cfg.Name, raw, ip)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(kubeconfig)
+		cmd := exec.Command("cilium", "install", "--wait")
+		cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cilium install: %w\n%s", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	})
 }
 
 // preflight validates the host before any VM is booted.

@@ -58,6 +58,27 @@ func rewriteAdminConf(name, adminConf, serverIP string) (cluster0, user0, contex
 	return cluster0, user0, context, nil
 }
 
+// writeTempKubeconfig materializes a standalone kubeconfig for host
+// tools (like the cilium installer) that need the cluster before its
+// context is merged into ~/.kube/config at the end of Create. The
+// caller removes the file.
+func writeTempKubeconfig(name, adminConf, serverIP string) (string, error) {
+	content, err := standaloneKubeconfig(name, adminConf, serverIP)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp("", "kiac-kubeconfig-*")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), f.Close()
+}
+
 // standaloneKubeconfig renders a self-contained kubeconfig for one
 // cluster, e.g. for download from the UI.
 func standaloneKubeconfig(name, adminConf, serverIP string) (string, error) {
