@@ -17,16 +17,18 @@ const adminConf = "/etc/kubernetes/admin.conf"
 
 // Config describes a cluster to create.
 type Config struct {
-	Name        string
-	Workers     int
-	Image       string
-	CPUs        string
-	Memory      string
-	CNI         string
-	NoMetrics   bool
-	NoStorage   bool
-	NoLB        bool
-	WaitTimeout time.Duration
+	Name          string
+	Workers       int
+	Image         string
+	CPUs          string
+	Memory        string
+	CNI           string
+	NoMetrics     bool
+	NoStorage     bool
+	NoLB          bool
+	Observability bool
+	Gateway       bool
+	WaitTimeout   time.Duration
 }
 
 // Manager orchestrates cluster lifecycle on top of the container runtime.
@@ -225,6 +227,20 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	} else if !cfg.NoLB {
 		ui.Infof("LoadBalancer pool deferred: apply an IPAddressPool after your CNI is up")
+	}
+
+	// Optional addons ride after the LB pool: both expose Services of
+	// type LoadBalancer and want an EXTERNAL-IP assignable immediately.
+	// Failures degrade the cluster rather than tearing it down.
+	if cfg.Observability && cfg.CNI != "none" {
+		if err := m.installObservability(cp, cfg); err != nil {
+			ui.Infof("observability stack not installed: %v", err)
+		}
+	}
+	if cfg.Gateway && cfg.CNI != "none" {
+		if err := m.installGateway(cp, cfg); err != nil {
+			ui.Infof("gateway stack not installed: %v", err)
+		}
 	}
 
 	var kubeconfigPath string

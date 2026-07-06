@@ -250,6 +250,18 @@ func firstString(m map[string]any, paths ...string) string {
 }
 
 // Remove force-deletes containers, ignoring not-found errors.
+// Stop halts a running node VM; the container and its state remain.
+func (c *Client) Stop(name string) error {
+	_, err := c.run("stop", name)
+	return err
+}
+
+// Start boots a previously stopped node VM.
+func (c *Client) Start(name string) error {
+	_, err := c.run("start", name)
+	return err
+}
+
 func (c *Client) Remove(names ...string) error {
 	if len(names) == 0 {
 		return nil
