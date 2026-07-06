@@ -31,7 +31,7 @@ var kernelAssets = map[string]kernelAsset{
 	// config; see kernel/config-full.
 	"full": {
 		URL:    "https://github.com/saiyam1814/kiac/releases/download/kernel-v6.12.28-full/kiac-kernel-6.12.28-full",
-		SHA256: "", // filled in by the first kernel-build release; downloads are blocked until then
+		SHA256: "764f036ca633192788cc65fd515a09e3a0242b32599805b0478751ec71355f47",
 		File:   "kiac-kernel-6.12.28-full",
 	},
 }
