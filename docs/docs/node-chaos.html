@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node chaos · kiac docs</title>
+<meta name="description" content="kiac stop node and start node: real node failure with NotReady detection, rescheduling, and MetalLB IP re-sync.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a class="on" href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Day two</div>
+  <h1>Node chaos</h1>
+  <p class="lede">Because every node is its own VM, stopping one is a real node failure: the kernel goes away, the kubelet goes silent, and the control plane reacts exactly like it would in production.</p>
+
+  <h2 id="stop">Stopping a node</h2>
+  <pre><code>kiac stop node worker-1 --name dev</code></pre>
+  <p>The node argument accepts the short name (<code>worker-1</code>, <code>control-plane</code>) or the full container name (<code>kiac-dev-worker-1</code>). The VM halts; the container and its state remain, ready to boot again.</p>
+  <p><b>What to watch</b>, in a second terminal:</p>
+  <pre><code>kubectl get nodes -w                <span class="c"># the node flips Ready -> NotReady</span>
+kubectl get pods -o wide -w         <span class="c"># its pods get evicted and land on survivors</span>
+kubectl get events --sort-by=.lastTimestamp   <span class="c"># NodeNotReady, TaintManagerEviction, Scheduled</span></code></pre>
+  <p>Expected timeline with stock Kubernetes defaults: the node goes <code>NotReady</code> within about a minute (when its kubelet lease expires), and pods with the default tolerations are evicted and rescheduled about five minutes after that (<code>node.kubernetes.io/unreachable</code> toleration, 300s). Deployments recover; naked pods do not, which is exactly the lesson.</p>
+  <p>If you created the cluster with <code>--observability</code>, open the <b>Nodes</b> Grafana dashboard and watch the stopped node's lines flatline while the survivors' pod counts climb.</p>
+  <p>Guard rails:</p>
+  <ul>
+    <li>Stopping the control plane of a <b>single-node</b> cluster is refused; there would be no surviving node to observe anything.</li>
+    <li>Stopping the control plane of a multi-node cluster proceeds with a warning: the API server (and kubectl) is down until you start it again.</li>
+  </ul>
+
+  <h2 id="start">Starting it again</h2>
+  <pre><code>kiac start node worker-1 --name dev
+kubectl get nodes -w    <span class="c"># watch it rejoin</span></code></pre>
+  <p>The VM boots, the kubelet re-registers, and the node returns to <code>Ready</code>. Two behaviors worth knowing:</p>
+  <h3 id="ip-resync">MetalLB IP re-sync</h3>
+  <p>vmnet may hand the VM a <b>different IP</b> on restart. The kubelet re-registers itself with the new address automatically, but the MetalLB per-node <code>IPAddressPool</code> (<code>kiac-ip-&lt;node&gt;</code>) would still pin the old one, leaving LoadBalancer Services pointing at an address nothing routes to. So <code>kiac start node</code> finishes by rewriting that node's pool with its current IP, retrying while the cluster settles (the MetalLB webhook itself may be recovering from the very outage being healed).</p>
+  <p>If the re-sync fails, kiac says so and the failure only degrades LoadBalancer coverage, nothing else.</p>
+  <h3 id="idempotent">Idempotent start</h3>
+  <p><code>kiac start node</code> on an already-running node skips the boot and just re-runs the MetalLB pool re-sync. That makes it the natural retry whenever the first sync raced MetalLB's own recovery:</p>
+  <pre><code>kiac start node worker-1 --name dev    <span class="c"># safe to run again any time</span></code></pre>
+
+  <h2 id="ideas">Failure drills to try</h2>
+  <ul>
+    <li>Deploy 6 replicas across 2 workers, stop one worker, and time how long until all 6 serve traffic again.</li>
+    <li>Put a PVC-backed pod on a node and stop that node: local-path volumes are node-local, so watch the pod stay Pending and reason about why.</li>
+    <li>Stop the node that holds the EXTERNAL-IP of a LoadBalancer Service and watch what happens to traffic; then start it and confirm the IP re-sync.</li>
+    <li>On a 3-node cluster, stop the control plane and observe that workloads keep serving while <code>kubectl</code> fails: the data plane outlives the control plane.</li>
+  </ul>
+  <p>The <a href="dashboard.html">dashboard</a> has per-node Stop/Start buttons that shell out to these same commands.</p>
+
+  <div class="pn">
+    <a href="gateway-api.html"><span>Previous</span>Gateway API</a>
+    <a class="next" href="dashboard.html"><span>Next</span>Dashboard (kiac ui)</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

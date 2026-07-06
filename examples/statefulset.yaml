@@ -1,0 +1,88 @@
+# StatefulSet example: persistent volumes via volumeClaimTemplates.
+#
+# Demonstrates the bundled local-path default StorageClass (installed
+# unless you pass --no-storage). Each replica gets its own
+# PersistentVolumeClaim, provisioned dynamically on the node VM's disk,
+# and the data survives pod restarts.
+#
+# Run it:
+#
+#   kiac create cluster --workers 2
+#   kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/statefulset.yaml
+#   kubectl get pvc                # both PVCs go Bound once their pod schedules
+#   kubectl get pods -l app=notes  # notes-0 and notes-1
+#
+# Prove the data persists across a pod restart:
+#
+#   kubectl exec notes-0 -- sh -c 'echo hello > /data/note.txt'
+#   kubectl delete pod notes-0
+#   kubectl wait --for=condition=Ready pod/notes-0 --timeout=60s
+#   kubectl exec notes-0 -- cat /data/note.txt   # still says hello
+#
+# Clean up (volumeClaimTemplates PVCs are kept on delete by design, so
+# remove them explicitly):
+#
+#   kubectl delete -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/statefulset.yaml
+#   kubectl delete pvc -l app=notes
+apiVersion: v1
+kind: Service
+metadata:
+  name: notes
+  labels:
+    app: notes
+spec:
+  # Headless Service: StatefulSets need one for stable per-pod DNS
+  # (notes-0.notes.default.svc, notes-1.notes.default.svc).
+  clusterIP: None
+  selector:
+    app: notes
+  ports:
+    - name: http
+      port: 80
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: notes
+  labels:
+    app: notes
+spec:
+  serviceName: notes
+  replicas: 2
+  selector:
+    matchLabels:
+      app: notes
+  template:
+    metadata:
+      labels:
+        app: notes
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/nginx:1.29-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+  volumeClaimTemplates:
+    # No storageClassName: the default StorageClass (local-path
+    # provisioner from the node image) picks these up. The provisioner
+    # binds on first consumer, so a PVC shows Pending until its pod is
+    # scheduled; that is normal.
+    - metadata:
+        name: data
+        labels:
+          app: notes
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 100Mi

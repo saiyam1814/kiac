@@ -1,0 +1,71 @@
+# kiac cluster config with every knob set, used with:
+#
+#   kiac create cluster --config cluster-full.yaml
+#
+# Every key is optional; this file just spells all of them out. A flag
+# set explicitly on the command line beats the file value, so
+#
+#   kiac create cluster --config cluster-full.yaml --workers 1
+#
+# gives you this exact cluster with 1 worker instead of 3. Omitted keys
+# keep the CLI defaults. See examples/cluster.yaml for a minimal
+# starting point.
+
+# Cluster name: lowercase letters, digits, dashes. Node VMs are named
+# kiac-<name>-control-plane and kiac-<name>-worker-N. Default: dev.
+name: full
+
+# Worker node count. Each node is its own lightweight VM. With 0
+# workers the control plane is untainted and runs your pods. Default: 0.
+workers: 3
+
+# Kubernetes version: a supported minor ("1.32" through "1.36") or an
+# exact patch ("1.36.1"). Each minor is pinned to a tested
+# kindest/node image digest. Default: "1.36".
+k8sVersion: "1.36"
+
+# Node image, overrides k8sVersion entirely. Leave unset unless you
+# need a specific kindest/node build.
+# image: docker.io/kindest/node:v1.36.1
+
+# Pod network: kindnet (the default), or none to bring your own CNI.
+# The stock node kernel has no VXLAN/br_netfilter/BPF-JIT modules, so
+# flannel/calico/cilium need a custom kernel.
+cni: kindnet
+
+# Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
+cpus: "4"
+memory: 4G
+
+# Timeout for nodes to become Ready. Default: 5m.
+wait: 5m
+
+# Addons are positive toggles (true installs). The first three default
+# to true, the last two to false; everything is on here.
+addons:
+  # metrics-server: kubectl top nodes / kubectl top pods.
+  metrics: true
+
+  # local-path dynamic provisioner as the default StorageClass, so
+  # PVCs bind with no extra setup (see examples/statefulset.yaml).
+  storage: true
+
+  # MetalLB with a per-node IP pool: Services of type LoadBalancer get
+  # real EXTERNAL-IPs reachable from your Mac (see
+  # examples/loadbalancer.yaml). Required by observability and gateway.
+  loadBalancer: true
+
+  # Prometheus v3.5.0 + Grafana 12.0.2 + kube-state-metrics +
+  # node-exporter in namespace kiac-observability. Grafana gets a
+  # LoadBalancer IP on port 3000, anonymous admin, with two provisioned
+  # dashboards: Cluster Overview and Nodes. Pods annotated
+  # prometheus.io/scrape: "true" are scraped automatically (see
+  # examples/observability-scrape.yaml).
+  observability: true
+
+  # Gateway API v1.5.1 CRDs + Traefik v3.7.6 in namespace kiac-gateway,
+  # with GatewayClass "traefik" and a default Gateway "kiac" listening
+  # on HTTP :80 for routes from all namespaces (see
+  # examples/httproute.yaml). Grafana and Traefik share one
+  # LoadBalancer IP (ports 3000 vs 80/443).
+  gateway: true

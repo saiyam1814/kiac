@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gateway API · kiac docs</title>
+<meta name="description" content="The --gateway addon: Gateway API CRDs plus Traefik, with a full HTTPRoute walkthrough.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a class="on" href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Built-in addons</div>
+  <h1>Gateway API</h1>
+  <p class="lede">One flag installs the Gateway API CRDs and Traefik with a GatewayClass and a default Gateway already accepted, so a plain <code>kubectl apply</code> of an HTTPRoute routes traffic with zero extra setup.</p>
+
+  <pre><code>kiac create cluster --name dev --workers 2 --gateway</code></pre>
+
+  <h2 id="whats-installed">What gets installed</h2>
+  <table>
+    <tr><th>Piece</th><th>Detail</th></tr>
+    <tr><td>Gateway API CRDs</td><td>v1.5.1, experimental channel, vendored from the upstream release</td></tr>
+    <tr><td>Traefik</td><td>v3.7.6, Deployment in namespace <code>kiac-gateway</code>, <code>type: LoadBalancer</code> Service on ports 80/443</td></tr>
+    <tr><td>GatewayClass</td><td><code>traefik</code> (controller <code>traefik.io/gateway-controller</code>)</td></tr>
+    <tr><td>Gateway</td><td><code>kiac</code> in namespace <code>kiac-gateway</code>: HTTP listener on port 80, accepting routes from <b>all namespaces</b></td></tr>
+  </table>
+  <p>Why the experimental CRD channel? Traefik v3.7's Gateway provider unconditionally watches TLSRoute and BackendTLSPolicy, which the standard channel does not install; without them the GatewayClass never goes Accepted. The experimental install is a superset of the standard one, so standard resources behave identically.</p>
+  <p><code>--gateway</code> requires the built-in LoadBalancer: combining it with <code>--no-lb</code> is an error. At the end of create, kiac prints the address:</p>
+  <pre><code><span class="o">Gateway API ready: http://192.168.64.3 (GatewayClass traefik, Gateway kiac-gateway/kiac)</span></code></pre>
+
+  <h2 id="walkthrough">Full HTTPRoute walkthrough</h2>
+  <p><b>1. Deploy something to route to.</b></p>
+  <pre><code>kubectl create deployment web --image=nginx
+kubectl expose deployment web --port=80    <span class="c"># plain ClusterIP; the Gateway does the exposing</span></code></pre>
+  <p><b>2. Apply an HTTPRoute.</b> The only kiac-specific part is the <code>parentRefs</code>, which attach the route to the default Gateway:</p>
+  <pre><code>cat &lt;&lt;'EOF' | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+spec:
+  parentRefs:
+    - name: kiac
+      namespace: kiac-gateway
+  hostnames: ["web.local"]
+  rules:
+    - backendRefs:
+        - name: web
+          port: 80
+EOF</code></pre>
+  <p><b>3. Check the route attached.</b></p>
+  <pre><code>kubectl get httproute web
+kubectl get gateway kiac -n kiac-gateway   <span class="c"># ADDRESS shows the LoadBalancer IP</span></code></pre>
+  <p><b>4. Curl it.</b> Grab the Gateway address and send the Host header the route matches on:</p>
+  <pre><code>GW=$(kubectl get svc traefik -n kiac-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -H "Host: web.local" http://$GW/
+<span class="o">&lt;!DOCTYPE html&gt; ... Welcome to nginx! ...</span></code></pre>
+  <p>Prefer a real hostname in the browser? Map it in <code>/etc/hosts</code>:</p>
+  <pre><code>echo "$GW web.local" | sudo tee -a /etc/hosts
+curl http://web.local/</code></pre>
+  <p>Path matching, header matching, traffic splitting, and everything else in the <a href="https://gateway-api.sigs.k8s.io/">Gateway API spec</a> work the same way; kiac only pre-creates the Gateway so you can start at the HTTPRoute.</p>
+
+  <h2 id="details">Operational details</h2>
+  <ul>
+    <li>The default Gateway accepts routes from every namespace (<code>allowedRoutes.namespaces.from: All</code>), so HTTPRoutes work from wherever your app lives.</li>
+    <li>Traefik publishes its Service's LoadBalancer address into the Gateway's status, so <code>kubectl get gateway</code> shows the same IP the Service has.</li>
+    <li>The Traefik Service shares its node IP with Grafana via <code>metallb.io/allow-shared-ip</code> when <code>--observability</code> is also on (ports 80/443 vs 3000).</li>
+    <li>The HTTPS listener port 443 is exposed on the Service, but the default Gateway defines only the HTTP listener; add your own listener plus certificates for TLS.</li>
+    <li>If the gateway install fails, kiac logs it and keeps the cluster running rather than tearing it down.</li>
+    <li>Enable via config file instead of the flag: <code>addons.gateway: true</code>. See <a href="config-file.html">Config file</a>.</li>
+  </ul>
+
+  <div class="pn">
+    <a href="observability.html"><span>Previous</span>Observability</a>
+    <a class="next" href="node-chaos.html"><span>Next</span>Node chaos</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

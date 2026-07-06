@@ -1,0 +1,127 @@
+# Observability example: get your own app's metrics into the bundled
+# Prometheus with two pod annotations.
+#
+# The --observability addon runs Prometheus with a "pods" scrape job
+# that discovers every pod annotated prometheus.io/scrape: "true" and
+# scrapes prometheus.io/port (path defaults to /metrics; override with
+# prometheus.io/path). Scrape interval is 30s.
+#
+# The app here is nginx plus the official nginx-prometheus-exporter
+# sidecar, which turns nginx's stub_status into Prometheus metrics
+# (nginx_http_requests_total, nginx_connections_active, ...).
+#
+# Run it:
+#
+#   kiac create cluster --workers 2 --observability
+#   kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/observability-scrape.yaml
+#
+# Generate a little traffic so the counters move:
+#
+#   kubectl run traffic --image=docker.io/nginx:1.29-alpine --restart=Never --rm -it -- \
+#     sh -c 'for i in $(seq 20); do wget -q -O /dev/null http://scrapeme; done; echo done'
+#
+# See it in Grafana (URL is printed at cluster create; anonymous admin):
+#
+#   GRAFANA_IP=$(kubectl get svc grafana -n kiac-observability -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+#   open "http://$GRAFANA_IP:3000/explore"
+#
+# In Explore, pick the Prometheus datasource and query:
+#
+#   rate(nginx_http_requests_total{pod=~"scrapeme.*"}[2m])
+#
+# Within a scrape interval or two the series appears, labelled with the
+# pod and namespace that produced it. Clean up:
+#
+#   kubectl delete -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/observability-scrape.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scrapeme-nginx-conf
+  labels:
+    app: scrapeme
+data:
+  # Minimal server that also exposes stub_status on :8080 for the
+  # exporter sidecar (localhost-only via the pod network namespace).
+  default.conf: |
+    server {
+      listen 80;
+      location / {
+        return 200 'hello from scrapeme\n';
+      }
+    }
+    server {
+      listen 8080;
+      location /stub_status {
+        stub_status;
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scrapeme
+  labels:
+    app: scrapeme
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scrapeme
+  template:
+    metadata:
+      labels:
+        app: scrapeme
+      # These two lines are the whole integration: the bundled
+      # Prometheus keeps any pod with scrape=true and pulls
+      # http://<pod-ip>:9113/metrics every 30s.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9113"
+    spec:
+      containers:
+        - name: nginx
+          image: docker.io/nginx:1.29-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+        - name: exporter
+          # Official multi-arch exporter; serves /metrics on :9113.
+          image: docker.io/nginx/nginx-prometheus-exporter:1.4.2
+          args:
+            - --nginx.scrape-uri=http://127.0.0.1:8080/stub_status
+          ports:
+            - name: metrics
+              containerPort: 9113
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: conf
+          configMap:
+            name: scrapeme-nginx-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scrapeme
+  labels:
+    app: scrapeme
+spec:
+  selector:
+    app: scrapeme
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

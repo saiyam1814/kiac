@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contributing · kiac docs</title>
+<meta name="description" content="How to contribute to kiac: dev setup, project layout, and where to find issues.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a class="on" href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Project</div>
+  <h1>Contributing</h1>
+  <p class="lede">kiac is a young project and PRs land fast. Issues are scoped with context and acceptance criteria so you can pick one up cold.</p>
+
+  <h2 id="find-work">Find something to work on</h2>
+  <ul>
+    <li>Browse the <a href="https://github.com/saiyam1814/kiac/issues">open issues</a>; anything unassigned is up for grabs.</li>
+    <li>New to the codebase? Filter by the <a href="https://github.com/saiyam1814/kiac/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">good first issue</a> label.</li>
+    <li>Have an idea that is not filed yet? Open an issue first for anything non-trivial, so the approach is agreed before the code exists.</li>
+  </ul>
+
+  <h2 id="setup">Dev setup</h2>
+  <pre><code>git clone https://github.com/saiyam1814/kiac
+cd kiac
+make build          <span class="c"># builds bin/kiac with the version stamped in</span>
+make test           <span class="c"># go test ./...</span>
+make lint           <span class="c"># go vet ./...</span>
+./bin/kiac doctor</code></pre>
+  <p>You need Go, plus the same runtime requirements as any user (Apple silicon, apple/container 1.0+). Unit tests run anywhere; actually creating clusters needs the real runtime.</p>
+
+  <h2 id="layout">Project layout</h2>
+  <table>
+    <tr><th>Path</th><th>What lives there</th></tr>
+    <tr><td><code>cmd/</code></td><td>cobra commands; deliberately thin shims over pkg/cluster</td></tr>
+    <tr><td><code>pkg/cluster/</code></td><td>cluster lifecycle: create, delete, addons, chaos, kubeconfig, status</td></tr>
+    <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, MetalLB, observability, gateway), versions pinned</td></tr>
+    <tr><td><code>pkg/runtime/</code></td><td>wrapper around the apple/container CLI</td></tr>
+    <tr><td><code>pkg/webui/</code></td><td>the local dashboard: Go handlers + one embedded HTML file</td></tr>
+    <tr><td><code>docs/</code></td><td>this website (GitHub Pages serves the <code>docs/</code> directory)</td></tr>
+    <tr><td><code>examples/</code></td><td>example configs like <code>cluster.yaml</code></td></tr>
+  </table>
+
+  <h2 id="expectations">What a good PR looks like</h2>
+  <ul>
+    <li>Unit tests for new behavior (<code>make test</code> passes; CI runs it too).</li>
+    <li>Pinned versions for anything new that gets embedded: manifests in <code>pkg/cluster/assets/</code> pin exact image tags, and node images pin digests.</li>
+    <li>Honest UX on failure: optional addons degrade the cluster rather than tearing it down, errors say what to do next. Keep that bar.</li>
+    <li>Docs updated when flags or behavior change (this site plus the README).</li>
+  </ul>
+
+  <div class="pn">
+    <a href="troubleshooting.html"><span>Previous</span>Troubleshooting</a>
+    <a class="next" href="index.html"><span>Docs home</span>Overview &amp; install</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

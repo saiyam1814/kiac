@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observability · kiac docs</title>
+<meta name="description" content="The --observability addon: Prometheus, Grafana with provisioned dashboards, kube-state-metrics, and node-exporter.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a class="on" href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Built-in addons</div>
+  <h1>Observability</h1>
+  <p class="lede">One flag installs a laptop-sized Prometheus and Grafana stack with dashboards already provisioned, on a URL you can open the moment create finishes.</p>
+
+  <pre><code>kiac create cluster --name dev --workers 2 --observability</code></pre>
+
+  <h2 id="whats-installed">What gets installed</h2>
+  <p>Everything lands in the <code>kiac-observability</code> namespace, from manifests embedded in the kiac binary (no Helm, no internet fetch at install time):</p>
+  <table>
+    <tr><th>Component</th><th>Version</th><th>Notes</th></tr>
+    <tr><td>Prometheus</td><td>v3.5.0</td><td>single replica, emptyDir storage, 6h retention, 30s scrape interval</td></tr>
+    <tr><td>Grafana</td><td>12.0.2</td><td><code>type: LoadBalancer</code> on port 3000, anonymous Admin, dashboards provisioned</td></tr>
+    <tr><td>kube-state-metrics</td><td>v2.16.0</td><td>object-level metrics (pods, phases, restarts)</td></tr>
+    <tr><td>node-exporter</td><td>v1.9.1</td><td>DaemonSet; per-node CPU, memory, disk, network</td></tr>
+  </table>
+  <p>Nothing in the stack needs kernel features beyond Apple's minimal node kernel; the exporters are <code>/proc</code> and <code>/sys</code> readers, no eBPF, no modules.</p>
+  <p>At the end of create, kiac prints the URL:</p>
+  <pre><code><span class="o">Grafana: http://192.168.64.3:3000 (anonymous admin, local-only)</span></code></pre>
+  <p>Find it again any time:</p>
+  <pre><code>kubectl get svc grafana -n kiac-observability
+<span class="c"># open http://&lt;EXTERNAL-IP&gt;:3000</span></code></pre>
+
+  <div class="warn"><b>Anonymous admin, on purpose</b>
+  Grafana runs with anonymous Admin access and basic auth disabled. kiac clusters are local-only dev tools reachable just from your Mac, so a login screen would only get in the way. Do not reuse these manifests anywhere routable.</div>
+
+  <h2 id="dashboards">The provisioned dashboards</h2>
+  <p>Two dashboards are provisioned from ConfigMaps, refreshed every 30s, wired to the bundled Prometheus datasource:</p>
+  <h3>Cluster Overview</h3>
+  <ul>
+    <li>Stat row: node count, running pods, pods not running, container restarts over the last hour.</li>
+    <li>Time series: node CPU usage, node memory usage, pods by phase, container restarts by pod.</li>
+  </ul>
+  <h3>Nodes</h3>
+  <ul>
+    <li>Per-node CPU usage, memory used, load average (1m), filesystem usage, network throughput (rx/tx), and pods per node.</li>
+  </ul>
+  <p>Both are great companions to <a href="node-chaos.html">node chaos</a>: stop a worker and watch its lines flatline while pods pile onto the survivors.</p>
+
+  <h2 id="scrape-targets">Adding your own scrape targets</h2>
+  <p>Prometheus runs a <code>pods</code> discovery job that scrapes any pod carrying the standard annotations. Annotate your pod template and you are in, no config reload needed:</p>
+  <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+      annotations:
+        prometheus.io/scrape: "true"   <span class="c"># required: opt this pod in</span>
+        prometheus.io/port: "8080"     <span class="c"># port serving metrics</span>
+        prometheus.io/path: "/metrics" <span class="c"># optional; /metrics is the default</span>
+    spec:
+      containers:
+        - name: myapp
+          image: myapp:dev
+          ports:
+            - containerPort: 8080</code></pre>
+  <p>Scraped series arrive with <code>namespace</code> and <code>pod</code> labels attached. The other preconfigured jobs are <code>node-exporter</code>, <code>kube-state-metrics</code>, <code>kubelet</code>, and <code>cadvisor</code> (container-level CPU/memory).</p>
+  <p>Prometheus itself is ClusterIP-only, reachable in-cluster at <code>prometheus.kiac-observability.svc:9090</code>. To poke at it from your Mac:</p>
+  <pre><code>kubectl port-forward -n kiac-observability svc/prometheus 9090:9090
+<span class="c"># open http://localhost:9090</span></code></pre>
+
+  <h2 id="details">Operational details</h2>
+  <ul>
+    <li>The stack expects the default MetalLB LoadBalancer. With <code>--no-lb</code> the Grafana Service never gets an EXTERNAL-IP and the install step fails (the cluster itself keeps working).</li>
+    <li>Grafana shares its node IP with the Traefik gateway via <code>metallb.io/allow-shared-ip</code> when both addons are on: ports 3000 and 80/443 do not overlap, so one worker IP is enough for both.</li>
+    <li>Storage is emptyDir with 6h retention: metrics restart from zero when the Prometheus pod does. Right-sized for a laptop, not for keeping history.</li>
+    <li>If an install step fails, kiac logs it and keeps the cluster; the observability stack degrades, the cluster does not tear down.</li>
+    <li>Enable via config file instead of the flag: <code>addons.observability: true</code>. See <a href="config-file.html">Config file</a>.</li>
+  </ul>
+
+  <div class="pn">
+    <a href="config-file.html"><span>Previous</span>Config file</a>
+    <a class="next" href="gateway-api.html"><span>Next</span>Gateway API</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

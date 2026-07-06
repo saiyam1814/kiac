@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Config file · kiac docs</title>
+<meta name="description" content="Declarative clusters with kiac create cluster --config: the YAML schema, precedence rules, and a full example.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a class="on" href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Core concepts</div>
+  <h1>Config file</h1>
+  <p class="lede">Describe the whole cluster in one YAML file and check it into your repo, so <code>kiac create cluster --config cluster.yaml</code> gives everyone on the team the same cluster.</p>
+
+  <pre><code>kiac create cluster --config cluster.yaml</code></pre>
+
+  <h2 id="example">Full example</h2>
+  <p>This is <a href="https://github.com/saiyam1814/kiac/blob/main/examples/cluster.yaml">examples/cluster.yaml</a> from the repo; every key is optional:</p>
+  <pre><code>name: dev            <span class="c"># cluster name: lowercase letters, digits, dashes</span>
+workers: 2           <span class="c"># worker node count; 0 untaints the control plane</span>
+k8sVersion: "1.36"   <span class="c"># Kubernetes minor ("1.36") or exact patch ("1.36.1")</span>
+<span class="c"># image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion</span>
+cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
+cpus: "4"            <span class="c"># vCPUs per node VM (quote it: YAML reads bare 4 as a number)</span>
+memory: 4G           <span class="c"># memory per node VM</span>
+wait: 5m             <span class="c"># timeout for nodes to become Ready</span>
+
+<span class="c"># Addons are positive toggles; omitted keys keep the defaults shown.</span>
+addons:
+  metrics: true          <span class="c"># metrics-server (kubectl top nodes/pods)</span>
+  storage: true          <span class="c"># local-path default StorageClass</span>
+  loadBalancer: true     <span class="c"># MetalLB, Services of type LoadBalancer</span>
+  observability: false   <span class="c"># Prometheus + Grafana + node-exporter</span>
+  gateway: false         <span class="c"># Gateway API CRDs + Traefik</span></code></pre>
+
+  <h2 id="schema">Schema</h2>
+  <table>
+    <tr><th>Key</th><th>Type</th><th>Default</th><th>Maps to flag</th></tr>
+    <tr><td><code>name</code></td><td>string</td><td><code>dev</code></td><td><code>--name</code></td></tr>
+    <tr><td><code>workers</code></td><td>int</td><td><code>0</code></td><td><code>--workers</code></td></tr>
+    <tr><td><code>k8sVersion</code></td><td>string</td><td><code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
+    <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
+    <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
+    <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
+    <tr><td><code>memory</code></td><td>string</td><td><code>4G</code></td><td><code>--memory</code></td></tr>
+    <tr><td><code>wait</code></td><td>duration string (<code>5m</code>, <code>90s</code>)</td><td><code>5m</code></td><td><code>--wait</code></td></tr>
+    <tr><td><code>addons.metrics</code></td><td>bool</td><td><code>true</code></td><td><code>--no-metrics</code> (inverted)</td></tr>
+    <tr><td><code>addons.storage</code></td><td>bool</td><td><code>true</code></td><td><code>--no-storage</code> (inverted)</td></tr>
+    <tr><td><code>addons.loadBalancer</code></td><td>bool</td><td><code>true</code></td><td><code>--no-lb</code> (inverted)</td></tr>
+    <tr><td><code>addons.observability</code></td><td>bool</td><td><code>false</code></td><td><code>--observability</code></td></tr>
+    <tr><td><code>addons.gateway</code></td><td>bool</td><td><code>false</code></td><td><code>--gateway</code></td></tr>
+  </table>
+  <p>Notes on the schema:</p>
+  <ul>
+    <li><b>Unknown keys are an error.</b> A typo like <code>worker: 2</code> fails the create instead of silently falling back to a default.</li>
+    <li>Addon keys are positive (<code>storage: true</code>) even though the flags are negative (<code>--no-storage</code>); kiac maps between them.</li>
+    <li>Quote <code>cpus</code>: YAML parses a bare <code>4</code> as a number, and the field is a string.</li>
+    <li>An empty file is valid and means "all defaults".</li>
+  </ul>
+
+  <h2 id="precedence">Precedence</h2>
+  <p>Three layers, most specific wins:</p>
+  <ol>
+    <li><b>A flag set explicitly on the command line</b> always wins over the file.</li>
+    <li><b>A key present in the file</b> wins over the built-in default.</li>
+    <li><b>Everything omitted</b> keeps the CLI default.</li>
+  </ol>
+  <pre><code><span class="c"># cluster.yaml says workers: 2, name: dev</span>
+kiac create cluster --config cluster.yaml --workers 3
+<span class="c"># result: name dev (from file), workers 3 (flag overrides file)</span></code></pre>
+  <p>The distinction is "explicitly set", not "different from the default": passing <code>--workers 0</code> on the command line beats <code>workers: 2</code> in the file.</p>
+
+  <div class="pn">
+    <a href="storage-and-metrics.html"><span>Previous</span>Storage &amp; metrics</a>
+    <a class="next" href="cli-reference.html"><span>Next</span>CLI reference</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

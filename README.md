@@ -74,7 +74,11 @@ Containers are great for packaging software, and kiac depends on them. The point
 - ⚖️ **`type: LoadBalancer` works** — MetalLB ships by default, pooled on node IPs, so Services get a real EXTERNAL-IP you can curl from your Mac. No `<pending>`, no tunnels.
 - 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
-- 🖥️ **A console when you want one** — `kiac ui` opens a local web console to create, watch, and delete clusters, same engine as the CLI.
+- 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
+- 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
+- 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
+- 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
+- 🖥️ **A console when you want one** — `kiac ui` opens a local web console, now with cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, and a create form. Same engine as the CLI.
 - 🍎 **Native stack** — one Swift runtime from Apple, one Go binary from us. Coexists with Docker Desktop, kind, and k3d; never touches the Docker socket.
 
 ## Quickstart
@@ -112,7 +116,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 ```
 
 ```text
-⬢ kiac v0.1.0 · Kubernetes in Apple Containers
+⬢ kiac v0.2.0 · Kubernetes in Apple Containers
  ✓ Preflight checks (0.3s)
  ✓ Pulling node image kindest/node:v1.36.1 (8.4s)
  ✓ Booting 3 node VM(s) (9.8s)
@@ -130,6 +134,14 @@ Cluster "dev" is ready in 2m26s. Every node is its own lightweight VM.
 ```
 
 The kubeconfig is merged into `~/.kube/config` as context `kiac-dev` (your existing config is backed up to `~/.kube/config.kiac.bak` the first time).
+
+### Turn everything on
+
+```bash
+kiac create cluster --name dev --workers 2 --observability --gateway
+```
+
+One command later you have Grafana at port 3000 on a real LoadBalancer IP (anonymous admin, local-only, two dashboards already provisioned) and a Gateway serving HTTP on port 80, also on a LoadBalancer IP. Point an HTTPRoute at `parentRefs: [{name: kiac, namespace: kiac-gateway}]` and it routes with zero extra setup; see [`examples/httproute.yaml`](examples/httproute.yaml).
 
 ### See the isolation pay off
 
@@ -157,16 +169,23 @@ $ curl http://192.168.64.3       # HTTP 200, straight from your Mac
 
 ```bash
 kiac doctor                                  # check your setup
+kiac doctor --fix                            # ...and auto-start the container service
 kiac create cluster                          # single node, everything included
 kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 kiac create cluster --k8s-version 1.34       # pick your Kubernetes (1.32-1.36 pinned)
+kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
 kiac ui                                      # local web console to create/manage clusters
-kiac get clusters
+kiac get clusters                            # -o wide for versions/age, -o json for scripts
 kiac get nodes --name dev
+kiac stop node worker-1 --name dev           # real node failure: NotReady, eviction, rescheduling
+kiac start node worker-1 --name dev          # node rejoins; idempotent
 container build -t myapp:dev .               # build with apple/container
 kiac load image myapp:dev --name dev         # push it into every node
+kiac completion zsh                          # bash|zsh|fish|powershell; see kiac completion -h
 kiac delete cluster --name dev
 ```
+
+Full guides and command reference live on the [docs site](https://saiyam1814.github.io/kiac/).
 
 ### Flags for `create cluster`
 
@@ -182,6 +201,9 @@ kiac delete cluster --name dev
 | `--no-metrics` | `false` | skip metrics-server |
 | `--no-storage` | `false` | skip the local-path default StorageClass |
 | `--no-lb` | `false` | skip MetalLB (`type: LoadBalancer` support) |
+| `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
+| `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
+| `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values |
 | `--wait` | `5m` | node readiness timeout |
 
 ## How it works
@@ -194,15 +216,14 @@ kiac drives the `apple/container` CLI to boot one lightweight VM per node from t
 
 ## Roadmap
 
-- **Node chaos** — `kiac stop|start node` to test real NotReady detection, eviction, and rescheduling
 - **Custom node kernels** (`--kernel`) to unlock Flannel, Calico, Cilium, and eBPF
 - **Persistent clusters** backed by `container machine` (WWDC26 persistent Linux environments), so a cluster survives a reboot
 - **Built-in LoadBalancer controller** to replace MetalLB (node-IP allocation needs no ARP speaker)
-- **HA control planes** and an ingress helper
+- **HA control planes**
 
 ## Contributing
 
-Issues and PRs are welcome. New here? Look for issues labeled [`good first issue`](https://github.com/saiyam1814/kiac/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) — they are scoped with context and acceptance criteria to be a clean first contribution.
+Issues and PRs are welcome, from typo fixes to new addons. A good way in: try the configs in [`examples/`](examples/), read the [docs site](https://saiyam1814.github.io/kiac/), and open an issue for anything that surprised you. If you want to build something bigger, open an issue first so we can agree on the shape.
 
 ## Credits
 

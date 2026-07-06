@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Troubleshooting · kiac docs</title>
+<meta name="description" content="Common kiac failures and their fixes: doctor --fix, cluster already exists, reboots, pending EXTERNAL-IPs, and more.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a class="on" href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Day two</div>
+  <h1>Troubleshooting</h1>
+  <p class="lede">Start with <code>kiac doctor</code>; it catches most environment problems. The rest of this page is the known failure modes and what they mean.</p>
+
+  <h2 id="doctor">First move: kiac doctor</h2>
+  <pre><code>kiac doctor        <span class="c"># checks macOS, apple/container, the system service, kubectl, arm64</span>
+kiac doctor --fix  <span class="c"># also starts the container system service if it is stopped</span></code></pre>
+  <p>What <code>--fix</code> actually runs is <code>container system start</code>. You can run that yourself, and inspect the service with <code>container system status</code>. kiac also starts the service automatically during <code>create</code> preflight.</p>
+
+  <h2 id="cluster-exists">"cluster already exists"</h2>
+  <pre><code><span class="o">Error: cluster "dev" already exists; delete it first with: kiac delete cluster --name dev</span></code></pre>
+  <p>Node VMs from a previous create (even stopped ones) still carry the cluster's name. Delete and recreate:</p>
+  <pre><code>kiac delete cluster --name dev
+kiac create cluster --name dev --workers 2</code></pre>
+  <p>This is also the fix after a reboot, see below.</p>
+
+  <h2 id="reboot">After a reboot: clusters show 0/N</h2>
+  <pre><code>kiac get clusters
+<span class="o">NAME  STATUS
+dev   0/3 stopped</span></code></pre>
+  <p>A Mac reboot does not preserve running lightweight VMs: the container service forgets them, so every node of every cluster is gone. <code>0/N stopped</code> is that signal. Clusters do not survive reboots today; delete and recreate:</p>
+  <pre><code>kiac delete cluster --name dev
+kiac create cluster --name dev --workers 2</code></pre>
+  <p>Persistent clusters (backed by <code>container machine</code>) are on the roadmap. Until then, treat clusters as cheap and disposable, and keep the definition in a <a href="config-file.html">config file</a> so recreating is one command.</p>
+
+  <h2 id="create-fails">Create fails partway</h2>
+  <p>kiac tears down the half-created node VMs automatically (you will see <code>cleaned up partial cluster "dev"</code>), so just fix the cause and re-run. Common causes:</p>
+  <ul>
+    <li><b>macOS older than 26</b>: multi-node networking needs macOS 26+. Try a single-node cluster, or upgrade.</li>
+    <li><b>Timeout on a loaded machine</b>: raise it with <code>--wait 10m</code>.</li>
+    <li><b>Cluster name too long</b>: a node's container name is also its Linux hostname, capped at 63 characters. kiac rejects names that would overflow; use a shorter name.</li>
+  </ul>
+
+  <h2 id="pending-ip">LoadBalancer EXTERNAL-IP stays &lt;pending&gt;</h2>
+  <ul>
+    <li>Created with <code>--no-lb</code>? MetalLB is not installed; there is nothing to assign IPs.</li>
+    <li>Check the pools exist: <code>kubectl get ipaddresspools -n metallb-system</code>. If the pool step failed at create time, kiac says so in the create output (the cluster still works otherwise).</li>
+    <li>For Grafana specifically: <code>kubectl get svc -n kiac-observability grafana</code>; for the gateway: <code>kubectl get svc -n kiac-gateway traefik</code>.</li>
+    <li>After stopping and starting a node, its IP may have changed; <code>kiac start node &lt;node&gt; --name &lt;cluster&gt;</code> re-syncs the MetalLB pool and is safe to re-run. See <a href="node-chaos.html">Node chaos</a>.</li>
+  </ul>
+
+  <h2 id="top-unknown">kubectl top shows &lt;unknown&gt;</h2>
+  <p>metrics-server needs about 60 seconds after cluster creation for its first scrape. If it never resolves, check the metrics-server pod in <code>kube-system</code>.</p>
+
+  <h2 id="cni-error">"flannel/calico/cilium needs kernel features"</h2>
+  <pre><code><span class="o">Error: cilium needs kernel features (br_netfilter, VXLAN, eBPF) that Apple's stock
+node kernel does not enable; use kindnet, or --cni none with a custom kernel
+(tracked on the roadmap)</span></code></pre>
+  <p>Not a bug: Apple's minimal node kernel ships without those features. kindnet is the supported CNI today; the full story is in <a href="networking.html">Networking</a>.</p>
+
+  <h2 id="gateway-no-lb">"--gateway needs the built-in LoadBalancer"</h2>
+  <p><code>--gateway</code> exposes Traefik through a <code>type: LoadBalancer</code> Service, so it cannot be combined with <code>--no-lb</code>. Drop <code>--no-lb</code>.</p>
+
+  <h2 id="api-down">kubectl suddenly times out</h2>
+  <p>Did you stop the control-plane node? On multi-node clusters <code>kiac stop node control-plane</code> proceeds with a warning, and the API server is down until:</p>
+  <pre><code>kiac start node control-plane --name dev</code></pre>
+
+  <h2 id="kubeconfig">Kubeconfig looks wrong</h2>
+  <p>kiac only touches entries named <code>kiac-&lt;cluster&gt;</code>, and the first time it modifies your kubeconfig it saves the original to <code>~/.kube/config.kiac.bak</code>. <code>kiac delete cluster</code> removes exactly the cluster's entries and clears <code>current-context</code> if it pointed there.</p>
+
+  <h2 id="still-stuck">Still stuck?</h2>
+  <p>Open an issue with the failing command's output: <a href="https://github.com/saiyam1814/kiac/issues">github.com/saiyam1814/kiac/issues</a>.</p>
+
+  <div class="pn">
+    <a href="dashboard.html"><span>Previous</span>Dashboard (kiac ui)</a>
+    <a class="next" href="contributing.html"><span>Next</span>Contributing</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

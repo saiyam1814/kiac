@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard (kiac ui) · kiac docs</title>
+<meta name="description" content="A tour of kiac ui, the local web console: cluster cards, live resource bars, node stop/start, addon links, and the create form.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a class="on" href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Day two</div>
+  <h1>Dashboard (kiac ui)</h1>
+  <p class="lede">A local web console for people who would rather click than type. Same engine as the CLI, literally: every mutating action shells out to the kiac binary itself, so the UI and CLI can never drift.</p>
+
+  <pre><code>kiac ui                <span class="c"># serves on 127.0.0.1:5180 and opens your browser</span>
+kiac ui --port 0       <span class="c"># pick any free port</span></code></pre>
+
+  <h2 id="tour">Tour</h2>
+  <h3>Cluster cards</h3>
+  <p>Each cluster gets a card, auto-refreshed every 5 seconds, with a row per node showing:</p>
+  <ul>
+    <li>Role (control-plane or worker), state, and the node VM's IP.</li>
+    <li><b>Live resource bars</b>: CPU and memory per node, fed by <code>kubectl top nodes</code> inside the cluster. Bars turn red at 85%. They appear once metrics-server has scraped (about a minute after create) and degrade gracefully to plain node state before that.</li>
+    <li><b>Stop / Start buttons</b> per node, running the same <a href="node-chaos.html">node chaos</a> commands as the CLI, including the MetalLB IP re-sync on start.</li>
+  </ul>
+  <h3>Addon links</h3>
+  <p>When the cluster has addons installed, chips appear on the card:</p>
+  <ul>
+    <li><b>Open Grafana</b> links straight to the Grafana LoadBalancer URL (port 3000).</li>
+    <li><b>Gateway</b> shows the Traefik gateway's LoadBalancer IP.</li>
+  </ul>
+  <h3>Kubeconfig download</h3>
+  <p>Every card offers a standalone <code>kiac-&lt;name&gt;.kubeconfig</code> download, self-contained and pointed at the control plane's IP, handy for tools that want their own file instead of your merged <code>~/.kube/config</code>.</p>
+  <h3>Create form</h3>
+  <p>The sidebar form covers the same knobs as <code>kiac create cluster</code>: name, workers, Kubernetes version (the pinned 1.32-1.36 list), CPUs and memory per node, CNI, and checkboxes for MetalLB, metrics-server, local-path storage, observability, and Gateway API. Progress streams into an activity panel showing exactly the log the terminal would print.</p>
+  <h3>Delete</h3>
+  <p>Card-level delete, with a confirmation prompt, equivalent to <code>kiac delete cluster --name &lt;name&gt;</code>.</p>
+
+  <h2 id="security">Security model</h2>
+  <p>The console hands out cluster-admin kubeconfigs, so it is deliberately hard to reach from anywhere but your own terminal and browser:</p>
+  <ul>
+    <li>It binds to <b>127.0.0.1 only</b>; nothing on your network can connect.</li>
+    <li>Requests with an unexpected <code>Host</code> header are rejected (blocks DNS-rebinding attacks).</li>
+    <li>Cross-origin requests are rejected (blocks CSRF from other pages in your browser).</li>
+    <li>One mutating job per cluster at a time, so a double-click can never race two creates or a stop against a delete.</li>
+  </ul>
+
+  <div class="pn">
+    <a href="node-chaos.html"><span>Previous</span>Node chaos</a>
+    <a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,88 @@
+# HTTPRoute example: hostname routing through the bundled gateway.
+#
+# Demonstrates the --gateway addon: Gateway API v1.5.1 CRDs plus Traefik,
+# with a GatewayClass "traefik" and a default Gateway "kiac" in the
+# kiac-gateway namespace that listens on HTTP :80 and accepts routes
+# from every namespace. Any HTTPRoute that points its parentRefs at
+# {name: kiac, namespace: kiac-gateway} is live immediately; no Gateway
+# of your own to write.
+#
+# Run it:
+#
+#   kiac create cluster --workers 2 --gateway
+#   kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/httproute.yaml
+#
+#   GATEWAY_IP=$(kubectl get svc traefik -n kiac-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+#   curl -H 'Host: echo.local' http://$GATEWAY_IP/
+#
+# The echo server answers with a JSON dump of the request it received.
+# Requests without the echo.local Host header get a 404 from Traefik.
+# Clean up:
+#
+#   kubectl delete -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/httproute.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  labels:
+    app: echo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo
+  template:
+    metadata:
+      labels:
+        app: echo
+    spec:
+      containers:
+        - name: echo
+          # Tiny multi-arch echo server; replies to any path with a JSON
+          # description of the request. Listens on port 80 by default.
+          image: docker.io/ealen/echo-server:0.9.2
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  labels:
+    app: echo
+spec:
+  # Plain ClusterIP: the gateway is the front door, the Service only
+  # needs to be reachable from inside the cluster.
+  selector:
+    app: echo
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: echo
+  labels:
+    app: echo
+spec:
+  # Attach to the default Gateway that --gateway installed. It allows
+  # routes from all namespaces, so this works from default (or any
+  # other) namespace as-is.
+  parentRefs:
+    - name: kiac
+      namespace: kiac-gateway
+  hostnames:
+    - echo.local
+  rules:
+    - backendRefs:
+        - name: echo
+          port: 80

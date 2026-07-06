@@ -1,0 +1,65 @@
+# LoadBalancer example: nginx behind a Service of type LoadBalancer.
+#
+# Demonstrates that a kiac cluster hands out real, routable EXTERNAL-IPs
+# with zero configuration. MetalLB ships by default (drop --no-lb to
+# disable) and its pool holds the node VM IPs, so the address you get
+# back is reachable straight from your Mac. No tunnels, no port
+# forwarding.
+#
+# Run it:
+#
+#   kiac create cluster --workers 2
+#   kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/loadbalancer.yaml
+#   kubectl get svc web            # wait for EXTERNAL-IP (a few seconds)
+#   curl http://$(kubectl get svc web -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+#
+# You should get the nginx welcome page. Clean up:
+#
+#   kubectl delete -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples/loadbalancer.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          # Official multi-arch image; the alpine variant keeps the pull
+          # small on the node VMs.
+          image: docker.io/nginx:1.29-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  # MetalLB assigns an IP from the per-node pool; kubectl get svc web
+  # shows it under EXTERNAL-IP.
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

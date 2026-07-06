@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage &amp; metrics · kiac docs</title>
+<meta name="description" content="The default StorageClass (local-path-provisioner) and metrics-server that every kiac cluster ships with.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a class="on" href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Core concepts</div>
+  <h1>Storage &amp; metrics</h1>
+  <p class="lede">Two things every local cluster needs on day one, installed by default and removable with a flag.</p>
+
+  <h2 id="storage">Default StorageClass: local-path</h2>
+  <p>Every cluster gets a default StorageClass backed by <b>local-path-provisioner</b> (the same manifest the kind project ships inside the <code>kindest/node</code> image). PersistentVolumeClaims bind without any setup, so StatefulSets and <code>volumeClaimTemplates</code> work immediately:</p>
+  <pre><code>kubectl get storageclass
+<span class="o">NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE
+standard (default)     rancher.io/local-path   Delete          WaitForFirstConsumer</span></code></pre>
+  <p>Try it:</p>
+  <pre><code>cat &lt;&lt;'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl get pvc data    <span class="c"># Pending until a pod uses it (WaitForFirstConsumer), then Bound</span></code></pre>
+  <p>Things to know:</p>
+  <ul>
+    <li>Volumes are directories on the node VM's disk. They live and die with the node: pin a workload with <code>nodeSelector</code> if the data must follow it, and expect data loss when a node VM is deleted.</li>
+    <li>Binding waits for the first consumer pod, so a lone PVC showing <code>Pending</code> is normal.</li>
+    <li>Skip installation with <code>--no-storage</code> (or <code>addons.storage: false</code> in a <a href="config-file.html">config file</a>).</li>
+  </ul>
+
+  <h2 id="metrics">metrics-server</h2>
+  <p>kiac installs metrics-server v0.8.1 by default, patched with <code>--kubelet-insecure-tls</code> because kubeadm-issued kubelet serving certificates are self-signed in local clusters. That is the standard tweak every local distribution needs, done for you.</p>
+  <pre><code>kubectl top nodes
+<span class="o">NAME                     CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)
+kiac-dev-control-plane   269m         5%       828Mi           20%
+kiac-dev-worker-1        35m          0%       288Mi           7%
+kiac-dev-worker-2        52m          1%       359Mi           9%</span>
+
+kubectl top pods -A</code></pre>
+  <ul>
+    <li>Give it about 60 seconds after cluster creation for the first scrape; until then rows show <code>&lt;unknown&gt;</code>.</li>
+    <li>These are the same numbers the <a href="dashboard.html">dashboard</a> renders as live per-node bars.</li>
+    <li>Skip installation with <code>--no-metrics</code> (or <code>addons.metrics: false</code> in a config file).</li>
+  </ul>
+
+  <div class="note"><b>Want more than kubectl top?</b>
+  <code>--observability</code> adds Prometheus, Grafana, kube-state-metrics, and node-exporter with dashboards already provisioned. See <a href="observability.html">Observability</a>.</div>
+
+  <div class="pn">
+    <a href="networking.html"><span>Previous</span>Networking</a>
+    <a class="next" href="config-file.html"><span>Next</span>Config file</a>
+  </div>
+</main>
+</div>
+</body>
+</html>
