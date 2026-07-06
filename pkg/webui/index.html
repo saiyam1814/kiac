@@ -19,12 +19,18 @@
   header span.sub{color:var(--mid);font-size:13px}
   header .live{margin-left:auto;color:var(--mid);font-size:12px;display:flex;align-items:center;gap:6px}
   header .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
-  main{max-width:1120px;margin:0 auto;padding:30px 20px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:22px;align-items:start}
-  @media (max-width:940px){main{grid-template-columns:1fr}}
+  main{max-width:1240px;margin:0 auto;padding:30px 20px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:22px;align-items:start}
+  /* The node table needs ~700px before .tscroll kicks in; below this the
+     form stacks under the clusters instead of cramping beside them. */
+  @media (max-width:1180px){main{grid-template-columns:1fr}}
   .panel{background:#fff;border-radius:var(--radius);padding:24px;box-shadow:0 1px 3px rgba(5,11,36,.06)}
   h2{font-size:16px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
   h2 .count{font-size:11px;font-weight:700;background:var(--accent-tint);color:var(--accent);border-radius:99px;padding:2px 9px}
   .col{display:grid;gap:18px;min-width:0}
+  /* Grid items default to min-width:auto, so a wide node table would push
+     the card past its column (under the form) instead of letting .tscroll
+     scroll it. Force shrinkability. */
+  .col>*{min-width:0}
 
   /* create form */
   form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
