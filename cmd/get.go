@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -9,7 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var getNodesName string
+var (
+	getNodesName      string
+	getClustersOutput string
+)
 
 var getCmd = &cobra.Command{
 	Use:   "get",
@@ -21,18 +25,41 @@ var getClustersCmd = &cobra.Command{
 	Aliases: []string{"cluster"},
 	Short:   "List kiac clusters",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		names, err := cluster.NewManager().Clusters()
+		statuses, err := cluster.NewManager().Statuses()
 		if err != nil {
 			return err
 		}
-		if len(names) == 0 {
+		switch getClustersOutput {
+		case "json":
+			// Empty stays a JSON array so scripts never special-case null.
+			if statuses == nil {
+				statuses = []cluster.ClusterStatus{}
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(statuses)
+		case "", "wide":
+		default:
+			return fmt.Errorf("unknown output format %q (supported: wide, json)", getClustersOutput)
+		}
+		if len(statuses) == 0 {
 			fmt.Println("No kiac clusters found.")
 			return nil
 		}
-		for _, n := range names {
-			fmt.Println(n)
+		w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+		if getClustersOutput == "wide" {
+			fmt.Fprintln(w, "NAME\tSTATUS\tK8S-VERSION\tCREATED")
+			for _, s := range statuses {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+					s.Name, s.Status, orDash(s.K8sVersion), orDash(cluster.FormatCreated(s.Created)))
+			}
+		} else {
+			fmt.Fprintln(w, "NAME\tSTATUS")
+			for _, s := range statuses {
+				fmt.Fprintf(w, "%s\t%s\n", s.Name, s.Status)
+			}
 		}
-		return nil
+		return w.Flush()
 	},
 }
 
@@ -57,7 +84,15 @@ var getNodesCmd = &cobra.Command{
 	},
 }
 
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
 func init() {
+	getClustersCmd.Flags().StringVarP(&getClustersOutput, "output", "o", "", "output format: wide or json")
 	getNodesCmd.Flags().StringVar(&getNodesName, "name", "dev", "cluster name")
 	getCmd.AddCommand(getClustersCmd, getNodesCmd)
 }

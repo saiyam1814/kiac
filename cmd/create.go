@@ -25,6 +25,15 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --memory 8G --cpus 4`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
+		if createConfigFile != "" {
+			fc, err := cluster.LoadConfigFile(createConfigFile)
+			if err != nil {
+				return err
+			}
+			if err := fc.Merge(&createCfg, &k8sVersion, cmd.Flags().Changed); err != nil {
+				return err
+			}
+		}
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
 		}
@@ -42,10 +51,14 @@ var createClusterCmd = &cobra.Command{
 	},
 }
 
-var k8sVersion string
+var (
+	k8sVersion       string
+	createConfigFile string
+)
 
 func init() {
 	f := createClusterCmd.Flags()
+	f.StringVar(&createConfigFile, "config", "", "cluster config YAML (see examples/cluster.yaml); flags set explicitly on the command line override file values")
 	f.StringVar(&createCfg.Name, "name", "dev", "cluster name")
 	f.IntVar(&createCfg.Workers, "workers", 0, "number of worker nodes (control plane is untainted when 0)")
 	f.StringVar(&k8sVersion, "k8s-version", cluster.DefaultK8sVersion,
@@ -53,7 +66,8 @@ func init() {
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
 	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, or none (custom kernels needed for flannel/calico/cilium)")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
-	f.StringVar(&createCfg.Memory, "memory", "4G", "memory per node VM")
+	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
+	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")
 	f.BoolVar(&createCfg.NoMetrics, "no-metrics", false, "skip installing metrics-server")
 	f.BoolVar(&createCfg.NoStorage, "no-storage", false, "skip installing the local-path default StorageClass")
 	f.BoolVar(&createCfg.NoLB, "no-lb", false, "skip installing MetalLB (type: LoadBalancer support)")

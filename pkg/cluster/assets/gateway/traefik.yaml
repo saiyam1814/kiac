@@ -1,0 +1,136 @@
+# Traefik v3 as the bundled Gateway API implementation. RBAC is the
+# minimum the kubernetesgateway provider needs for the STANDARD channel
+# (no TLSRoute/TCPRoute: those are experimental-channel only). The
+# provider watches all namespaces because no
+# --providers.kubernetesgateway.namespaces filter is set.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiac-gateway
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik
+  namespace: kiac-gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiac-traefik-gateway
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, services, secrets, configmaps, nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [list, watch]
+  # Traefik's provider watches the full route surface unconditionally;
+  # a forbidden list on any of them wedges its informer sync and the
+  # GatewayClass never goes Accepted. RBAC on CRDs that are not
+  # installed (tcproutes, udproutes on the standard channel) is harmless.
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses, gateways, httproutes, grpcroutes, tlsroutes, tcproutes, udproutes, referencegrants, backendtlspolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses/status, gateways/status, httproutes/status, grpcroutes/status, tlsroutes/status, tcproutes/status, udproutes/status, backendtlspolicies/status]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kiac-traefik-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kiac-traefik-gateway
+subjects:
+  - kind: ServiceAccount
+    name: traefik
+    namespace: kiac-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: kiac-gateway
+  labels:
+    app: traefik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+    spec:
+      serviceAccountName: traefik
+      # Pin to the node owning the kiac-primary LB pool so gateway
+      # traffic enters on the node that runs the proxy (vmnet's
+      # forwarded path is slow for bulk transfers).
+      nodeSelector:
+        kiac.io/lb-primary: "true"
+      containers:
+        - name: traefik
+          image: docker.io/traefik:v3.7.6
+          args:
+            - --entrypoints.web.address=:80
+            - --entrypoints.websecure.address=:443
+            - --entrypoints.traefik.address=:8080
+            - --ping=true
+            - --providers.kubernetesgateway=true
+            # statusaddress publishes this Service's LB ingress as the
+            # Gateway's status address, so `kubectl get gateway` shows it.
+            - --providers.kubernetesgateway.statusaddress.service.name=traefik
+            - --providers.kubernetesgateway.statusaddress.service.namespace=kiac-gateway
+          ports:
+            - name: web
+              containerPort: 80
+            - name: websecure
+              containerPort: 443
+            - name: traefik
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: traefik
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: traefik
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: kiac-gateway
+  labels:
+    app: traefik
+  # Shares a node IP with Grafana (port 3000) when both addons are on;
+  # the pool has only one /32 per worker. Ports must stay disjoint.
+  # The kiac-primary pool keeps the IP on the node the pod is pinned to.
+  annotations:
+    metallb.io/allow-shared-ip: kiac
+    metallb.io/address-pool: kiac-primary
+spec:
+  type: LoadBalancer
+  selector:
+    app: traefik
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+    - name: websecure
+      port: 443
+      targetPort: websecure

@@ -3,85 +3,133 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>kiac · clusters</title>
+<title>kiac · dashboard</title>
 <style>
   :root {
     --accent:#326CE5; --accent-hover:#4F83EA; --accent-tint:#E0EAFB;
-    --ink:#050B24; --mid:#828592; --divider:#E6E7E9; --bg:#EDEFF3; --radius:16px;
+    --ink:#050B24; --mid:#828592; --subtle:#B4B6BD; --divider:#E6E7E9; --bg:#EDEFF3;
+    --ok:#1A9E55; --bad:#C0392B; --radius:18px;
+    --mono:"SF Mono","Roboto Mono",ui-monospace,monospace;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
   header{background:rgba(255,255,255,.8);backdrop-filter:blur(20px);border-bottom:1px solid var(--divider);padding:14px 26px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:5}
   header .hex{color:var(--accent);font-size:22px}
   header b{font-size:18px}
-  header span{color:var(--mid);font-size:13px}
-  main{max-width:860px;margin:0 auto;padding:34px 20px;display:grid;gap:22px}
-  .panel{background:#fff;border-radius:var(--radius);padding:26px;box-shadow:0 1px 3px rgba(5,11,36,.06)}
-  h2{font-size:17px;margin-bottom:16px}
-  form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;align-items:end}
+  header span.sub{color:var(--mid);font-size:13px}
+  header .live{margin-left:auto;color:var(--mid);font-size:12px;display:flex;align-items:center;gap:6px}
+  header .live i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  main{max-width:1120px;margin:0 auto;padding:30px 20px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:22px;align-items:start}
+  @media (max-width:940px){main{grid-template-columns:1fr}}
+  .panel{background:#fff;border-radius:var(--radius);padding:24px;box-shadow:0 1px 3px rgba(5,11,36,.06)}
+  h2{font-size:16px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  h2 .count{font-size:11px;font-weight:700;background:var(--accent-tint);color:var(--accent);border-radius:99px;padding:2px 9px}
+  .col{display:grid;gap:18px;min-width:0}
+
+  /* create form */
+  form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .full{grid-column:1/-1}
   label{font-size:12px;color:var(--mid);font-weight:600;display:block;margin-bottom:5px}
-  input,select{width:100%;padding:9px 11px;border:1px solid var(--divider);border-radius:10px;font-size:14px;background:#fff;font-family:inherit}
+  input,select{width:100%;padding:9px 11px;border:1px solid var(--divider);border-radius:10px;font-size:14px;background:#fff;font-family:inherit;color:var(--ink)}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
-  .checks{grid-column:1/-1;display:flex;gap:18px;flex-wrap:wrap;font-size:13.5px;color:var(--mid)}
-  .checks label{display:flex;align-items:center;gap:6px;margin:0;font-size:13.5px;font-weight:500}
-  .checks input{width:auto}
+  .checks{grid-column:1/-1;display:grid;gap:9px;font-size:13.5px;padding-top:2px}
+  .checks label{display:flex;align-items:center;gap:8px;margin:0;font-size:13.5px;font-weight:500;color:var(--ink)}
+  .checks input{width:auto;accent-color:var(--accent)}
+  .checks small{color:var(--mid);font-weight:400}
   button.primary{grid-column:1/-1;background:var(--accent);color:#fff;border:none;border-radius:99px;padding:12px;font-size:15px;font-weight:600;cursor:pointer}
   button.primary:hover{background:var(--accent-hover)}
   button.primary:disabled{opacity:.5;cursor:default}
-  .cluster{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--divider)}
-  .cluster:last-child{border-bottom:none}
-  .cluster .nm{font-weight:700;font-size:15px}
-  .cluster .nodes{color:var(--mid);font-size:13px;margin-top:3px}
-  .badge{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 9px;background:var(--accent-tint);color:var(--accent);margin-left:8px;text-transform:uppercase}
-  .actions{display:flex;gap:8px}
-  .del{background:none;border:1px solid var(--divider);color:#c0392b;border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
-  .del:hover{border-color:#c0392b}
-  .connect{background:var(--accent);border:none;color:#fff;border-radius:99px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
-  .connect:hover{background:var(--accent-hover)}
+
+  /* cluster cards */
+  .card .chead{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .card .nm{font-weight:800;font-size:17px;letter-spacing:-.01em}
+  .badge{display:inline-block;font-size:11px;font-weight:700;border-radius:99px;padding:2px 9px;background:var(--accent-tint);color:var(--accent);margin-left:8px;text-transform:uppercase;vertical-align:2px}
+  .meta{color:var(--mid);font-size:12.5px;margin-top:3px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;border-radius:99px;padding:5px 13px;background:var(--accent-tint);color:var(--accent);text-decoration:none;border:none}
+  a.chip:hover{background:var(--accent);color:#fff}
+  .chip b{font-family:var(--mono);font-weight:600}
+  .cactions{display:flex;gap:8px}
+  .btn{border-radius:99px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn.sm{padding:7px 16px;font-size:13px}
+  .btn.tiny{padding:4px 12px;font-size:12px}
+  .btn.go{background:var(--accent);border:1px solid var(--accent);color:#fff}
+  .btn.go:hover{background:var(--accent-hover)}
+  .btn.ghost{background:none;border:1px solid var(--divider);color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.danger{background:none;border:1px solid var(--divider);color:var(--bad)}
+  .btn.danger:hover{border-color:var(--bad)}
+  .tscroll{overflow-x:auto}
+  table.nodes{width:100%;border-collapse:collapse;font-size:13px}
+  table.nodes th{text-align:left;color:var(--mid);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;padding:6px 10px 6px 0;border-bottom:1px solid var(--divider)}
+  table.nodes td{padding:9px 10px 9px 0;border-bottom:1px solid var(--divider);vertical-align:middle;white-space:nowrap}
+  table.nodes tr:last-child td{border-bottom:none}
+  .mono{font-family:var(--mono);font-size:12.5px}
+  .role{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:var(--bg);color:var(--mid)}
+  .role.cp{background:var(--accent-tint);color:var(--accent)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;background:var(--subtle)}
+  .dot.on{background:var(--ok)}
+  .metric{display:flex;align-items:center;gap:8px;min-width:120px}
+  .bar{flex:0 0 56px;height:6px;border-radius:99px;background:var(--bg);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:99px;background:var(--accent);transition:width .6s ease}
+  .bar i.hot{background:var(--bad)}
+  .metric span{color:var(--mid);font-size:11.5px;font-family:var(--mono)}
+  .dim{color:var(--subtle)}
+  .ta-r{text-align:right}
+  .note{color:var(--mid);font-size:12px;margin-top:10px}
+  .empty{color:var(--mid);font-size:14px}
+
+  /* activity */
+  #jobstate{font-size:13px;color:var(--mid);margin-bottom:10px}
+  .ok{color:var(--ok);font-weight:700}.bad{color:var(--bad);font-weight:700}
+  pre{background:#0d1226;color:#c9cede;border-radius:12px;padding:18px;font-size:12.5px;line-height:1.7;max-height:300px;overflow:auto;font-family:var(--mono);white-space:pre-wrap}
+
+  /* connect dialog */
   dialog{border:none;border-radius:var(--radius);padding:26px;max-width:520px;width:92%;box-shadow:0 30px 80px -20px rgba(5,11,36,.4)}
   dialog::backdrop{background:rgba(5,11,36,.35);backdrop-filter:blur(4px)}
   dialog h3{font-size:16px;margin-bottom:6px}
   dialog p{color:var(--mid);font-size:13px;margin-bottom:14px}
-  .cmd{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-family:"SF Mono","Roboto Mono",ui-monospace,monospace;font-size:13px}
+  .cmd{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-family:var(--mono);font-size:13px}
   .cmd code{flex:1;overflow-x:auto;white-space:nowrap}
   .cmd button{border:none;background:#fff;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;color:var(--mid);cursor:pointer;box-shadow:0 1px 3px rgba(5,11,36,.1)}
   dialog .close{margin-top:8px;background:none;border:1px solid var(--divider);border-radius:99px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink)}
-  pre{background:#0d1226;color:#c9cede;border-radius:12px;padding:18px;font-size:12.5px;line-height:1.7;max-height:340px;overflow:auto;font-family:"SF Mono","Roboto Mono",ui-monospace,monospace;white-space:pre-wrap}
-  .empty{color:var(--mid);font-size:14px;padding:10px 0}
-  #jobstate{font-size:13px;color:var(--mid);margin-bottom:10px}
-  .ok{color:#1a9e55;font-weight:700}.bad{color:#c0392b;font-weight:700}
 </style>
 </head>
 <body>
-<header><span class="hex">⬢</span> <b>kiac</b> <span>Kubernetes in Apple Containers · local console</span></header>
+<header>
+  <span class="hex">⬢</span> <b>kiac</b> <span class="sub">Kubernetes in Apple Containers · local dashboard</span>
+  <span class="live"><i></i>auto-refresh</span>
+</header>
 <main>
-  <div class="panel">
+  <section class="col">
+    <div class="panel" id="jobpanel" style="display:none">
+      <h2>Activity</h2>
+      <div id="jobstate"></div>
+      <pre id="joblog"></pre>
+    </div>
+    <h2 style="margin:0 4px -6px">Clusters <span class="count" id="count">0</span></h2>
+    <div class="col" id="cards"><div class="panel empty">Loading…</div></div>
+  </section>
+
+  <aside class="panel">
     <h2>Create a cluster</h2>
     <form id="f">
-      <div><label>Name</label><input id="name" value="dev" pattern="[a-z0-9-]+"></div>
+      <div class="full"><label>Name</label><input id="name" value="dev" pattern="[a-z0-9-]+"></div>
       <div><label>Workers</label><input id="workers" type="number" min="0" max="6" value="2"></div>
       <div><label>Kubernetes</label><select id="version"></select></div>
-      <div><label>CNI</label><select id="cni"></select></div>
-      <div><label>Memory / node</label><input id="memory" value="3G"></div>
+      <div><label>CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
+      <div><label>Memory / node</label><input id="memory" value="4G"></div>
+      <div class="full"><label>CNI</label><select id="cni"></select></div>
       <div class="checks">
-        <label><input type="checkbox" id="lb" checked> LoadBalancer (MetalLB)</label>
+        <label><input type="checkbox" id="lb" checked> LoadBalancer <small>MetalLB</small></label>
         <label><input type="checkbox" id="metrics" checked> metrics-server</label>
         <label><input type="checkbox" id="storage" checked> local-path storage</label>
+        <label><input type="checkbox" id="observability"> Observability <small>Prometheus + Grafana</small></label>
+        <label><input type="checkbox" id="gateway"> Gateway API <small>Traefik</small></label>
       </div>
       <button class="primary" id="go">Create cluster</button>
     </form>
-  </div>
-
-  <div class="panel" id="jobpanel" style="display:none">
-    <h2>Activity</h2>
-    <div id="jobstate"></div>
-    <pre id="joblog"></pre>
-  </div>
-
-  <div class="panel">
-    <h2>Clusters</h2>
-    <div id="list"><div class="empty">Loading…</div></div>
-  </div>
+  </aside>
 </main>
 <dialog id="dlg">
   <h3 id="dlg-title"></h3>
@@ -92,24 +140,100 @@
 <script>
 const $ = id => document.getElementById(id);
 async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const state = { clusters: [], metrics: {}, addons: {} };
 
 async function loadMeta() {
   const m = await j('/api/meta');
-  $('version').innerHTML = m.versions.map(v => `<option ${v===m.defaultVersion?'selected':''}>${v}</option>`).join('');
-  $('cni').innerHTML = m.cnis.map(c => `<option>${c}</option>`).join('');
+  $('version').innerHTML = m.versions.map(v => `<option ${v===m.defaultVersion?'selected':''}>${esc(v)}</option>`).join('');
+  $('cni').innerHTML = m.cnis.map(c => `<option>${esc(c)}</option>`).join('');
 }
 
-async function refresh() {
-  const cs = await j('/api/clusters');
-  $('list').innerHTML = cs.length ? cs.map(c => `
-    <div class="cluster">
-      <div><span class="nm">${c.name}</span><span class="badge">${(c.nodes||[]).length} node${(c.nodes||[]).length>1?'s':''}</span>
-        <div class="nodes">${(c.nodes||[]).map(n => `${n.name} · ${n.status}`).join('<br>')}</div></div>
-      <div class="actions">
-        <button class="connect" onclick="connect('${c.name}')">Connect</button>
-        <button class="del" onclick="del('${c.name}')">Delete</button>
+function ago(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (!isFinite(s) || s < 0) return '';
+  if (s < 90) return 'just now';
+  const m = s / 60, h = m / 60, d = h / 24;
+  return m < 90 ? Math.round(m) + ' min ago' : h < 36 ? Math.round(h) + ' h ago' : Math.round(d) + ' d ago';
+}
+
+function bar(pct, label) {
+  if (pct === undefined || pct === null) return '<span class="dim">—</span>';
+  return `<div class="metric"><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${Math.min(pct, 100)}%"></i></div><span>${pct}%${label ? ' · ' + esc(label) : ''}</span></div>`;
+}
+
+function card(c) {
+  const nodes = c.nodes || [];
+  const m = state.metrics[c.name];
+  const byNode = {};
+  if (m && m.ready) for (const r of m.nodes || []) byNode[r.node] = r;
+  const a = state.addons[c.name] || {};
+  const chips =
+    (a.grafana ? `<a class="chip" href="http://${esc(a.grafana)}" target="_blank" rel="noopener">Open Grafana ↗</a>` : '') +
+    (a.gateway ? `<span class="chip">Gateway: <b>${esc(a.gateway)}</b></span>` : '');
+  const rows = nodes.map(n => {
+    const running = (n.status || '').toLowerCase() === 'running';
+    const mm = byNode[n.name];
+    return `<tr>
+      <td class="mono">${esc(n.name)}</td>
+      <td><span class="role ${n.role === 'control-plane' ? 'cp' : ''}">${esc(n.role)}</span></td>
+      <td><span class="dot ${running ? 'on' : ''}"></span>${esc(n.status || 'unknown')}</td>
+      <td class="mono">${esc(n.ip || '—')}</td>
+      <td>${bar(mm ? mm.cpuPct : undefined, mm && mm.cpu)}</td>
+      <td>${bar(mm ? mm.memPct : undefined, mm && mm.mem)}</td>
+      <td class="ta-r">${running
+        ? `<button class="btn tiny ghost" onclick="nodeAction('${c.name}','${n.name}','stop')">Stop</button>`
+        : `<button class="btn tiny go" onclick="nodeAction('${c.name}','${n.name}','start')">Start</button>`}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="panel card">
+    <div class="chead">
+      <div>
+        <span class="nm">${esc(c.name)}</span><span class="badge">${nodes.length} node${nodes.length === 1 ? '' : 's'}</span>
+        <div class="meta">${c.created ? 'created ' + ago(c.created) : ''}&nbsp;</div>
       </div>
-    </div>`).join('') : '<div class="empty">No clusters yet. Create one above - it takes about three minutes.</div>';
+      <div class="chips">${chips}</div>
+      <div class="cactions">
+        <button class="btn sm go" onclick="connect('${c.name}')">Connect</button>
+        <button class="btn sm danger" onclick="del('${c.name}')">Delete</button>
+      </div>
+    </div>
+    <div class="tscroll"><table class="nodes">
+      <thead><tr><th>Node</th><th>Role</th><th>State</th><th>IP</th><th>CPU</th><th>Memory</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    ${m && !m.ready ? '<div class="note">Live metrics not available yet - metrics-server needs the cluster up and ~60s of scraping.</div>' : ''}
+  </div>`;
+}
+
+function render() {
+  const cs = state.clusters;
+  $('count').textContent = cs.length;
+  $('cards').innerHTML = cs.length ? cs.map(card).join('')
+    : '<div class="panel empty">No clusters yet. Create one on the right - it takes about three minutes.</div>';
+}
+
+let polling = false;
+async function refresh() {
+  if (polling) return;
+  polling = true;
+  try {
+    const cs = await j('/api/clusters');
+    if (cs.error) return;
+    state.clusters = cs;
+    render();
+    await Promise.all(cs.map(async c => {
+      const [m, a] = await Promise.all([
+        j(`/api/clusters/${c.name}/metrics`).catch(() => null),
+        j(`/api/clusters/${c.name}/addons`).catch(() => null),
+      ]);
+      if (m) state.metrics[c.name] = m;
+      if (a) state.addons[c.name] = a;
+    }));
+    render();
+  } catch (e) { /* server restarting; next tick retries */ }
+  finally { polling = false; }
 }
 
 let pollTimer;
@@ -121,9 +245,9 @@ function watch(jobId, verb) {
     const job = await j('/api/jobs/' + jobId);
     $('joblog').textContent = job.log || '(starting…)';
     $('joblog').scrollTop = $('joblog').scrollHeight;
-    $('jobstate').innerHTML = job.status === 'running' ? verb + '…'
-      : job.status === 'done' ? '<span class="ok">✓ ' + verb + ' finished</span>'
-      : '<span class="bad">✗ ' + verb + ' failed</span>';
+    $('jobstate').innerHTML = job.status === 'running' ? esc(verb) + '…'
+      : job.status === 'done' ? '<span class="ok">✓ ' + esc(verb) + ' finished</span>'
+      : '<span class="bad">✗ ' + esc(verb) + ' failed</span>';
     if (job.status !== 'running') { clearInterval(pollTimer); $('go').disabled = false; refresh(); }
   }, 1200);
 }
@@ -132,13 +256,21 @@ $('f').addEventListener('submit', async e => {
   e.preventDefault();
   const body = {
     name: $('name').value.trim(), workers: +$('workers').value,
-    k8sVersion: $('version').value, cni: $('cni').value, memory: $('memory').value.trim(),
+    k8sVersion: $('version').value, cni: $('cni').value,
+    cpus: $('cpus').value.trim(), memory: $('memory').value.trim(),
     noLB: !$('lb').checked, noMetrics: !$('metrics').checked, noStorage: !$('storage').checked,
+    observability: $('observability').checked, gateway: $('gateway').checked,
   };
   const r = await j('/api/clusters', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.error) { alert(r.error); return; }
   watch(r.job, 'Creating "' + body.name + '"');
 });
+
+async function nodeAction(cl, node, verb) {
+  const r = await j(`/api/clusters/${cl}/nodes/${node}/${verb}`, { method: 'POST' });
+  if (r.error) { alert(r.error); return; }
+  watch(r.job, (verb === 'stop' ? 'Stopping ' : 'Starting ') + node);
+}
 
 function connect(name) {
   const ctx = 'kiac-' + name;
@@ -161,7 +293,7 @@ async function del(name) {
   watch(r.job, 'Deleting "' + name + '"');
 }
 
-loadMeta(); refresh(); setInterval(refresh, 10000);
+loadMeta(); refresh(); setInterval(refresh, 5000);
 </script>
 </body>
 </html>

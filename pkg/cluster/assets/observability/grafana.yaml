@@ -1,0 +1,209 @@
+# Grafana with anonymous Admin access: kiac clusters are local-only dev
+# tools reachable just from the Mac that runs them, so a login screen
+# would only get in the way. Do not reuse this manifest anywhere routable.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: kiac-observability
+data:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.kiac-observability.svc:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: kiac-observability
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: kiac
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: kiac-observability
+data:
+  cluster-overview.json: |
+    {
+      "uid": "kiac-cluster-overview",
+      "title": "Cluster Overview",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {"id": 1, "type": "stat", "title": "Nodes", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "count(kube_node_info)"}]},
+        {"id": 2, "type": "stat", "title": "Running pods", "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{phase=\"Running\"})"}]},
+        {"id": 3, "type": "stat", "title": "Pods not running", "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum(kube_pod_status_phase{phase!=\"Running\",phase!=\"Succeeded\"})"}]},
+        {"id": 4, "type": "stat", "title": "Container restarts (1h)", "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum(increase(kube_pod_container_status_restarts_total[1h]))"}]},
+        {"id": 5, "type": "timeseries", "title": "Node CPU usage", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+         "targets": [{"refId": "A", "expr": "1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))", "legendFormat": "{{node}}"}]},
+        {"id": 6, "type": "timeseries", "title": "Node memory usage", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+         "targets": [{"refId": "A", "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes", "legendFormat": "{{node}}"}]},
+        {"id": 7, "type": "timeseries", "title": "Pods by phase", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum by (phase) (kube_pod_status_phase)", "legendFormat": "{{phase}}"}]},
+        {"id": 8, "type": "timeseries", "title": "Container restarts by pod", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[10m])) > 0", "legendFormat": "{{namespace}}/{{pod}}"}]}
+      ]
+    }
+  nodes.json: |
+    {
+      "uid": "kiac-nodes",
+      "title": "Nodes",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {"id": 1, "type": "timeseries", "title": "CPU usage", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+         "targets": [{"refId": "A", "expr": "1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))", "legendFormat": "{{node}}"}]},
+        {"id": 2, "type": "timeseries", "title": "Memory used", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}},
+         "targets": [{"refId": "A", "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes", "legendFormat": "{{node}}"}]},
+        {"id": 3, "type": "timeseries", "title": "Load average (1m)", "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "node_load1", "legendFormat": "{{node}}"}]},
+        {"id": 4, "type": "timeseries", "title": "Filesystem usage", "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+         "targets": [{"refId": "A", "expr": "max by (node) (1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs|ramfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs|ramfs\"})", "legendFormat": "{{node}}"}]},
+        {"id": 5, "type": "timeseries", "title": "Network throughput", "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}},
+         "targets": [
+           {"refId": "A", "expr": "sum by (node) (rate(node_network_receive_bytes_total{device!=\"lo\"}[5m]))", "legendFormat": "{{node}} rx"},
+           {"refId": "B", "expr": "sum by (node) (rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m]))", "legendFormat": "{{node}} tx"}
+         ]},
+        {"id": 6, "type": "timeseries", "title": "Pods per node", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+         "datasource": {"type": "prometheus", "uid": "prometheus"},
+         "targets": [{"refId": "A", "expr": "sum by (node) (kube_pod_info)", "legendFormat": "{{node}}"}]}
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: kiac-observability
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      # Pin to the node owning the kiac-primary LB pool: traffic entering
+      # one node and NATed to a pod on another crosses vmnet's slow
+      # forwarding path, so the UI must be pod-local to its LB IP.
+      nodeSelector:
+        kiac.io/lb-primary: "true"
+      # The image runs as the grafana user; fsGroup makes the emptyDir
+      # backing /var/lib/grafana (sqlite state) writable.
+      securityContext:
+        runAsUser: 472
+        runAsNonRoot: true
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: docker.io/grafana/grafana:12.0.2
+          env:
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Admin
+            - name: GF_AUTH_BASIC_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: kiac-observability
+  labels:
+    app: grafana
+  # The MetalLB pool holds one /32 per worker; sharing lets Grafana and
+  # the Traefik gateway coexist on a single-worker cluster. Port 3000
+  # keeps it disjoint from Traefik's 80/443 (sharing requires no overlap).
+  # The kiac-primary pool keeps the IP on the node the pod is pinned to.
+  annotations:
+    metallb.io/allow-shared-ip: kiac
+    metallb.io/address-pool: kiac-primary
+spec:
+  type: LoadBalancer
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

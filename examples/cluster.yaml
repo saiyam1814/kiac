@@ -1,0 +1,23 @@
+# kiac cluster config, used with: kiac create cluster --config cluster.yaml
+#
+# Every key is optional. Precedence: a flag set explicitly on the
+# command line overrides the value from this file; omitted keys keep
+# the CLI defaults. For a fully spelled-out config with every knob
+# and all addons on, see examples/cluster-full.yaml.
+
+name: dev            # cluster name: lowercase letters, digits, dashes
+workers: 2           # worker node count; 0 untaints the control plane
+k8sVersion: "1.36"   # Kubernetes minor ("1.36") or exact patch ("1.36.1")
+# image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion
+cni: kindnet         # pod network: kindnet, or none to bring your own
+cpus: "4"            # vCPUs per node VM (quote it: YAML reads bare 4 as a number)
+memory: 4G           # memory per node VM
+wait: 5m             # timeout for nodes to become Ready
+
+# Addons are positive toggles; omitted keys keep the defaults shown.
+addons:
+  metrics: true          # metrics-server (kubectl top nodes/pods)
+  storage: true          # local-path default StorageClass
+  loadBalancer: true     # MetalLB, Services of type LoadBalancer
+  observability: false   # Prometheus + Grafana + node-exporter
+  gateway: false         # Gateway API CRDs + Traefik

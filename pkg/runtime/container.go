@@ -186,9 +186,11 @@ func (c *Client) IP(name string) (string, error) {
 
 // Info is one row from `container ls`.
 type Info struct {
-	Name   string
-	Image  string
-	Status string
+	Name    string
+	Image   string
+	Status  string
+	IP      string // first IPv4 without CIDR suffix; empty while stopped
+	Created string // creation timestamp as the CLI reports it (RFC3339)
 }
 
 // List returns containers whose names start with prefix (running or not).
@@ -210,9 +212,11 @@ func parseList(out, prefix string) ([]Info, error) {
 	var infos []Info
 	for _, row := range rows {
 		info := Info{
-			Name:   firstString(row, "configuration.id", "id", "name"),
-			Image:  firstString(row, "configuration.image.reference", "image", "imageRef"),
-			Status: firstString(row, "status.state", "status", "state"),
+			Name:    firstString(row, "configuration.id", "id", "name"),
+			Image:   firstString(row, "configuration.image.reference", "image", "imageRef"),
+			Status:  firstString(row, "status.state", "status", "state"),
+			IP:      firstIPv4(row),
+			Created: firstString(row, "configuration.creationDate", "creationDate", "created"),
 		}
 		if info.Name == "" || !strings.HasPrefix(info.Name, prefix) {
 			continue
@@ -220,6 +224,40 @@ func parseList(out, prefix string) ([]Info, error) {
 		infos = append(infos, info)
 	}
 	return infos, nil
+}
+
+var ipv4Re = regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+
+// firstIPv4 pulls a node address out of an ls row: CLI 1.x lists it
+// under status.networks (ipv4Address), 0.x under a top-level networks
+// array (address); both append a CIDR suffix.
+func firstIPv4(row map[string]any) string {
+	var lists []any
+	if st, ok := row["status"].(map[string]any); ok {
+		lists = append(lists, st["networks"])
+	}
+	lists = append(lists, row["networks"])
+	for _, l := range lists {
+		arr, ok := l.([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range arr {
+			net, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, key := range []string{"ipv4Address", "address"} {
+				if s, ok := net[key].(string); ok {
+					ip, _, _ := strings.Cut(s, "/")
+					if ipv4Re.MatchString(ip) {
+						return ip
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // firstString digs dotted paths out of loosely-typed JSON and returns the

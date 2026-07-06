@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var doctorFix bool
+
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check that this Mac can run kiac clusters",
@@ -44,11 +46,24 @@ var doctorCmd = &cobra.Command{
 
 		if cliOK {
 			running := rt.SystemRunning()
-			d := "running"
-			if !running {
-				d = "stopped - kiac will start it automatically on create"
+			switch {
+			case !running && doctorFix:
+				// Before/after both go through ui.Check so a fix is never silent.
+				ui.Check(false, "container system service", "stopped - fixing: container system start")
+				if err := rt.SystemStart(); err != nil {
+					failures++
+					ui.Check(false, "container system service", "start failed: "+err.Error())
+				} else if rt.SystemRunning() {
+					ui.Check(true, "container system service", "running (started by --fix)")
+				} else {
+					failures++
+					ui.Check(false, "container system service", "still not running after start; inspect with: container system status")
+				}
+			case running:
+				ui.Check(true, "container system service", "running")
+			default:
+				ui.Check(false, "container system service", "stopped - kiac will start it automatically on create, or run: kiac doctor --fix")
 			}
-			ui.Check(running, "container system service", d)
 		}
 
 		_, kubectlErr := exec.LookPath("kubectl")
@@ -71,6 +86,10 @@ var doctorCmd = &cobra.Command{
 		ui.Hintf("all good - run: kiac create cluster")
 		return nil
 	},
+}
+
+func init() {
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "attempt to fix failed checks (starts the container system service)")
 }
 
 func macOSVersion() string {

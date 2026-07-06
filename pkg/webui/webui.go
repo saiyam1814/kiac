@@ -11,15 +11,21 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/saiyam1814/kiac/pkg/cluster"
 )
 
 //go:embed index.html
 var indexHTML []byte
+
+// adminConf mirrors pkg/cluster: kubectl always runs inside the
+// control-plane node against the admin kubeconfig kubeadm wrote there.
+const adminConf = "/etc/kubernetes/admin.conf"
 
 type job struct {
 	mu     sync.Mutex
@@ -31,20 +37,23 @@ type server struct {
 	mgr  *cluster.Manager
 	self string
 
-	mu   sync.Mutex
-	jobs map[string]*job
-	busy map[string]bool // cluster names with an in-flight create/delete
-	next int
+	mu      sync.Mutex
+	jobs    map[string]*job
+	busy    map[string]bool   // cluster names with an in-flight mutating job
+	created map[string]string // cluster name -> creationTimestamp, stable for the cluster's lifetime
+	next    int
 }
 
-// Serve starts the UI server on 127.0.0.1:port and blocks.
-func Serve(port int) (string, http.Handler, net.Listener, error) {
+func newServer() (*server, error) {
 	self, err := os.Executable()
 	if err != nil {
-		return "", nil, nil, err
+		return nil, err
 	}
-	s := &server{mgr: cluster.NewManager(), self: self, jobs: map[string]*job{}, busy: map[string]bool{}}
+	return &server{mgr: cluster.NewManager(), self: self,
+		jobs: map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}, nil
+}
 
+func (s *server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -55,14 +64,26 @@ func Serve(port int) (string, http.Handler, net.Listener, error) {
 	mux.HandleFunc("POST /api/clusters", s.createCluster)
 	mux.HandleFunc("DELETE /api/clusters/{name}", s.deleteCluster)
 	mux.HandleFunc("GET /api/clusters/{name}/kubeconfig", s.kubeconfig)
+	mux.HandleFunc("GET /api/clusters/{name}/metrics", s.metrics)
+	mux.HandleFunc("GET /api/clusters/{name}/addons", s.addons)
+	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/stop", s.nodeAction("stop"))
+	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/start", s.nodeAction("start"))
 	mux.HandleFunc("GET /api/jobs/{id}", s.getJob)
+	return mux
+}
 
+// Serve starts the UI server on 127.0.0.1:port and blocks.
+func Serve(port int) (string, http.Handler, net.Listener, error) {
+	s, err := newServer()
+	if err != nil {
+		return "", nil, nil, err
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return "", nil, nil, err
 	}
 	url := fmt.Sprintf("http://%s", ln.Addr().String())
-	return url, loopbackOnly(ln.Addr().String(), mux), ln, nil
+	return url, loopbackOnly(ln.Addr().String(), s.routes()), ln, nil
 }
 
 // loopbackOnly rejects cross-origin and DNS-rebinding requests. The UI
@@ -106,14 +127,17 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 }
 
 type clusterInfo struct {
-	Name  string     `json:"name"`
-	Nodes []nodeInfo `json:"nodes"`
+	Name    string     `json:"name"`
+	Created string     `json:"created,omitempty"`
+	Nodes   []nodeInfo `json:"nodes"`
 }
 
 type nodeInfo struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Image  string `json:"image"`
+	Role   string `json:"role"`
+	IP     string `json:"ip,omitempty"`
 }
 
 func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
@@ -128,24 +152,165 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		ci := clusterInfo{Name: n}
+		ci := clusterInfo{Name: n, Created: s.createdAt(n)}
 		for _, nd := range nodes {
-			ci.Nodes = append(ci.Nodes, nodeInfo{Name: nd.Name, Status: nd.Status, Image: nd.Image})
+			ni := nodeInfo{Name: nd.Name, Status: nd.Status, Image: nd.Image, Role: nodeRole(nd.Name)}
+			// IPs come from inside the VM; a stopped node has none.
+			if strings.EqualFold(nd.Status, "running") {
+				if ip, err := s.mgr.Runtime().IP(nd.Name); err == nil {
+					ni.IP = ip
+				}
+			}
+			ci.Nodes = append(ci.Nodes, ni)
 		}
 		out = append(out, ci)
 	}
+	s.pruneCreated(names)
 	writeJSON(w, 200, out)
 }
 
+func nodeRole(node string) string {
+	if strings.HasSuffix(node, "-control-plane") {
+		return "control-plane"
+	}
+	return "worker"
+}
+
+// createdAt caches the control-plane Node's creationTimestamp: it never
+// changes while the cluster exists, and fetching it costs an exec into
+// the node VM on every list poll otherwise.
+func (s *server) createdAt(name string) string {
+	s.mu.Lock()
+	c, ok := s.created[name]
+	s.mu.Unlock()
+	if ok {
+		return c
+	}
+	cp := cluster.ControlPlane(name)
+	out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
+		"get", "node", cp, "-o", "jsonpath={.metadata.creationTimestamp}")
+	if err != nil {
+		return ""
+	}
+	ts := strings.TrimSpace(out)
+	if _, err := time.Parse(time.RFC3339, ts); err != nil {
+		return ""
+	}
+	s.mu.Lock()
+	s.created[name] = ts
+	s.mu.Unlock()
+	return ts
+}
+
+// pruneCreated drops cache entries for clusters that no longer exist, so
+// a deleted-and-recreated cluster never shows the old creation time.
+func (s *server) pruneCreated(names []string) {
+	live := map[string]bool{}
+	for _, n := range names {
+		live[n] = true
+	}
+	s.mu.Lock()
+	for n := range s.created {
+		if !live[n] {
+			delete(s.created, n)
+		}
+	}
+	s.mu.Unlock()
+}
+
+type nodeMetrics struct {
+	Node   string `json:"node"`
+	CPU    string `json:"cpu"`
+	CPUPct int    `json:"cpuPct"`
+	Mem    string `json:"mem"`
+	MemPct int    `json:"memPct"`
+}
+
+// metrics shells `kubectl top nodes` inside the control plane. Any
+// failure (cluster still booting, metrics-server not scraped yet, node
+// stopped) is a ready=false payload rather than an HTTP error, so the
+// UI degrades to plain node state instead of breaking.
+func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !sanitizeName(name) {
+		writeJSON(w, 400, map[string]string{"error": "invalid name"})
+		return
+	}
+	out, err := s.mgr.Runtime().Exec(cluster.ControlPlane(name),
+		"kubectl", "--kubeconfig", adminConf, "top", "nodes", "--no-headers")
+	rows := []nodeMetrics{}
+	if err == nil {
+		rows = parseTopNodes(out)
+	}
+	writeJSON(w, 200, map[string]any{"ready": err == nil && len(rows) > 0, "nodes": rows})
+}
+
+// parseTopNodes parses `kubectl top nodes --no-headers` rows:
+// NAME CPU(cores) CPU% MEMORY(bytes) MEMORY%. Rows carrying <unknown>
+// (a node metrics-server has not scraped) are dropped, not errors.
+func parseTopNodes(out string) []nodeMetrics {
+	var rows []nodeMetrics
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 5 || strings.Contains(line, "<unknown>") {
+			continue
+		}
+		cpuPct, err1 := strconv.Atoi(strings.TrimSuffix(f[2], "%"))
+		memPct, err2 := strconv.Atoi(strings.TrimSuffix(f[4], "%"))
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rows = append(rows, nodeMetrics{Node: f[0], CPU: f[1], CPUPct: cpuPct, Mem: f[3], MemPct: memPct})
+	}
+	return rows
+}
+
+var (
+	ipv4Re     = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
+	hostPortRe = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$`)
+)
+
+// addons reports the LoadBalancer endpoints of the optional stacks. A
+// missing namespace, missing Service, or still-pending EXTERNAL-IP all
+// yield an empty string, which the UI reads as "hide the chip". Results
+// are regexp-validated so nothing but an address ever reaches an href.
+func (s *server) addons(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !sanitizeName(name) {
+		writeJSON(w, 400, map[string]string{"error": "invalid name"})
+		return
+	}
+	cp := cluster.ControlPlane(name)
+	res := map[string]string{"grafana": "", "gateway": ""}
+	if out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
+		"-n", "kiac-observability", "get", "svc", "grafana",
+		"-o", "jsonpath={.status.loadBalancer.ingress[0].ip}:{.spec.ports[0].port}"); err == nil {
+		if v := strings.TrimSpace(out); hostPortRe.MatchString(v) {
+			res["grafana"] = v
+		}
+	}
+	if out, err := s.mgr.Runtime().Exec(cp, "kubectl", "--kubeconfig", adminConf,
+		"-n", "kiac-gateway", "get", "svc",
+		"-o", "jsonpath={.items[*].status.loadBalancer.ingress[*].ip}"); err == nil {
+		if f := strings.Fields(out); len(f) > 0 && ipv4Re.MatchString(f[0]) {
+			res["gateway"] = f[0]
+		}
+	}
+	writeJSON(w, 200, res)
+}
+
 type createReq struct {
-	Name       string `json:"name"`
-	Workers    int    `json:"workers"`
-	K8sVersion string `json:"k8sVersion"`
-	CNI        string `json:"cni"`
-	Memory     string `json:"memory"`
-	NoLB       bool   `json:"noLB"`
-	NoMetrics  bool   `json:"noMetrics"`
-	NoStorage  bool   `json:"noStorage"`
+	Name          string `json:"name"`
+	Workers       int    `json:"workers"`
+	K8sVersion    string `json:"k8sVersion"`
+	CNI           string `json:"cni"`
+	CPUs          string `json:"cpus"`
+	Memory        string `json:"memory"`
+	NoLB          bool   `json:"noLB"`
+	NoMetrics     bool   `json:"noMetrics"`
+	NoStorage     bool   `json:"noStorage"`
+	Observability bool   `json:"observability"`
+	Gateway       bool   `json:"gateway"`
 }
 
 func sanitizeName(s string) bool { return cluster.ValidName(s) }
@@ -168,6 +333,9 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	if req.CNI != "" {
 		args = append(args, "--cni", req.CNI)
 	}
+	if req.CPUs != "" {
+		args = append(args, "--cpus", req.CPUs)
+	}
 	if req.Memory != "" {
 		args = append(args, "--memory", req.Memory)
 	}
@@ -179,6 +347,12 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NoStorage {
 		args = append(args, "--no-storage")
+	}
+	if req.Observability {
+		args = append(args, "--observability")
+	}
+	if req.Gateway {
+		args = append(args, "--gateway")
 	}
 	id, err := s.startJob(req.Name, args)
 	if err != nil {
@@ -200,6 +374,43 @@ func (s *server) deleteCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]string{"job": id})
+}
+
+// nodeAction shells out to `kiac <verb> node <node> --name <cluster>`
+// through the same per-cluster job lock as create/delete, so a stop can
+// never race a delete of the same cluster.
+func (s *server) nodeAction(verb string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name, node := r.PathValue("name"), r.PathValue("node")
+		if !sanitizeName(name) || !clusterNode(name, node) {
+			writeJSON(w, 400, map[string]string{"error": "invalid cluster or node name"})
+			return
+		}
+		id, err := s.startJob(name, []string{verb, "node", node, "--name", name})
+		if err != nil {
+			writeJSON(w, 409, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, 202, map[string]string{"job": id})
+	}
+}
+
+// clusterNode reports whether node names a member of cluster name, so a
+// crafted path cannot aim stop/start at an arbitrary container.
+func clusterNode(name, node string) bool {
+	if node == cluster.ControlPlane(name) {
+		return true
+	}
+	rest, ok := strings.CutPrefix(node, "kiac-"+name+"-worker-")
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *server) kubeconfig(w http.ResponseWriter, r *http.Request) {

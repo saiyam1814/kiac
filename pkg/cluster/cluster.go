@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
@@ -21,7 +22,8 @@ type Config struct {
 	Workers       int
 	Image         string
 	CPUs          string
-	Memory        string
+	Memory        string // worker VMs; measured idle usage is ~400Mi, so 2G default
+	CPMemory      string // control plane; etcd+apiserver (and all addons on single-node) need headroom
 	CNI           string
 	NoMetrics     bool
 	NoStorage     bool
@@ -101,19 +103,24 @@ func (m *Manager) Create(cfg Config) error {
 
 	if err := ui.Step(fmt.Sprintf("Booting %d node VM(s)", len(nodes)), func() error {
 		for _, n := range nodes {
-			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: cfg.Memory}); err != nil {
+			mem := cfg.Memory
+			if n == cp && cfg.CPMemory != "" {
+				mem = cfg.CPMemory
+			}
+			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem}); err != nil {
 				return err
 			}
 		}
-		for _, n := range nodes {
+		// Each node boots independently, so readiness polling and the
+		// sysctl run concurrently across nodes.
+		return inParallel(len(nodes), func(i int) error {
+			n := nodes[i]
 			if err := m.rt.WaitReady(n, cfg.WaitTimeout); err != nil {
 				return err
 			}
-			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-				return err
-			}
-		}
-		return nil
+			_, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1")
+			return err
+		})
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
 		return err
@@ -141,16 +148,16 @@ func (m *Manager) Create(cfg Config) error {
 				return fmt.Errorf("unexpected join command: %q", joinCmd)
 			}
 			join = append(join, "--ignore-preflight-errors=all")
-			for i := 1; i <= cfg.Workers; i++ {
-				w := worker(cfg.Name, i)
+			// Joins from distinct nodes against one control plane are
+			// safe to run concurrently.
+			return inParallel(cfg.Workers, func(i int) error {
+				w := worker(cfg.Name, i+1)
 				// Fresh slice per worker so each gets its own --node-name
 				// without aliasing the shared base via append.
 				args := append(append([]string{}, join...), "--node-name", w)
-				if _, err := m.rt.Exec(w, args...); err != nil {
-					return err
-				}
-			}
-			return nil
+				_, err := m.rt.Exec(w, args...)
+				return err
+			})
 		}); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
@@ -173,31 +180,44 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
+	// The three default addons apply independent manifests against the
+	// same apiserver, so they install concurrently under one step.
+	type addon struct {
+		name  string // step title fragment and error prefix
+		apply func() error
+	}
+	var addons []addon
 	if !cfg.NoStorage {
-		if err := ui.Step("Installing storage (local-path-provisioner)", func() error {
+		addons = append(addons, addon{"storage", func() error {
 			_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 				"apply", "-f", "/kind/manifests/default-storage.yaml")
 			return err
-		}); err != nil {
-			m.cleanupOnFailure(cfg.Name)
-			return err
-		}
+		}})
 	}
-
 	if !cfg.NoMetrics {
-		if err := ui.Step("Installing metrics-server", func() error {
+		addons = append(addons, addon{"metrics-server", func() error {
 			return m.rt.ExecStdin(cp, strings.NewReader(metricsServerManifest),
 				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
-		}); err != nil {
-			m.cleanupOnFailure(cfg.Name)
-			return err
-		}
+		}})
 	}
-
 	if !cfg.NoLB {
-		if err := ui.Step("Installing LoadBalancer (MetalLB)", func() error {
+		addons = append(addons, addon{"MetalLB", func() error {
 			return m.rt.ExecStdin(cp, strings.NewReader(metallbManifest),
 				"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
+		}})
+	}
+	if len(addons) > 0 {
+		var names []string
+		for _, a := range addons {
+			names = append(names, a.name)
+		}
+		if err := ui.Step(fmt.Sprintf("Installing addons (%s)", strings.Join(names, ", ")), func() error {
+			return inParallel(len(addons), func(i int) error {
+				if err := addons[i].apply(); err != nil {
+					return fmt.Errorf("%s: %w", addons[i].name, err)
+				}
+				return nil
+			})
 		}); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
@@ -299,21 +319,39 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 // for a live node IP with its own MAC, hijacking all node-to-node
 // traffic for that node (apiserver heartbeats included) and marking it
 // NotReady. The webhook needs a moment after rollout, so apply retries.
+//
+// The first pooled node is the PRIMARY: its pool is named kiac-primary
+// (a stable name static manifests can request via the
+// metallb.io/address-pool annotation) and the node is labeled
+// kiac.io/lb-primary=true (so those manifests can co-schedule their
+// pods onto it with a nodeSelector). Traffic that enters one node and
+// gets NATed to a pod on another crosses vmnet's slow forwarding path
+// (~100x worse for bulk transfers), so bundled addons like Grafana and
+// Traefik pin both their LB IP and their pods to the primary node,
+// keeping delivery pod-local.
 func (m *Manager) configureLBPool(cp string, cfg Config, nodes []string) error {
 	pool := nodes
 	if cfg.Workers > 0 {
 		pool = nodes[1:]
 	}
 	var docs []string
-	for _, n := range pool {
+	for i, n := range pool {
 		ip, err := m.rt.IP(n)
 		if err != nil {
 			return err
 		}
+		poolName := "kiac-ip-" + n
+		if i == 0 {
+			poolName = "kiac-primary"
+			if _, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+				"label", "node", n, "kiac.io/lb-primary=true", "--overwrite"); err != nil {
+				return err
+			}
+		}
 		docs = append(docs, fmt.Sprintf(`apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: kiac-ip-%[1]s
+  name: %[3]s
   namespace: metallb-system
 spec:
   addresses: ["%[2]s/32"]
@@ -324,11 +362,11 @@ metadata:
   name: kiac-l2-%[1]s
   namespace: metallb-system
 spec:
-  ipAddressPools: [kiac-ip-%[1]s]
+  ipAddressPools: [%[3]s]
   nodeSelectors:
     - matchLabels:
         kubernetes.io/hostname: %[1]s
-`, n, ip))
+`, n, ip, poolName))
 	}
 	manifest := strings.Join(docs, "---\n")
 
@@ -338,8 +376,12 @@ spec:
 		return fmt.Errorf("MetalLB controller did not become available: %w", err)
 	}
 
+	// Available lags actual webhook serving: the endpoint must exist and
+	// kube-proxy must program it, which on a loaded machine trails the
+	// deployment condition by minutes. Retries are cheap and idempotent,
+	// so the window is generous (36 x 5s on top of the wait above).
 	var lastErr error
-	for attempt := 0; attempt < 18; attempt++ {
+	for attempt := 0; attempt < 36; attempt++ {
 		lastErr = m.rt.ExecStdin(cp, strings.NewReader(manifest),
 			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-")
 		if lastErr == nil {
@@ -485,6 +527,29 @@ func (m *Manager) LoadImages(name string, images []string) error {
 			return nil
 		})
 		os.Remove(tarPath)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// inParallel runs fn(0..n-1) concurrently and waits for every call to
+// finish: execs into node VMs cannot be cancelled mid-flight, so no
+// goroutine may be abandoned. The lowest-index error wins, keeping the
+// reported failure deterministic regardless of goroutine scheduling.
+func inParallel(n int, fn func(i int) error) error {
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = fn(i)
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
 		if err != nil {
 			return err
 		}
