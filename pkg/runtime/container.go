@@ -90,6 +90,7 @@ type RunOpts struct {
 	Memory     string
 	Env        []string // KEY=VALUE pairs, passed as -e flags
 	Entrypoint string   // overrides the image entrypoint when non-empty
+	Kernel     string   // custom kernel Image path (--kernel), empty = bundled default
 	Args       []string // command arguments appended after the image
 }
 
@@ -113,6 +114,9 @@ func (c *Client) RunDetached(o RunOpts) error {
 	}
 	if o.Entrypoint != "" {
 		args = append(args, "--entrypoint", o.Entrypoint)
+	}
+	if o.Kernel != "" {
+		args = append(args, "--kernel", o.Kernel)
 	}
 	args = append(args, o.Image)
 	args = append(args, o.Args...)

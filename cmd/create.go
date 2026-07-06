@@ -38,6 +38,13 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
 		}
+		if createKernel != "" {
+			kpath, err := cluster.ResolveKernel(createKernel)
+			if err != nil {
+				return err
+			}
+			createCfg.Kernel = kpath
+		}
 		if !cluster.ValidName(createCfg.Name) {
 			return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", createCfg.Name)
 		}
@@ -76,6 +83,7 @@ var (
 	k8sVersion       string
 	createDistro     string
 	createConfigFile string
+	createKernel     string
 )
 
 func init() {
@@ -88,7 +96,8 @@ func init() {
 	f.StringVar(&createDistro, "distro", "kubeadm",
 		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage, servicelb, and metrics-server)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
-	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, or none (custom kernels needed for flannel/calico/cilium)")
+	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, or none (bring your own; pair with --kernel full for cilium/calico/flannel)")
+	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")

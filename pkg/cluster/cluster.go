@@ -25,6 +25,7 @@ type Config struct {
 	Memory        string // worker VMs; measured idle usage is ~400Mi, so 2G default
 	CPMemory      string // control plane; etcd+apiserver (and all addons on single-node) need headroom
 	CNI           string
+	Kernel        string // resolved kernel Image path; empty = runtime default
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
@@ -107,7 +108,7 @@ func (m *Manager) Create(cfg Config) error {
 			if n == cp && cfg.CPMemory != "" {
 				mem = cfg.CPMemory
 			}
-			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem}); err != nil {
+			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem, Kernel: cfg.Kernel}); err != nil {
 				return err
 			}
 		}

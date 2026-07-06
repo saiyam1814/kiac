@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -22,11 +23,15 @@ const k3sKubeconfig = "/etc/rancher/k3s/k3s.yaml"
 func k3sServerArgs(cfg Config, nodeName string) []string {
 	args := []string{
 		"server",
-		// The node kernel is monolithic with no VXLAN support, and
-		// VXLAN is flannel's default backend; host-gw routes pod
-		// traffic over vmnet instead, exactly like kindnet does on
-		// the kubeadm path.
-		"--flannel-backend=host-gw",
+		// flannel is disabled outright: even with host-gw (the node
+		// kernel has no VXLAN), flannel bridges pods onto cni0, and
+		// without br_netfilter same-node pod->ClusterIP return
+		// traffic bypasses iptables un-DNAT and times out. kiac
+		// applies kindnet (PTP, routed) right after the API answers.
+		"--flannel-backend=none",
+		// k3s's network-policy controller programs iptables against
+		// the flannel bridge; without flannel it only logs errors.
+		"--disable-network-policy",
 		// The container name is also the VM hostname, so it is a
 		// stable SAN; the apiserver cert already includes the node IP
 		// that mergeKubeconfig points the host's kubeconfig at.
@@ -87,6 +92,26 @@ func k3sAgentEnv(serverIP, token string) []string {
 		"K3S_URL=https://" + serverIP + ":6443",
 		"K3S_TOKEN=" + token,
 	}
+}
+
+// ensureK3sCNIPlugins installs the upstream CNI plugin binaries kindnet
+// needs into /opt/cni/bin of a node VM. kubelet resolves plugins there,
+// and with the bundled flannel disabled k3s leaves the directory empty.
+// k3s's own multicall binary is no substitute: it does not implement
+// ptp, the plugin kindnet's conflist is built around (and bridge would
+// reintroduce the br_netfilter breakage kindnet exists to avoid).
+func (m *Manager) ensureK3sCNIPlugins(node string) error {
+	archive, err := ensureCNIPluginsArchive()
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
+		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin ./loopback ./ptp ./host-local ./portmap ./bandwidth")
 }
 
 // k3sToken generates the shared cluster secret agents present to join.
@@ -159,6 +184,17 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		return err
 	}
 
+	if err := ui.Step("Installing CNI (kindnet)", func() error {
+		if err := m.ensureK3sCNIPlugins(cp); err != nil {
+			return err
+		}
+		return m.k3sKubectlStdin(cp, strings.NewReader(k3sKindnetManifest),
+			"apply", "-f", "-")
+	}); err != nil {
+		m.cleanupOnFailure(cfg.Name)
+		return err
+	}
+
 	serverIP, err := m.rt.IP(cp)
 	if err != nil {
 		m.cleanupOnFailure(cfg.Name)
@@ -183,7 +219,12 @@ func (m *Manager) CreateK3s(cfg Config) error {
 					return err
 				}
 			}
-			return nil
+			// Pod sandboxes on the agents need the standard CNI plugin
+			// names resolvable too; the helper's poll rides out each
+			// agent's k3s self-extraction.
+			return inParallel(cfg.Workers, func(i int) error {
+				return m.ensureK3sCNIPlugins(worker(cfg.Name, i+1))
+			})
 		}); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
@@ -417,21 +458,27 @@ func (m *Manager) waitK3sSvcLBIP(cp, namespace, svc string, timeout time.Duratio
 		}
 	}
 	deadline := time.Now().Add(timeout)
+	first := ""
 	for {
 		out, err := m.k3sKubectl(cp, "get", "svc", "-n", namespace, svc,
 			"-o", "jsonpath={range .status.loadBalancer.ingress[*]}{.ip}{\" \"}{end}")
 		if err == nil {
-			ips := strings.Fields(out)
-			if len(ips) > 0 {
-				for _, ip := range ips {
-					if primaryIP != "" && ip == primaryIP {
-						return ip, nil
-					}
+			for _, ip := range strings.Fields(out) {
+				if primaryIP != "" && ip == primaryIP {
+					return ip, nil
 				}
-				return ips[0], nil
+				if first == "" {
+					first = ip
+				}
 			}
 		}
 		if time.Now().After(deadline) {
+			// servicelb publishes node IPs one at a time as its
+			// per-node pods go ready; only fall back to whichever
+			// came first once the primary has had its full window.
+			if first != "" {
+				return first, nil
+			}
 			return "", fmt.Errorf("service %s/%s never got a LoadBalancer IP (servicelb disabled?); check: kubectl get svc -n %s %s", namespace, svc, namespace, svc)
 		}
 		time.Sleep(3 * time.Second)

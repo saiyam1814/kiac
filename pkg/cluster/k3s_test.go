@@ -63,7 +63,8 @@ func TestK3sServerArgs(t *testing.T) {
 	}
 	joined := " " + strings.Join(args, " ") + " "
 	for _, want := range []string{
-		" --flannel-backend=host-gw ", // node kernel has no VXLAN
+		" --flannel-backend=none ",   // kiac applies kindnet instead (no br_netfilter in the kernel)
+		" --disable-network-policy ", // k3s netpol controller targets the flannel bridge
 		" --tls-san kiac-dev-control-plane ",
 		" --node-name kiac-dev-control-plane ",
 		" --disable=traefik ", // never fight --gateway Traefik for 80/443
