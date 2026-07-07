@@ -19,6 +19,7 @@ var (
 	dim    = "\033[2m"
 	green  = "\033[32m"
 	red    = "\033[31m"
+	yellow = "\033[33m"
 	cyan   = "\033[36m"
 	accent = "\033[38;5;33m" // kubernetes blue
 )
@@ -56,6 +57,11 @@ func Successf(format string, args ...any) {
 // Hintf prints an indented command hint.
 func Hintf(format string, args ...any) {
 	fmt.Printf("  %s\n", c(cyan, fmt.Sprintf(format, args...)))
+}
+
+// Warnf prints a prominent, non-fatal warning line.
+func Warnf(format string, args ...any) {
+	fmt.Printf(" %s %s\n", c(bold+yellow, "!"), c(yellow, fmt.Sprintf(format, args...)))
 }
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}

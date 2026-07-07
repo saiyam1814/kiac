@@ -170,9 +170,25 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 		return err
 	}
 
+	// Resume is the documented recovery for a control-plane VM the Mac
+	// could not reach, so confirming host access came back is the whole
+	// point of reporting here.
+	reachable := false
+	_ = ui.Step("Checking API server reachability from your Mac", func() error {
+		reachable = hostReachAPI(newIP, 10*time.Second)
+		if !reachable {
+			return fmt.Errorf("host cannot reach %s:6443", newIP)
+		}
+		return nil
+	})
+
 	ui.Successf("Cluster %q resumed in %s.", name, time.Since(start).Round(time.Second))
 	ui.Infof("context kiac-%s updated in %s", name, kubeconfigPath)
-	ui.Hintf("kubectl get nodes")
+	if reachable {
+		ui.Hintf("kubectl get nodes")
+	} else {
+		warnAPIUnreachable(cp, name, newIP)
+	}
 	return nil
 }
 

@@ -283,13 +283,29 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		return err
 	}
 
+	// See Create: vmnet can leave the control-plane VM unreachable from
+	// the Mac even though the API is healthy inside it. Probe before
+	// suggesting kubectl.
+	reachable := false
+	_ = ui.Step("Checking API server reachability from your Mac", func() error {
+		reachable = hostReachAPI(serverIP, 10*time.Second)
+		if !reachable {
+			return fmt.Errorf("host cannot reach %s:6443", serverIP)
+		}
+		return nil
+	})
+
 	ui.Successf("k3s cluster %q is ready in %s. Every node is its own lightweight VM.",
 		cfg.Name, time.Since(start).Round(time.Second))
 	ui.Infof("context kiac-%s merged into %s", cfg.Name, kubeconfigPath)
 	ui.Infof("k3s bundles local-path storage, servicelb, and metrics-server; kiac-lb is not needed here")
-	ui.Hintf("kubectl get nodes")
-	if !cfg.NoMetrics {
-		ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")
+	if reachable {
+		ui.Hintf("kubectl get nodes")
+		if !cfg.NoMetrics {
+			ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")
+		}
+	} else {
+		warnAPIUnreachable(cp, cfg.Name, serverIP)
 	}
 	return nil
 }

@@ -119,6 +119,18 @@ dev   0/3 stopped</span></code></pre>
     <li>A full reboot plus <code>kiac resume cluster</code> does <b>not</b> hit this; it is specific to restarting a single VM while the container system service keeps running.</li>
   </ul>
 
+  <h2 id="host-api-unreachable">kubectl: "no route to host" on a freshly created cluster</h2>
+  <pre><code><span class="o">Unable to connect to the server: dial tcp 192.168.64.5:6443: connect: no route to host</span></code></pre>
+  <p>Same apple/container vmnet family as above, seen right after <code>kiac create</code>: the API server is healthy <b>inside</b> the control-plane VM (<code>container exec kiac-&lt;name&gt;-control-plane kubectl get nodes</code> works, Grafana on a LoadBalancer IP works), but your Mac cannot reach the control-plane VM's IP on <code>6443</code>. "no route to host" is an ARP/L3 failure for that one VM IP, not a port or TLS problem: vmnet did not make that VM host-reachable, often a stale ARP entry left over from a deleted cluster whose control plane reused the same lease. kiac now checks this at the end of <code>create</code> and, when it fails, prints the recovery instead of a <code>kubectl</code> hint that would only error.</p>
+  <p>The cluster is fine; use it from inside the VM, or reset vmnet and resume to restore host access:</p>
+  <pre><code><span class="c"># use it right now, from inside the control-plane VM</span>
+container exec kiac-dev-control-plane kubectl get nodes
+
+<span class="c"># restore kubectl from your Mac: reset vmnet, then heal the cluster</span>
+container system stop && container system start
+kiac resume cluster --name dev</code></pre>
+  <p>A full <code>container system</code> restart tears down and rebuilds vmnet (clearing the stale ARP state), and <code>kiac resume</code> re-points every node, kubeconfig, and certificate SAN at the fresh IPs. This is being tracked upstream at apple/container; see <a href="https://github.com/saiyam1814/kiac/issues/6">issue #6</a>.</p>
+
   <h2 id="slow-bulk">Cross-node bulk transfers are slow</h2>
   <p>Expected on routed CNIs (kindnet): cross-node pod traffic takes vmnet's slow forwarded path. Control traffic and ordinary dev workloads are fine; bulk data transfers are where it shows. <code>--cni cilium --kernel full</code> avoids it entirely via the vxlan overlay (~285MB/s cross-node measured). See <a href="networking.html#fast-slow">Networking</a>.</p>
 

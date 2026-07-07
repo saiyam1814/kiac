@@ -280,28 +280,44 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
-	var kubeconfigPath string
+	var kubeconfigPath, serverIP string
 	if err := ui.Step("Writing kubeconfig", func() error {
 		raw, err := m.rt.Exec(cp, "cat", adminConf)
 		if err != nil {
 			return err
 		}
-		ip, err := m.rt.IP(cp)
+		serverIP, err = m.rt.IP(cp)
 		if err != nil {
 			return err
 		}
-		kubeconfigPath, err = mergeKubeconfig(cfg.Name, raw, ip)
+		kubeconfigPath, err = mergeKubeconfig(cfg.Name, raw, serverIP)
 		return err
 	}); err != nil {
 		return err
 	}
 
+	// The API endpoint is healthy inside the VM, but vmnet may not have
+	// made the control-plane VM host-reachable; probe before handing the
+	// user a kubectl hint that would only error with "no route to host".
+	reachable := false
+	_ = ui.Step("Checking API server reachability from your Mac", func() error {
+		reachable = hostReachAPI(serverIP, 10*time.Second)
+		if !reachable {
+			return fmt.Errorf("host cannot reach %s:6443", serverIP)
+		}
+		return nil
+	})
+
 	ui.Successf("Cluster %q is ready in %s. Every node is its own lightweight VM.",
 		cfg.Name, time.Since(start).Round(time.Second))
 	ui.Infof("context kiac-%s merged into %s", cfg.Name, kubeconfigPath)
-	ui.Hintf("kubectl get nodes")
-	if !cfg.NoMetrics {
-		ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")
+	if reachable {
+		ui.Hintf("kubectl get nodes")
+		if !cfg.NoMetrics {
+			ui.Hintf("kubectl top nodes        # native metrics, give it ~60s to scrape")
+		}
+	} else {
+		warnAPIUnreachable(cp, cfg.Name, serverIP)
 	}
 	return nil
 }
