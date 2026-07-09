@@ -31,13 +31,13 @@ var kernelAssets = map[string]kernelAsset{
 	// config; see kernel/config-full.
 	"full": {
 		URL:    "https://github.com/saiyam1814/kiac/releases/download/kernel-v6.12.28-full/kiac-kernel-6.12.28-full",
-		SHA256: "764f036ca633192788cc65fd515a09e3a0242b32599805b0478751ec71355f47",
+		SHA256: "bc0455952b4542f0a28d2dfedf00538e8f4c67d8a93f70a0c875e6f22d671926",
 		File:   "kiac-kernel-6.12.28-full",
 	},
 }
 
 // kernelHTTP allows the kernel to take a while on slow links but never
-// hang a create forever; the asset is ~15MB.
+// hang a create forever; the asset is ~37MB.
 var kernelHTTP = &http.Client{Timeout: 10 * time.Minute}
 
 // ResolveKernel maps a --kernel value to a local kernel binary path.
