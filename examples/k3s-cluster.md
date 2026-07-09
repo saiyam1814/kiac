@@ -24,13 +24,12 @@ context as usual.
 
 ## 2. What is bundled, and what kiac changes
 
-k3s brings its own batteries, and kiac keeps most of them:
+k3s brings its own batteries, and kiac keeps the parts that behave well
+inside Apple Container VMs:
 
 - **sqlite datastore**, not etcd: one file, less memory, fine for a
   laptop cluster.
 - **local-path** is the default StorageClass, from k3s itself.
-- **servicelb** (klipper) backs `type: LoadBalancer` with node IPs
-  natively, so kiac-lb is not installed on this distro.
 - **metrics-server** is bundled; `kubectl top nodes` works after the
   first scrape (~60s).
 
@@ -38,6 +37,12 @@ Two deliberate changes:
 
 - The bundled **Traefik ingress is disabled**: it would fight the
   `--gateway` addon's Traefik for ports 80 and 443.
+- The bundled **servicelb is disabled** and kiac runs the same tiny
+  **kiac-lb** controller used by the kubeadm path. k3s ServiceLB
+  advertises every node IP for a LoadBalancer; on vmnet, a large upload
+  that enters a node without the backend pod still has to cross the
+  slow offload-sensitive forwarding path. kiac-lb assigns one
+  endpoint-local node IP instead.
 - The bundled **flannel is disabled** and kiac applies kindnet
   instead. Flannel wires pods onto a bridge, and on a kernel without
   br_netfilter, same-node pod-to-Service return traffic bypasses the
@@ -46,10 +51,11 @@ Two deliberate changes:
   needs (containernetworking v1.7.1) are downloaded once,
   sha256-verified, and cached under `~/.kiac`.
 
-Because the distro carries its own addons, the `--no-metrics`,
-`--no-storage`, and `--no-lb` flags map onto k3s `--disable` switches
-rather than skipping kiac installs. `--cni` does not apply here; it is
-a kubeadm-path flag and kiac says so if you pass it.
+Because the distro carries some of its own addons, the `--no-metrics`
+and `--no-storage` flags map onto k3s `--disable` switches. `--no-lb`
+skips kiac-lb and leaves LoadBalancer Services pending, as on the
+kubeadm path. `--cni` does not apply here; it is a kubeadm-path flag
+and kiac says so if you pass it.
 
 ## 3. PVC demo: the StatefulSet example, unchanged
 
@@ -73,12 +79,10 @@ kubectl get svc web        # wait for EXTERNAL-IP
 curl http://$(kubectl get svc web -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 ```
 
-One k3s-specific detail: servicelb advertises every node's IP, so
-`kubectl get svc web` may list more than one EXTERNAL-IP as the
-per-node pods come up. Any of them answers from your Mac; for bulk
-transfers the IP of the node actually running the pod is the fast one,
-since traffic entering another node is NATed across vmnet's slower
-forwarding path.
+On k3s this now behaves like the kubeadm path: kiac-lb assigns one
+node IP, preferring a node that hosts a ready backend endpoint. That
+keeps large requests and uploads on the pod-local path instead of
+advertising every node and hoping clients choose the lucky one.
 
 `--observability` and `--gateway` work on k3s with the same flags and
 the same defaults as everywhere else (Grafana on :3000, GatewayClass

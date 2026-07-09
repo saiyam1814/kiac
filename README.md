@@ -214,7 +214,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--name` | `dev` | cluster name |
 | `--workers` | `0` | worker count; control plane is untainted when 0 |
 | `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 (both distros) |
-| `--distro` | `kubeadm` | `kubeadm` (kindest/node) or `k3s` (rancher/k3s: sqlite datastore, bundled servicelb, local-path, and metrics-server; `--cni` does not apply, kiac applies kindnet) |
+| `--distro` | `kubeadm` | `kubeadm` (kindest/node) or `k3s` (rancher/k3s: sqlite datastore, bundled local-path and metrics-server; kiac-lb handles LoadBalancers; `--cni` does not apply, kiac applies kindnet) |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
 | `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), or `none` to bring your own |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |

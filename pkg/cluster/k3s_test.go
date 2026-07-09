@@ -67,13 +67,14 @@ func TestK3sServerArgs(t *testing.T) {
 		" --disable-network-policy ", // k3s netpol controller targets the flannel bridge
 		" --tls-san kiac-dev-control-plane ",
 		" --node-name kiac-dev-control-plane ",
-		" --disable=traefik ", // never fight --gateway Traefik for 80/443
+		" --disable=traefik ",   // never fight --gateway Traefik for 80/443
+		" --disable=servicelb ", // kiac-lb publishes endpoint-local LoadBalancer IPs
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("server args %q missing %q", joined, want)
 		}
 	}
-	for _, banned := range []string{"servicelb", "metrics-server", "local-storage"} {
+	for _, banned := range []string{"metrics-server", "local-storage"} {
 		if strings.Contains(joined, banned) {
 			t.Errorf("default server args must not disable %s: %q", banned, joined)
 		}

@@ -191,7 +191,7 @@ async function loadMeta() {
     const cil = !k3s && $('cni').value === 'cilium';
     $('cni').disabled = k3s;
     const note = $('cni-note');
-    if (k3s) { note.textContent = 'k3s always runs kindnet; servicelb, local-path, and metrics-server come bundled.'; note.style.display = 'block'; }
+    if (k3s) { note.textContent = 'k3s always runs kindnet; local-path and metrics-server come bundled; kiac-lb handles LoadBalancers.'; note.style.display = 'block'; }
     else if (cil) { note.textContent = 'Cilium downloads the full node kernel once (~40MB) and needs the cilium CLI: brew install cilium-cli.'; note.style.display = 'block'; }
     else { note.style.display = 'none'; }
   };

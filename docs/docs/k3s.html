@@ -60,16 +60,16 @@
   <pre><code>kiac create cluster --distro k3s --k8s-version 1.34</code></pre>
 
   <h2 id="bundled">What k3s bundles, and what kiac does with it</h2>
-  <p>k3s ships its own batteries, so on this path kiac installs none of its usual addons and maps its flags onto k3s's <code>--disable</code> switches instead:</p>
+  <p>k3s ships its own batteries, so on this path kiac keeps the pieces that behave well inside Apple Container VMs and swaps out the pieces that do not:</p>
   <table>
     <tr><th>Piece</th><th>On the k3s path</th><th>Opt out</th></tr>
     <tr><td>Storage</td><td>k3s's bundled local-path provisioner (default StorageClass)</td><td><code>--no-storage</code></td></tr>
     <tr><td>Metrics</td><td>k3s's bundled metrics-server; <code>kubectl top nodes</code> works natively</td><td><code>--no-metrics</code></td></tr>
-    <tr><td>LoadBalancer</td><td>k3s's bundled servicelb (klipper), which backs <code>type: LoadBalancer</code> with node IPs natively; kiac-lb is not installed</td><td><code>--no-lb</code></td></tr>
+    <tr><td>LoadBalancer</td><td>kiac-lb, the same tiny controller used by the kubeadm path; k3s's bundled servicelb is disabled because it advertises every node IP, including nodes that would forward large uploads across vmnet</td><td><code>--no-lb</code></td></tr>
     <tr><td>Ingress</td><td>k3s's bundled Traefik is <b>disabled</b>: it would fight the <code>--gateway</code> addon's Traefik for ports 80 and 443</td><td>always off</td></tr>
     <tr><td>Network policy</td><td>k3s's network-policy controller is disabled; it only works against the flannel bridge kiac removes (see below)</td><td>always off</td></tr>
   </table>
-  <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. servicelb assigns their LoadBalancer IPs, kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, and the default edge proxy handles large external uploads through NodePorts and LoadBalancers.</p>
+  <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. kiac-lb assigns their LoadBalancer IPs, kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, and the default edge proxy handles large external uploads through NodePorts and LoadBalancers.</p>
 
   <h2 id="kindnet">Why kindnet replaces flannel</h2>
   <p>k3s normally brings flannel as its CNI. kiac starts the server with <code>--flannel-backend=none</code> and applies <b>kindnet</b> instead, for a kernel reason:</p>
@@ -94,11 +94,11 @@
     <li><b>No <code>kiac resume</code> yet.</b> The <a href="persistence.html">reboot-healing flow</a> rewrites kubeadm's files and is kubeadm-only today. After a Mac reboot, delete and recreate a k3s cluster; it comes back in under a minute.</li>
     <li><b>No <code>--cni cilium</code>.</b> The Cilium path (and <code>--kernel</code> pairing) is a kubeadm-path feature; see <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
     <li><b>sqlite, single server.</b> There is one k3s server; workers are agents. Control-plane HA is out of scope for a laptop cluster.</li>
-    <li>servicelb advertises <em>every</em> node's IP for a LoadBalancer Service. Any of them answers, but only the IP of a node hosting the pod delivers without crossing vmnet's slow forwarded path; kiac and the <a href="dashboard.html">dashboard</a> prefer the primary node's IP for that reason.</li>
+    <li>k3s's bundled ServiceLB is intentionally disabled. kiac-lb publishes one endpoint-local node IP instead of every node IP, so LoadBalancer clients do not accidentally choose a cross-node large-upload path.</li>
   </ul>
 
   <div class="note"><b>Where next?</b>
-  <a href="networking.html">Networking</a> explains the vmnet fast/slow path story behind the kindnet and servicelb choices. <a href="cli-reference.html">CLI reference</a> lists every <code>create</code> flag.</div>
+  <a href="networking.html">Networking</a> explains the vmnet fast/slow path story behind the kindnet and kiac-lb choices. <a href="cli-reference.html">CLI reference</a> lists every <code>create</code> flag.</div>
 
   <div class="pn">
     <a href="cli-reference.html"><span>Previous</span>CLI reference</a>

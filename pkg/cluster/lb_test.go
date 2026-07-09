@@ -27,12 +27,12 @@ func TestKiacLBScriptSyntax(t *testing.T) {
 }
 
 // TestKiacLBScriptInvariants pins the parts of the script other code
-// depends on: the kubeconfig path, the status patch, the primary label,
-// and the node-image constraint that jq is unavailable.
+// depends on: the configurable kubeconfig path, the status patch, the
+// primary label, and the node-image constraint that jq is unavailable.
 func TestKiacLBScriptInvariants(t *testing.T) {
 	for _, want := range []string{
 		"#!/bin/sh",
-		adminConf, // uses the node's own admin kubeconfig
+		`${KUBECONFIG:=` + adminConf + `}`, // kubeadm default; k3s overrides it
 		"--subresource=status",
 		`{"status":{"loadBalancer":{"ingress":[{"ip":"`,
 		"kiac.io/lb-primary=true",                // prefers the labeled primary node
@@ -54,6 +54,23 @@ func TestKiacLBScriptInvariants(t *testing.T) {
 	}
 	if strings.ContainsRune(kiacLBScript, '`') {
 		t.Error("kiac-lb.sh contains a backtick; use $(...) so the Go raw string stays valid")
+	}
+}
+
+func TestKiacLBK3sSupervisor(t *testing.T) {
+	for _, want := range []string{
+		kiacLBScriptPath,
+		kiacLBK3sSupervisorPID,
+		kiacLBK3sLogPath,
+		"KUBECONFIG=" + k3sKubeconfig,
+		"while :; do",
+	} {
+		if !strings.Contains(kiacLBK3sSupervisorScript, want) {
+			t.Errorf("k3s kiac-lb supervisor is missing %q", want)
+		}
+	}
+	if strings.ContainsRune(kiacLBK3sSupervisorScript, '`') {
+		t.Error("k3s kiac-lb supervisor contains a backtick; use $(...) so the Go raw string stays valid")
 	}
 }
 

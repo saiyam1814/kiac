@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -27,8 +28,19 @@ type proxyApp struct {
 	iptables      string
 	kubectl       []string
 	lastSnapshot  string
-	lbMu          sync.RWMutex
-	lbTargets     map[string]string
+	routeMu       sync.RWMutex
+	routes        routeTable
+	nodeName      string
+}
+
+type routeTable struct {
+	loadBalancers map[string]backendRoute
+	nodePorts     map[int]backendRoute
+}
+
+type backendRoute struct {
+	dial         string
+	tunnelTarget string
 }
 
 func main() {
@@ -63,6 +75,7 @@ func (a *proxyApp) run(ctx context.Context) error {
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		a.kubectl = []string{"k3s", "kubectl"}
 	}
+	a.nodeName, _ = os.Hostname()
 
 	if err := a.resetHook(); err != nil {
 		return err
@@ -141,20 +154,57 @@ func (a *proxyApp) handleConn(client *net.TCPConn) {
 		log.Printf("original dst: %v", err)
 		return
 	}
+	if isProxyPort(dst, a.proxyPort) {
+		a.handleTunnel(client)
+		return
+	}
 
-	backendDst := a.backendDst(dst)
-	backendConn, err := a.dialBackend(backendDst)
+	route := a.backendRoute(dst)
+	if route.dial == "" {
+		route.dial = dst
+	}
+	backendConn, err := a.dialBackend(route.dial)
 	if err != nil {
-		log.Printf("dial %s: %v", backendDst, err)
+		log.Printf("dial %s: %v", route.dial, err)
 		return
 	}
 	backend := backendConn.(*net.TCPConn)
 	defer backend.Close()
 
-	errc := make(chan error, 2)
-	go copyTCP(backend, client, errc)
-	go copyTCP(client, backend, errc)
-	<-errc
+	if route.tunnelTarget != "" {
+		if _, err := fmt.Fprintf(backend, "KIACEDGE/1 %s\n", route.tunnelTarget); err != nil {
+			log.Printf("tunnel header to %s for %s: %v", route.dial, route.tunnelTarget, err)
+			return
+		}
+	}
+	proxyTCP(client, backend, client)
+}
+
+func (a *proxyApp) handleTunnel(client *net.TCPConn) {
+	if err := client.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		log.Printf("tunnel deadline: %v", err)
+		return
+	}
+	br := bufio.NewReader(client)
+	line, err := br.ReadString('\n')
+	_ = client.SetReadDeadline(time.Time{})
+	if err != nil {
+		log.Printf("tunnel header: %v", err)
+		return
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(line), "KIACEDGE/1 ")
+	if !ok || !validBackendTarget(target) {
+		log.Printf("invalid tunnel header %q", strings.TrimSpace(line))
+		return
+	}
+	backendConn, err := a.dialBackend(target)
+	if err != nil {
+		log.Printf("tunnel dial %s: %v", target, err)
+		return
+	}
+	backend := backendConn.(*net.TCPConn)
+	defer backend.Close()
+	proxyTCP(client, backend, br)
 }
 
 func (a *proxyApp) dialBackend(dst string) (net.Conn, error) {
@@ -170,25 +220,59 @@ func (a *proxyApp) dialBackend(dst string) (net.Conn, error) {
 	return dialer.Dial("tcp4", dst)
 }
 
-func (a *proxyApp) backendDst(original string) string {
-	a.lbMu.RLock()
-	defer a.lbMu.RUnlock()
-	if dst := a.lbTargets[original]; dst != "" {
-		return dst
+func isProxyPort(dst, proxyPort string) bool {
+	_, port, err := net.SplitHostPort(dst)
+	return err == nil && port == proxyPort
+}
+
+func validBackendTarget(target string) bool {
+	host, port, err := net.SplitHostPort(target)
+	if err != nil || net.ParseIP(host).To4() == nil {
+		return false
 	}
-	return original
+	p, err := strconv.Atoi(port)
+	return err == nil && p > 0 && p <= 65535
 }
 
-func (a *proxyApp) setLBTargets(targets map[string]string) {
-	a.lbMu.Lock()
-	defer a.lbMu.Unlock()
-	a.lbTargets = targets
+func (a *proxyApp) backendRoute(original string) backendRoute {
+	a.routeMu.RLock()
+	defer a.routeMu.RUnlock()
+	if route := a.routes.loadBalancers[original]; route.dial != "" {
+		return route
+	}
+	_, port, err := net.SplitHostPort(original)
+	if err != nil {
+		return backendRoute{}
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return backendRoute{}
+	}
+	return a.routes.nodePorts[p]
 }
 
-func copyTCP(dst, src *net.TCPConn, errc chan<- error) {
+func (a *proxyApp) setRoutes(routes routeTable) {
+	a.routeMu.Lock()
+	defer a.routeMu.Unlock()
+	a.routes = routes
+}
+
+func proxyTCP(client, backend *net.TCPConn, clientReader io.Reader) {
+	errc := make(chan error, 2)
+	go copyTCP(backend, clientReader, func() {
+		_ = backend.CloseWrite()
+		_ = client.CloseRead()
+	}, errc)
+	go copyTCP(client, backend, func() {
+		_ = client.CloseWrite()
+		_ = backend.CloseRead()
+	}, errc)
+	<-errc
+}
+
+func copyTCP(dst *net.TCPConn, src io.Reader, done func(), errc chan<- error) {
 	_, err := io.Copy(dst, src)
-	_ = dst.CloseWrite()
-	_ = src.CloseRead()
+	done()
 	errc <- err
 }
 
@@ -268,7 +352,7 @@ func (a *proxyApp) syncRules() error {
 	if err := a.ensureHook(); err != nil {
 		return err
 	}
-	snapshot := a.serviceSnapshot()
+	snapshot := a.clusterSnapshot()
 	if snapshot == a.lastSnapshot && !a.rulesMissing() {
 		return nil
 	}
@@ -287,13 +371,16 @@ func (a *proxyApp) syncRules() error {
 	if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 		return err
 	}
-	lbTargets := map[string]string{}
+	routes := routeTable{
+		loadBalancers: map[string]backendRoute{},
+		nodePorts:     map[int]backendRoute{},
+	}
 	if snapshot != "" {
-		if err := a.addLoadBalancerRules(snapshot, lbTargets); err != nil {
-			log.Printf("loadbalancer rules: %v", err)
+		if err := a.addServiceRules(snapshot, routes); err != nil {
+			log.Printf("service rules: %v", err)
 		}
 	}
-	a.setLBTargets(lbTargets)
+	a.setRoutes(routes)
 	a.lastSnapshot = snapshot
 	return nil
 }
@@ -304,12 +391,12 @@ func (a *proxyApp) rulesMissing() bool {
 		!a.iptOK("-C", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort)
 }
 
-func (a *proxyApp) serviceSnapshot() string {
+func (a *proxyApp) clusterSnapshot() string {
 	args := append([]string{}, a.kubectl...)
 	if a.kubeconfig != "" {
 		args = append(args, "--kubeconfig", a.kubeconfig)
 	}
-	args = append(args, "get", "svc", "-A", "-o", "json")
+	args = append(args, "get", "svc,endpointslice,nodes", "-A", "-o", "json")
 	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		log.Printf("%s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -318,31 +405,111 @@ func (a *proxyApp) serviceSnapshot() string {
 	return string(out)
 }
 
-type serviceList struct {
-	Items []struct {
-		Spec struct {
-			Type  string `json:"type"`
-			Ports []struct {
-				Port     int `json:"port"`
-				NodePort int `json:"nodePort"`
-			} `json:"ports"`
-		} `json:"spec"`
-		Status struct {
-			LoadBalancer struct {
-				Ingress []struct {
-					IP string `json:"ip"`
-				} `json:"ingress"`
-			} `json:"loadBalancer"`
-		} `json:"status"`
-	} `json:"items"`
+type kubeList struct {
+	Items []json.RawMessage `json:"items"`
 }
 
-func (a *proxyApp) addLoadBalancerRules(raw string, targets map[string]string) error {
-	var services serviceList
-	if err := json.Unmarshal([]byte(raw), &services); err != nil {
+type kubeKind struct {
+	Kind string `json:"kind"`
+}
+
+type objectMeta struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Labels    map[string]string `json:"labels"`
+}
+
+type serviceItem struct {
+	Metadata objectMeta `json:"metadata"`
+	Spec     struct {
+		Type  string        `json:"type"`
+		Ports []servicePort `json:"ports"`
+	} `json:"spec"`
+	Status struct {
+		LoadBalancer struct {
+			Ingress []struct {
+				IP string `json:"ip"`
+			} `json:"ingress"`
+		} `json:"loadBalancer"`
+	} `json:"status"`
+}
+
+type servicePort struct {
+	Name       string      `json:"name"`
+	Port       int         `json:"port"`
+	NodePort   int         `json:"nodePort"`
+	TargetPort intOrString `json:"targetPort"`
+}
+
+type intOrString struct {
+	IntVal int
+	StrVal string
+	Set    bool
+}
+
+func (v *intOrString) UnmarshalJSON(raw []byte) error {
+	if string(raw) == "null" || len(raw) == 0 {
+		return nil
+	}
+	v.Set = true
+	if raw[0] == '"' {
+		return json.Unmarshal(raw, &v.StrVal)
+	}
+	return json.Unmarshal(raw, &v.IntVal)
+}
+
+type endpointSliceItem struct {
+	Metadata  objectMeta      `json:"metadata"`
+	Ports     []endpointPort  `json:"ports"`
+	Endpoints []endpointEntry `json:"endpoints"`
+}
+
+type endpointPort struct {
+	Name     *string `json:"name"`
+	Port     *int    `json:"port"`
+	Protocol *string `json:"protocol"`
+}
+
+type endpointEntry struct {
+	Addresses  []string `json:"addresses"`
+	NodeName   string   `json:"nodeName"`
+	Conditions struct {
+		Ready *bool `json:"ready"`
+	} `json:"conditions"`
+}
+
+type nodeItem struct {
+	Metadata objectMeta `json:"metadata"`
+	Status   struct {
+		Addresses []struct {
+			Type    string `json:"type"`
+			Address string `json:"address"`
+		} `json:"addresses"`
+	} `json:"status"`
+}
+
+type clusterState struct {
+	services       []serviceItem
+	endpointSlices []endpointSliceItem
+	nodeIPs        map[string]string
+}
+
+type endpointTarget struct {
+	address  string
+	nodeName string
+}
+
+func (a *proxyApp) addServiceRules(raw string, routes routeTable) error {
+	state, err := parseClusterState(raw)
+	if err != nil {
 		return err
 	}
-	for _, svc := range services.Items {
+	for _, svc := range state.services {
+		for _, port := range svc.Spec.Ports {
+			if port.NodePort > 0 {
+				routes.nodePorts[port.NodePort] = state.routeFor(a.nodeName, a.proxyPort, svc, port)
+			}
+		}
 		if svc.Spec.Type != "LoadBalancer" {
 			continue
 		}
@@ -360,11 +527,117 @@ func (a *proxyApp) addLoadBalancerRules(raw string, targets map[string]string) e
 				if err := a.ipt("-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "-d", ingress.IP, "--dport", strconv.Itoa(port.Port), "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 					return err
 				}
-				if port.NodePort > 0 {
-					targets[net.JoinHostPort(ingress.IP, strconv.Itoa(port.Port))] = net.JoinHostPort(ingress.IP, strconv.Itoa(port.NodePort))
+				route := state.routeFor(a.nodeName, a.proxyPort, svc, port)
+				if route.dial == "" && port.NodePort > 0 {
+					route.dial = net.JoinHostPort(ingress.IP, strconv.Itoa(port.NodePort))
 				}
+				routes.loadBalancers[net.JoinHostPort(ingress.IP, strconv.Itoa(port.Port))] = route
 			}
 		}
 	}
 	return nil
+}
+
+func parseClusterState(raw string) (clusterState, error) {
+	state := clusterState{nodeIPs: map[string]string{}}
+	var list kubeList
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return state, err
+	}
+	for _, item := range list.Items {
+		var kind kubeKind
+		if err := json.Unmarshal(item, &kind); err != nil {
+			return state, err
+		}
+		switch kind.Kind {
+		case "Service":
+			var svc serviceItem
+			if err := json.Unmarshal(item, &svc); err != nil {
+				return state, err
+			}
+			state.services = append(state.services, svc)
+		case "EndpointSlice":
+			var slice endpointSliceItem
+			if err := json.Unmarshal(item, &slice); err != nil {
+				return state, err
+			}
+			state.endpointSlices = append(state.endpointSlices, slice)
+		case "Node":
+			var node nodeItem
+			if err := json.Unmarshal(item, &node); err != nil {
+				return state, err
+			}
+			for _, addr := range node.Status.Addresses {
+				if addr.Type == "InternalIP" && net.ParseIP(addr.Address).To4() != nil {
+					state.nodeIPs[node.Metadata.Name] = addr.Address
+					break
+				}
+			}
+		}
+	}
+	return state, nil
+}
+
+func (s clusterState) routeFor(localNode, proxyPort string, svc serviceItem, port servicePort) backendRoute {
+	endpoints := s.matchingEndpoints(svc, port)
+	for _, ep := range endpoints {
+		if ep.nodeName == "" || ep.nodeName == localNode {
+			return backendRoute{dial: ep.address}
+		}
+	}
+	for _, ep := range endpoints {
+		if nodeIP := s.nodeIPs[ep.nodeName]; nodeIP != "" {
+			return backendRoute{
+				dial:         net.JoinHostPort(nodeIP, proxyPort),
+				tunnelTarget: ep.address,
+			}
+		}
+	}
+	if len(endpoints) > 0 {
+		return backendRoute{dial: endpoints[0].address}
+	}
+	return backendRoute{}
+}
+
+func (s clusterState) matchingEndpoints(svc serviceItem, port servicePort) []endpointTarget {
+	var out []endpointTarget
+	for _, slice := range s.endpointSlices {
+		if slice.Metadata.Namespace != svc.Metadata.Namespace ||
+			slice.Metadata.Labels["kubernetes.io/service-name"] != svc.Metadata.Name {
+			continue
+		}
+		for _, epPort := range slice.Ports {
+			if epPort.Port == nil || !servicePortMatchesEndpoint(port, epPort) {
+				continue
+			}
+			for _, ep := range slice.Endpoints {
+				if ep.Conditions.Ready != nil && !*ep.Conditions.Ready {
+					continue
+				}
+				for _, addr := range ep.Addresses {
+					if net.ParseIP(addr).To4() == nil {
+						continue
+					}
+					out = append(out, endpointTarget{
+						address:  net.JoinHostPort(addr, strconv.Itoa(*epPort.Port)),
+						nodeName: ep.NodeName,
+					})
+				}
+			}
+		}
+	}
+	return out
+}
+
+func servicePortMatchesEndpoint(svcPort servicePort, epPort endpointPort) bool {
+	if epPort.Protocol != nil && *epPort.Protocol != "" && *epPort.Protocol != "TCP" {
+		return false
+	}
+	if svcPort.TargetPort.Set {
+		if svcPort.TargetPort.StrVal != "" {
+			return epPort.Name != nil && *epPort.Name == svcPort.TargetPort.StrVal
+		}
+		return epPort.Port != nil && *epPort.Port == svcPort.TargetPort.IntVal
+	}
+	return epPort.Port != nil && *epPort.Port == svcPort.Port
 }

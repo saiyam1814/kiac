@@ -108,8 +108,8 @@ kubectl get svc web    <span class="c"># EXTERNAL-IP is one of your worker node 
 
 <span class="c"># the controller's logs, from inside the control-plane VM</span>
 container exec kiac-dev-control-plane journalctl -u kiac-lb</code></pre>
-  <p>On <a href="k3s.html">--distro k3s</a>, k3s's bundled servicelb (klipper) backs <code>type: LoadBalancer</code> instead, natively on node IPs; kiac-lb is not installed there.</p>
-  <p>kiac also installs <b>kiac-edge-proxy</b> by default on every node. It is a tiny embedded node process that redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a built-in original-destination TCP proxy, then opens a fresh local connection back to the original Service address. That keeps kube-proxy in charge of backend selection while avoiding apple/container vmnet's TSO stall on large uploads from sibling VMs. Disable it only with <code>--no-edge-proxy</code>.</p>
+  <p>On <a href="k3s.html">--distro k3s</a>, kiac disables k3s's bundled servicelb and uses the same kiac-lb controller. ServiceLB advertises every node IP, but vmnet large uploads only stay reliable when traffic enters a node that can terminate locally, so kiac-lb publishes one endpoint-local node IP instead.</p>
+  <p>kiac also installs <b>kiac-edge-proxy</b> by default on every node. It is a tiny embedded node process that redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a built-in original-destination TCP proxy, watches Services and EndpointSlices, then connects to a ready endpoint. If the endpoint is on another node, the first proxy hands the stream to that node's proxy so the final pod connection is local to the endpoint node. That avoids apple/container vmnet's TSO stall on large uploads from sibling VMs. Disable it only with <code>--no-edge-proxy</code>.</p>
   <p>Skip the LoadBalancer controller with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>
 
   <div class="pn">

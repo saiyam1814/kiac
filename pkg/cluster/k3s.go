@@ -40,21 +40,22 @@ func k3sServerArgs(cfg Config, nodeName string) []string {
 		// container name, which get/status/chaos/delete key on.
 		"--node-name", nodeName,
 		// k3s's bundled Traefik ingress would fight kiac's --gateway
-		// Traefik for ports 80/443. servicelb (klipper) stays on: it
-		// backs type LoadBalancer with node IPs natively.
+		// Traefik for ports 80/443. Its bundled servicelb advertises
+		// every node IP for each LoadBalancer, including nodes that must
+		// forward large uploads across vmnet; kiac-lb is lighter and
+		// assigns an endpoint-local node IP instead.
 		"--disable=traefik",
+		"--disable=servicelb",
 	}
-	// k3s bundles metrics-server, local-path storage, and servicelb, so
-	// kiac's own addon installs are skipped entirely for this distro and
-	// the --no-* flags map onto k3s --disable switches instead.
+	// k3s bundles metrics-server and local-path storage, so kiac's own
+	// addon installs are skipped for those parts and the --no-* flags map
+	// onto k3s --disable switches instead. LoadBalancer support uses the
+	// same tiny kiac-lb controller as the kubeadm path unless --no-lb is set.
 	if cfg.NoMetrics {
 		args = append(args, "--disable=metrics-server")
 	}
 	if cfg.NoStorage {
 		args = append(args, "--disable=local-storage")
-	}
-	if cfg.NoLB {
-		args = append(args, "--disable=servicelb")
 	}
 	return args
 }
@@ -74,6 +75,11 @@ func k3sAgentArgs(nodeName string) []string {
 // variants ship in the image under /bin/aux.
 func k3sBoot(k3sArgs []string) (entrypoint string, args []string) {
 	cmd := "for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
+		"if [ -x " + kiacLBScriptPath + " ]; then " +
+		"mkdir -p /var/log /var/run; " +
+		"if ! kill -0 \"$(cat " + kiacLBK3sSupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
+		"nohup sh -c 'while :; do KUBECONFIG=" + k3sKubeconfig + " " + kiacLBScriptPath + " >>" + kiacLBK3sLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + kiacLBK3sSupervisorPID + "; " +
+		"fi; fi; " +
 		"if [ -x " + edgeProxyNodePath + " ] && [ -f " + edgeProxyKubeconfigPath + " ]; then " +
 		"if ! kill -0 \"$(cat " + edgeProxySupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
 		"nohup sh -c 'while :; do " + edgeProxyNodePath + " --kubeconfig " + edgeProxyKubeconfigPath + " >>" + edgeProxyLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + edgeProxySupervisorPID + "; " +
@@ -263,9 +269,9 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	// Same primary rule as configureLBPool on the kubeadm path: the
 	// first worker (or the server on single-node clusters) is labeled so
 	// bundled manifests like Grafana and Traefik, which pin their pods
-	// with a kiac.io/lb-primary nodeSelector, remain schedulable. The
-	// metallb.io/address-pool annotation those manifests carry is simply
-	// ignored by servicelb.
+	// with a kiac.io/lb-primary nodeSelector, remain schedulable. kiac-lb
+	// also prefers a node hosting the Service endpoint before falling back
+	// to this primary label.
 	if !cfg.NoLB {
 		primary := cp
 		if cfg.Workers > 0 {
@@ -275,6 +281,10 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			_, err := m.k3sKubectl(cp, "label", "node", primary, "kiac.io/lb-primary=true", "--overwrite")
 			return err
 		}); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
+		if err := m.installKiacLBK3s(cp); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
 		}
@@ -327,7 +337,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	ui.Successf("k3s cluster %q is ready in %s. Every node is its own lightweight VM.",
 		cfg.Name, time.Since(start).Round(time.Second))
 	ui.Infof("context kiac-%s merged into %s", cfg.Name, kubeconfigPath)
-	ui.Infof("k3s bundles local-path storage, servicelb, and metrics-server; kiac-lb is not needed here")
+	ui.Infof("k3s bundles local-path storage and metrics-server; kiac-lb provides LoadBalancer IPs")
 	if reachable {
 		ui.Hintf("kubectl get nodes")
 		if !cfg.NoMetrics {
@@ -416,7 +426,7 @@ func k3sNodesReady(out string, want int) bool {
 
 // installObservabilityK3s mirrors installObservability for the k3s
 // distro: same embedded manifests, applied through k3s kubectl, with
-// servicelb (not MetalLB) assigning Grafana its LoadBalancer IP.
+// kiac-lb assigning Grafana its LoadBalancer IP.
 func (m *Manager) installObservabilityK3s(cp string) error {
 	if err := ui.Step("Installing observability (Prometheus + Grafana)", func() error {
 		manifest := strings.Join(observabilityManifests(), "\n---\n")
@@ -428,9 +438,7 @@ func (m *Manager) installObservabilityK3s(cp string) error {
 	var grafanaIP string
 	if err := ui.Step("Waiting for Grafana LoadBalancer IP", func() error {
 		var err error
-		// servicelb first pulls its klipper-lb pod image inside the VM,
-		// so the window is wider than the kubeadm path's 90s.
-		grafanaIP, err = m.waitK3sSvcLBIP(cp, obsNamespace, "grafana", 120*time.Second)
+		grafanaIP, err = m.waitK3sLoadBalancerIP(cp, obsNamespace, "grafana", 90*time.Second)
 		return err
 	}); err != nil {
 		return err
@@ -471,7 +479,7 @@ func (m *Manager) installGatewayK3s(cp string) error {
 	var addr string
 	if err := ui.Step("Waiting for Gateway address", func() error {
 		var err error
-		addr, err = m.waitK3sSvcLBIP(cp, "kiac-gateway", "traefik", 120*time.Second)
+		addr, err = m.waitK3sLoadBalancerIP(cp, "kiac-gateway", "traefik", 90*time.Second)
 		return err
 	}); err != nil {
 		return err
@@ -482,14 +490,11 @@ func (m *Manager) installGatewayK3s(cp string) error {
 	return nil
 }
 
-// waitK3sSvcLBIP polls a Service until servicelb publishes a
-// LoadBalancer ingress IP for it. servicelb (klipper) advertises EVERY
-// node's IP; the addon pods are pinned to the kiac.io/lb-primary node,
-// and only that node's IP delivers pod-locally (a frame entering
-// another node is NATed across vmnet's slow forwarding path, ~100x
-// worse for bulk transfers), so the primary's IP is preferred over
-// ingress[0] when it is among the advertised set.
-func (m *Manager) waitK3sSvcLBIP(cp, namespace, svc string, timeout time.Duration) (string, error) {
+// waitK3sLoadBalancerIP polls a Service until kiac-lb publishes a
+// LoadBalancer ingress IP for it. The primary preference is kept for
+// older upgraded clusters that may still have multiple servicelb IPs in
+// status, but new k3s clusters use kiac-lb and normally publish one IP.
+func (m *Manager) waitK3sLoadBalancerIP(cp, namespace, svc string, timeout time.Duration) (string, error) {
 	primaryOut, _ := m.k3sKubectl(cp, "get", "nodes",
 		"-l", "kiac.io/lb-primary=true",
 		"-o", "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}")
@@ -518,13 +523,10 @@ func (m *Manager) waitK3sSvcLBIP(cp, namespace, svc string, timeout time.Duratio
 			}
 		}
 		if time.Now().After(deadline) {
-			// servicelb publishes node IPs one at a time as its
-			// per-node pods go ready; only fall back to whichever
-			// came first once the primary has had its full window.
 			if first != "" {
 				return first, nil
 			}
-			return "", fmt.Errorf("service %s/%s never got a LoadBalancer IP (servicelb disabled?); check: kubectl get svc -n %s %s", namespace, svc, namespace, svc)
+			return "", fmt.Errorf("service %s/%s never got a LoadBalancer IP (is kiac-lb running?); check: kubectl get svc -n %s %s", namespace, svc, namespace, svc)
 		}
 		time.Sleep(3 * time.Second)
 	}

@@ -69,7 +69,7 @@ kiac ui --port 0       <span class="c"># pick any free port</span></code></pre>
     <li><b>Open Grafana</b> links straight to the Grafana LoadBalancer URL (port 3000).</li>
     <li><b>Gateway</b> shows the Traefik gateway's LoadBalancer IP.</li>
   </ul>
-  <p>On k3s clusters, where servicelb advertises every node's IP, the chips prefer the primary node's IP: the addon pods are pinned there, so that address delivers pod-locally.</p>
+  <p>On current k3s clusters, kiac-lb normally publishes one endpoint-local IP. For older k3s clusters that still show multiple ServiceLB IPs, the chips prefer the primary node's IP because the addon pods are pinned there.</p>
   <h3 id="console">kubectl Console drawer</h3>
   <p>Every card has a <b>Console</b> button that opens a kubectl drawer at the bottom of the page, already targeted at that cluster:</p>
   <pre><code>kubectl <span class="k">get pods -A</span>            <span class="c"># you type what follows "kubectl"</span>

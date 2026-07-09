@@ -16,8 +16,10 @@ import (
 // IP is re-pointed on the next pass.
 
 const (
-	kiacLBScriptPath = "/usr/local/bin/kiac-lb.sh"
-	kiacLBUnitPath   = "/etc/systemd/system/kiac-lb.service"
+	kiacLBScriptPath       = "/usr/local/bin/kiac-lb.sh"
+	kiacLBUnitPath         = "/etc/systemd/system/kiac-lb.service"
+	kiacLBK3sLogPath       = "/var/log/kiac-lb.log"
+	kiacLBK3sSupervisorPID = "/var/run/kiac-lb-supervisor.pid"
 )
 
 // kiacLBScript is the controller itself. POSIX sh only, and no jq: the
@@ -38,7 +40,8 @@ const kiacLBScript = `#!/bin/sh
 # waits for the next pass, which also re-points Services whose node died
 # or came back from a restart with a new vmnet IP.
 
-export KUBECONFIG=/etc/kubernetes/admin.conf
+: "${KUBECONFIG:=/etc/kubernetes/admin.conf}"
+export KUBECONFIG
 DIR=/run/kiac-lb
 INTERVAL=3
 
@@ -221,6 +224,29 @@ func (m *Manager) installKiacLB(cp string) error {
 		return nil
 	})
 }
+
+func (m *Manager) installKiacLBK3s(cp string) error {
+	return ui.Step("Installing LoadBalancer (kiac-lb)", func() error {
+		if err := m.rt.ExecStdin(cp, strings.NewReader(kiacLBScript), "sh", "-c",
+			"mkdir -p /usr/local/bin && cat > "+kiacLBScriptPath+" && chmod 0755 "+kiacLBScriptPath); err != nil {
+			return err
+		}
+		_, err := m.rt.Exec(cp, "sh", "-euc", kiacLBK3sSupervisorScript)
+		return err
+	})
+}
+
+const kiacLBK3sSupervisorScript = `
+mkdir -p /var/log /var/run
+if [ -r ` + kiacLBK3sSupervisorPID + ` ]; then
+  old="$(cat ` + kiacLBK3sSupervisorPID + ` 2>/dev/null || true)"
+  if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then
+    exit 0
+  fi
+fi
+nohup sh -c 'while :; do KUBECONFIG=` + k3sKubeconfig + ` ` + kiacLBScriptPath + ` >>` + kiacLBK3sLogPath + ` 2>&1; sleep 1; done' >/dev/null 2>&1 &
+echo $! > ` + kiacLBK3sSupervisorPID + `
+`
 
 // labelLBPrimary marks the first LB-eligible node (worker-1 when workers
 // exist, else the control plane). Bundled addons (Grafana, Traefik) pin

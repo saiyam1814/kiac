@@ -120,7 +120,7 @@ spec:
 
   <h2 id="details">Operational details</h2>
   <ul>
-    <li>The stack expects the built-in LoadBalancer (kiac-lb, or servicelb on k3s). With <code>--no-lb</code> the Grafana Service never gets an EXTERNAL-IP and the install step fails (the cluster itself keeps working).</li>
+    <li>The stack expects the built-in LoadBalancer (kiac-lb on both kubeadm and k3s). With <code>--no-lb</code> the Grafana Service never gets an EXTERNAL-IP and the install step fails (the cluster itself keeps working).</li>
     <li>Grafana shares its node IP with the Traefik gateway when both addons are on: kiac-lb shares an IP whenever port sets are disjoint, and 3000 vs 80/443 do not overlap, so one worker IP is enough for both.</li>
     <li>The Grafana pod is pinned to the <code>kiac.io/lb-primary</code> node, so the printed URL always delivers traffic to the pod locally instead of crossing vmnet's slow forwarded path. See <a href="networking.html#fast-slow">Networking</a>.</li>
     <li>Storage is emptyDir with 6h retention: metrics restart from zero when the Prometheus pod does. Right-sized for a laptop, not for keeping history.</li>

@@ -21,9 +21,10 @@ const (
 // VM can hand vmnet a TSO-deferred TCP stream that survives until
 // kube-proxy DNATs/forwards it into a pod. The kiac edge proxy reads
 // SO_ORIGINAL_DST, terminates that external TCP connection on the node,
-// then opens a fresh connection to the original NodePort or LoadBalancer
-// destination. kube-proxy still performs the Service backend choice on
-// the proxy's new local connection, but the bad offloaded sender stream
+// watches Services/EndpointSlices, and opens a fresh connection to a
+// ready endpoint. If the selected endpoint lives on another node, the
+// first proxy tunnels to that node's proxy so the final pod connection is
+// still local to the endpoint node. The bad offloaded sender stream
 // never crosses the veth into the pod.
 func (m *Manager) installEdgeProxy(cp string, cfg Config, nodes []string) error {
 	return ui.Step("Installing edge proxy (large upload fix)", func() error {

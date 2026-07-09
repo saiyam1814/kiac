@@ -293,9 +293,10 @@ func (s *server) addons(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := map[string]string{"grafana": "", "gateway": ""}
-	// servicelb on k3s advertises every node's IP; prefer the
-	// lb-primary node's (the addon pods are pinned there, and only
-	// pod-local delivery avoids vmnet's slow forwarded path).
+	// Older k3s clusters may still have multiple ServiceLB IPs in
+	// status; prefer the lb-primary node's address because addon pods
+	// are pinned there and pod-local delivery avoids vmnet's slow
+	// forwarded path.
 	primary := ""
 	if out, err := hostKubectl(name, "get", "nodes", "-l", "kiac.io/lb-primary=true",
 		"-o", "jsonpath={.items[0].status.addresses[?(@.type==\"InternalIP\")].address}"); err == nil {

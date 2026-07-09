@@ -94,7 +94,7 @@ func init() {
 	f.StringVar(&k8sVersion, "k8s-version", cluster.DefaultK8sVersion,
 		"Kubernetes version ("+strings.Join(cluster.SupportedVersions(), ", ")+")")
 	f.StringVar(&createDistro, "distro", "kubeadm",
-		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage, servicelb, and metrics-server)")
+		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
 	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")

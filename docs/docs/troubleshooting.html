@@ -85,7 +85,7 @@ dev   0/3 stopped</span></code></pre>
   <ul>
     <li>Created with <code>--no-lb</code>? Nothing is installed to assign IPs.</li>
     <li>On kubeadm clusters, kiac-lb assigns IPs within seconds. If a Service stays pending, read the controller's logs from inside the control-plane VM: <code>container exec kiac-dev-control-plane journalctl -u kiac-lb</code>. A "no conflict-free node IP" line means every eligible node IP already has that Service's ports claimed.</li>
-    <li>On <a href="k3s.html">k3s clusters</a>, k3s's bundled servicelb assigns the IPs after pulling its klipper-lb pod image inside the VM, so the first Service can take a minute or two; its pods are the <code>svclb-*</code> pods in <code>kube-system</code>.</li>
+    <li>On <a href="k3s.html">k3s clusters</a>, kiac-lb assigns IPs too. Its logs are written inside the control-plane VM at <code>/var/log/kiac-lb.log</code>.</li>
     <li>For Grafana specifically: <code>kubectl get svc -n kiac-observability grafana</code>; for the gateway: <code>kubectl get svc -n kiac-gateway traefik</code>.</li>
     <li>A node that was stopped or restarted is handled automatically: kiac-lb re-points any ingress IP that stopped being an eligible node IP on its next pass (~3s). See <a href="networking.html#loadbalancer">Networking</a>.</li>
   </ul>
@@ -136,7 +136,7 @@ kiac resume cluster --name dev</code></pre>
 
   <h2 id="tso-nodeport-stall">Large uploads to a NodePort from another VM stall (TSO)</h2>
   <p>Older kiac clusters, or clusters created with <code>--no-edge-proxy</code>, can hit an apple/container vmnet offload interaction: a large HTTP body (roughly 200&nbsp;KiB or more) sent from <b>another Apple Container VM</b> to a kiac NodePort stalls after the first ~150-300&nbsp;KiB and then times out, while small requests and health checks pass. The sending VM's TCP segmentation offload (TSO) hands the virtual NIC oversized segments that get mangled on the way through the kiac node's NodePort DNAT into the pod. Confirmed on both kindnet and Cilium, so it is not CNI-specific.</p>
-  <p>Current kiac installs <b>kiac-edge-proxy</b> by default. It redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a tiny node-local original-destination proxy, terminating the sender's TCP connection on the node and opening a fresh local connection that kube-proxy can DNAT safely. Check it with:</p>
+  <p>Current kiac installs <b>kiac-edge-proxy</b> by default. It redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a tiny original-destination proxy, terminates the sender's TCP connection, and connects to a ready endpoint. If that endpoint is remote, the first proxy relays to the endpoint node's proxy so the final pod connection is local. Check it with:</p>
   <pre><code>container exec kiac-dev-control-plane ps -ef | grep '[k]iac-edge-proxy'
 container exec kiac-dev-control-plane tail -50 /var/log/kiac-edge-proxy.log</code></pre>
   <p>If you deliberately disabled the edge proxy, the remaining sender-side workaround is to disable TSO before the request (needs <code>NET_ADMIN</code>):</p>

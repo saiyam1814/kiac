@@ -66,7 +66,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name (lowercase letters, digits, dashes)</td></tr>
     <tr><td><code>--workers</code></td><td><code>0</code></td><td>number of worker nodes (control plane is untainted when 0)</td></tr>
     <tr><td><code>--k8s-version</code></td><td><code>1.36</code></td><td>Kubernetes version (1.36, 1.35, 1.34, 1.33, 1.32), for either distro</td></tr>
-    <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage, servicelb, and metrics-server). See <a href="k3s.html">k3s distro</a></td></tr>
+    <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
     <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code> (needs <code>--kernel full</code> and the <code>cilium</code> CLI), or <code>none</code> (bring your own). kubeadm distro only; the k3s path always gets kindnet</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
@@ -75,7 +75,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--cp-memory</code></td><td><code>4G</code></td><td>memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)</td></tr>
     <tr><td><code>--no-metrics</code></td><td><code>false</code></td><td>skip installing metrics-server</td></tr>
     <tr><td><code>--no-storage</code></td><td><code>false</code></td><td>skip installing the local-path default StorageClass</td></tr>
-    <tr><td><code>--no-lb</code></td><td><code>false</code></td><td>skip installing kiac-lb (<code>type: LoadBalancer</code> support); on k3s, disables the bundled servicelb instead</td></tr>
+    <tr><td><code>--no-lb</code></td><td><code>false</code></td><td>skip installing kiac-lb (<code>type: LoadBalancer</code> support)</td></tr>
     <tr><td><code>--no-edge-proxy</code></td><td><code>false</code></td><td>skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers</td></tr>
     <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP</td></tr>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
