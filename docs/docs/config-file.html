@@ -70,6 +70,7 @@ addons:
   metrics: true          <span class="c"># metrics-server (kubectl top nodes/pods)</span>
   storage: true          <span class="c"># local-path default StorageClass</span>
   loadBalancer: true     <span class="c"># kiac-lb, Services of type LoadBalancer</span>
+  edgeProxy: true        <span class="c"># node-local TCP proxy for large external uploads</span>
   observability: false   <span class="c"># Prometheus + Grafana + node-exporter</span>
   gateway: false         <span class="c"># Gateway API CRDs + Traefik</span></code></pre>
 
@@ -88,6 +89,7 @@ addons:
     <tr><td><code>addons.metrics</code></td><td>bool</td><td><code>true</code></td><td><code>--no-metrics</code> (inverted)</td></tr>
     <tr><td><code>addons.storage</code></td><td>bool</td><td><code>true</code></td><td><code>--no-storage</code> (inverted)</td></tr>
     <tr><td><code>addons.loadBalancer</code></td><td>bool</td><td><code>true</code></td><td><code>--no-lb</code> (inverted)</td></tr>
+    <tr><td><code>addons.edgeProxy</code></td><td>bool</td><td><code>true</code></td><td><code>--no-edge-proxy</code> (inverted)</td></tr>
     <tr><td><code>addons.observability</code></td><td>bool</td><td><code>false</code></td><td><code>--observability</code></td></tr>
     <tr><td><code>addons.gateway</code></td><td>bool</td><td><code>false</code></td><td><code>--gateway</code></td></tr>
   </table>

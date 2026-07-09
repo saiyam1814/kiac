@@ -135,14 +135,16 @@ kiac resume cluster --name dev</code></pre>
   <p>Expected on routed CNIs (kindnet): cross-node pod traffic takes vmnet's slow forwarded path. Control traffic and ordinary dev workloads are fine; bulk data transfers are where it shows. <code>--cni cilium --kernel full</code> avoids it entirely via the vxlan overlay (~285MB/s cross-node measured). See <a href="networking.html#fast-slow">Networking</a>.</p>
 
   <h2 id="tso-nodeport-stall">Large uploads to a NodePort from another VM stall (TSO)</h2>
-  <p>A large HTTP body (roughly 200&nbsp;KiB or more) sent from <b>another Apple Container VM</b> to a kiac NodePort stalls after the first ~150-300&nbsp;KiB and then times out, while small requests and health checks pass. It is an offload interaction in apple/container's vmnet: the sending VM's TCP segmentation offload (TSO) hands the virtual NIC oversized segments that get mangled on the way through the kiac node's NodePort DNAT into the pod, so the flow wedges. Confirmed on both kindnet and Cilium, so it is not CNI-specific.</p>
-  <p>The tell is what <em>works</em>: the same upload from the <b>macOS host</b> succeeds, and between two ordinary VMs it succeeds; only VM&nbsp;-&gt;&nbsp;kiac-NodePort with a big body fails.</p>
-  <p>The fix is on the <b>sender</b>: disable TSO on its interface before the request (needs <code>NET_ADMIN</code>). Nothing on the kiac node helps here (disabling every offload on the node's <code>eth0</code>, and switching Cilium to host-legacy routing, were both verified to make no difference), because the bytes are already damaged by the time they arrive.</p>
+  <p>Older kiac clusters, or clusters created with <code>--no-edge-proxy</code>, can hit an apple/container vmnet offload interaction: a large HTTP body (roughly 200&nbsp;KiB or more) sent from <b>another Apple Container VM</b> to a kiac NodePort stalls after the first ~150-300&nbsp;KiB and then times out, while small requests and health checks pass. The sending VM's TCP segmentation offload (TSO) hands the virtual NIC oversized segments that get mangled on the way through the kiac node's NodePort DNAT into the pod. Confirmed on both kindnet and Cilium, so it is not CNI-specific.</p>
+  <p>Current kiac installs <b>kiac-edge-proxy</b> by default. It redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a tiny node-local original-destination proxy, terminating the sender's TCP connection on the node and opening a fresh local connection that kube-proxy can DNAT safely. Check it with:</p>
+  <pre><code>container exec kiac-dev-control-plane ps -ef | grep '[k]iac-edge-proxy'
+container exec kiac-dev-control-plane tail -50 /var/log/kiac-edge-proxy.log</code></pre>
+  <p>If you deliberately disabled the edge proxy, the remaining sender-side workaround is to disable TSO before the request (needs <code>NET_ADMIN</code>):</p>
   <pre><code>container run --rm --cap-add NET_ADMIN --network default alpine:3.20 sh -lc '
   apk add --no-cache curl ethtool >/dev/null
   ethtool -K eth0 tso off        <span class="c"># the one setting that matters</span>
   curl --request PUT --data-binary @big-file http://NODE_IP:NODEPORT/'</code></pre>
-  <p>If the sender is a normal pod rather than a raw VM, the same applies to the node it runs on. This is an apple/container vmnet limitation being tracked upstream; see <a href="https://github.com/saiyam1814/kiac/issues/8">issue #8</a>.</p>
+  <p>This is the apple/container vmnet limitation tracked in <a href="https://github.com/saiyam1814/kiac/issues/8">issue #8</a>; the default edge proxy is kiac's built-in mitigation.</p>
 
   <h2 id="gateway-no-lb">"--gateway needs the built-in LoadBalancer"</h2>
   <p><code>--gateway</code> exposes Traefik through a <code>type: LoadBalancer</code> Service, so it cannot be combined with <code>--no-lb</code>. Drop <code>--no-lb</code>.</p>

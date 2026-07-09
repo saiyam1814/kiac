@@ -104,6 +104,7 @@ func init() {
 	f.BoolVar(&createCfg.NoMetrics, "no-metrics", false, "skip installing metrics-server")
 	f.BoolVar(&createCfg.NoStorage, "no-storage", false, "skip installing the local-path default StorageClass")
 	f.BoolVar(&createCfg.NoLB, "no-lb", false, "skip installing kiac-lb (type: LoadBalancer support)")
+	f.BoolVar(&createCfg.NoEdgeProxy, "no-edge-proxy", false, "skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers")
 	f.BoolVar(&createCfg.Observability, "observability", false, "install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP")
 	f.BoolVar(&createCfg.Gateway, "gateway", false, "install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway")
 	f.DurationVar(&createCfg.WaitTimeout, "wait", 5*time.Minute, "timeout for nodes to become ready")

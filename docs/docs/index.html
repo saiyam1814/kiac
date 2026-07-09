@@ -58,7 +58,7 @@
     <li><b>One lightweight VM per node.</b> Each node has its own kernel, kubelet, cgroups, and IP. The isolation boundary between nodes is the hypervisor, not Linux namespaces.</li>
     <li><b>Metrics.</b> metrics-server ships preconfigured; <code>kubectl top nodes</code> works out of the box.</li>
     <li><b>Storage.</b> A default StorageClass backed by local-path-provisioner, so PVCs just bind.</li>
-    <li><b>LoadBalancer.</b> kiac-lb, a tiny controller inside the control-plane VM, assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds; a real EXTERNAL-IP your Mac can curl. See <a href="networking.html#loadbalancer">Networking</a>.</li>
+    <li><b>LoadBalancer.</b> kiac-lb, a tiny controller inside the control-plane VM, assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds; the edge proxy keeps large external uploads flowing through NodePorts and LoadBalancers. See <a href="networking.html#loadbalancer">Networking</a>.</li>
     <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for rancher/k3s as PID 1 per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
     <li><b>Cilium and eBPF.</b> <code>--cni cilium --kernel full</code> boots the nodes on a published, sha-pinned kernel build and drives the official Cilium installer. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>

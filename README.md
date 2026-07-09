@@ -72,7 +72,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 📊 **Metrics out of the box** — `kubectl top nodes` works the moment the cluster is up. metrics-server ships preconfigured.
 - 💾 **PVCs that just bind** — a default StorageClass (local-path-provisioner) is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
 - ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default: a tiny systemd loop inside the control-plane VM assigns node IPs to Services in about two seconds, shares one IP across Services when ports don't collide, and heals itself after node restarts. No pods, no webhooks, no `<pending>`, no tunnels.
-- 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags.
+- 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags; a tiny embedded node-local edge proxy terminates external TCP first so large uploads from sibling VMs do not hit vmnet's TSO forwarding bug.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
 - ⚡ **Two distros** — kubeadm on `kindest/node` by default, or `--distro k3s` for `rancher/k3s` as PID 1 in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.
 - 🐝 **Cilium and eBPF, one flag pair** — `--cni cilium --kernel full` downloads a published, sha-pinned kernel build (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. Cross-node pod traffic runs at ~285MB/s and Mac-to-pod at ~1GB/s on Cilium's vxlan datapath.
@@ -130,6 +130,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
  ✓ Installing LoadBalancer (kiac-lb) (1.1s)
  ✓ Waiting for nodes to be Ready (10.7s)
  ✓ Labeling LoadBalancer primary node (0.3s)
+ ✓ Installing edge proxy (large upload fix) (0.8s)
  ✓ Writing kubeconfig (0.2s)
 
 Cluster "dev" is ready in 1m35s. Every node is its own lightweight VM.
@@ -202,7 +203,7 @@ kiac completion zsh                          # bash|zsh|fish|powershell; see kia
 kiac delete cluster --name dev
 ```
 
-One honest caveat: after `kiac stop node` + `kiac start node`, an apple/container 1.0 vmnet issue drops new TCP connections from your Mac to that one restarted VM. In-cluster traffic keeps working, and reboot plus `kiac resume` is unaffected. Details and workarounds live in the docs troubleshooting page.
+One honest caveat is tracked upstream in apple/container's vmnet layer: after `kiac stop node` + `kiac start node`, new TCP connections from your Mac to that one restarted VM can drop. In-cluster traffic keeps working, reboot plus `kiac resume` is unaffected, and the default edge proxy handles the separate large-upload TSO path for NodePort and LoadBalancer traffic. Details and workarounds live in the docs troubleshooting page.
 
 Full guides and command reference live on the [docs site](https://saiyam1814.github.io/kiac/).
 
@@ -223,6 +224,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--no-metrics` | `false` | skip metrics-server |
 | `--no-storage` | `false` | skip the local-path default StorageClass |
 | `--no-lb` | `false` | skip kiac-lb (`type: LoadBalancer` support) |
+| `--no-edge-proxy` | `false` | skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers |
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--distro` and `--kernel` are flags only for now) |
@@ -234,7 +236,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
   <img src="assets/architecture.png" alt="How kiac builds a cluster" width="100%">
 </p>
 
-kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, and the built-in kiac-lb LoadBalancer by default. With `--distro k3s` the same VMs run `rancher/k3s` as PID 1 instead, and `--kernel full` boots every node on a published kernel build with the features overlay and eBPF CNIs need. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
+kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, the built-in kiac-lb LoadBalancer, and the embedded node-local edge proxy by default. With `--distro k3s` the same VMs run `rancher/k3s` as PID 1 instead, and `--kernel full` boots every node on a published kernel build with the features overlay and eBPF CNIs need. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
 
 ## Roadmap
 

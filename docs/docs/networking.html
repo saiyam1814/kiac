@@ -109,7 +109,8 @@ kubectl get svc web    <span class="c"># EXTERNAL-IP is one of your worker node 
 <span class="c"># the controller's logs, from inside the control-plane VM</span>
 container exec kiac-dev-control-plane journalctl -u kiac-lb</code></pre>
   <p>On <a href="k3s.html">--distro k3s</a>, k3s's bundled servicelb (klipper) backs <code>type: LoadBalancer</code> instead, natively on node IPs; kiac-lb is not installed there.</p>
-  <p>Skip the whole thing with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>
+  <p>kiac also installs <b>kiac-edge-proxy</b> by default on every node. It is a tiny embedded node process that redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a built-in original-destination TCP proxy, then opens a fresh local connection back to the original Service address. That keeps kube-proxy in charge of backend selection while avoiding apple/container vmnet's TSO stall on large uploads from sibling VMs. Disable it only with <code>--no-edge-proxy</code>.</p>
+  <p>Skip the LoadBalancer controller with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>
 
   <div class="pn">
     <a href="getting-started.html"><span>Previous</span>Getting started</a>

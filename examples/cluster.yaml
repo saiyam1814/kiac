@@ -19,5 +19,6 @@ addons:
   metrics: true          # metrics-server (kubectl top nodes/pods)
   storage: true          # local-path default StorageClass
   loadBalancer: true     # kiac-lb, Services of type LoadBalancer
+  edgeProxy: true        # node-local TCP proxy for large external uploads
   observability: false   # Prometheus + Grafana + node-exporter
   gateway: false         # Gateway API CRDs + Traefik

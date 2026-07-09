@@ -30,6 +30,7 @@ type Config struct {
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
+	NoEdgeProxy   bool
 	Observability bool
 	Gateway       bool
 	WaitTimeout   time.Duration
@@ -263,6 +264,13 @@ func (m *Manager) Create(cfg Config) error {
 		}); err != nil {
 			ui.Infof("LB primary node not labeled: %v", err)
 			ui.Infof("the cluster works; label manually with: kubectl label node <node> kiac.io/lb-primary=true")
+		}
+	}
+
+	if !cfg.NoEdgeProxy && cfg.CNI != "none" {
+		if err := m.installEdgeProxy(cp, cfg, nodes); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
 		}
 	}
 

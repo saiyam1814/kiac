@@ -69,7 +69,7 @@
     <tr><td>Ingress</td><td>k3s's bundled Traefik is <b>disabled</b>: it would fight the <code>--gateway</code> addon's Traefik for ports 80 and 443</td><td>always off</td></tr>
     <tr><td>Network policy</td><td>k3s's network-policy controller is disabled; it only works against the flannel bridge kiac removes (see below)</td><td>always off</td></tr>
   </table>
-  <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. servicelb assigns their LoadBalancer IPs, and kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, so the printed URL is always an IP that delivers traffic to a local pod.</p>
+  <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. servicelb assigns their LoadBalancer IPs, kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, and the default edge proxy handles large external uploads through NodePorts and LoadBalancers.</p>
 
   <h2 id="kindnet">Why kindnet replaces flannel</h2>
   <p>k3s normally brings flannel as its CNI. kiac starts the server with <code>--flannel-backend=none</code> and applies <b>kindnet</b> instead, for a kernel reason:</p>

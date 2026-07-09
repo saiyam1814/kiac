@@ -73,7 +73,11 @@ func k3sAgentArgs(nodeName string) []string {
 // backend (CONFIG_IP_NF_IPTABLES_LEGACY=y) is fully supported. Both
 // variants ship in the image under /bin/aux.
 func k3sBoot(k3sArgs []string) (entrypoint string, args []string) {
-	cmd := "for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; exec k3s"
+	cmd := "for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
+		"if [ -x " + edgeProxyNodePath + " ] && [ -f " + edgeProxyKubeconfigPath + " ]; then " +
+		"if ! kill -0 \"$(cat " + edgeProxySupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
+		"nohup sh -c 'while :; do " + edgeProxyNodePath + " --kubeconfig " + edgeProxyKubeconfigPath + " >>" + edgeProxyLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + edgeProxySupervisorPID + "; " +
+		"fi; fi; exec k3s"
 	for _, a := range k3sArgs {
 		cmd += " " + shQuote(a)
 	}
@@ -91,6 +95,38 @@ func k3sAgentEnv(serverIP, token string) []string {
 	return []string{
 		"K3S_URL=https://" + serverIP + ":6443",
 		"K3S_TOKEN=" + token,
+	}
+}
+
+// k3sServerRunOpts carries the common VM knobs into the server VM. Keep
+// this in one place so flags like --kernel cannot silently apply to the
+// kubeadm path only.
+func k3sServerRunOpts(cfg Config, nodeName, token string) runtime.RunOpts {
+	entry, bootArgs := k3sBoot(k3sServerArgs(cfg, nodeName))
+	return runtime.RunOpts{
+		Name:       nodeName,
+		Image:      cfg.Image,
+		CPUs:       cfg.CPUs,
+		Memory:     cfg.CPMemory,
+		Env:        []string{"K3S_TOKEN=" + token},
+		Entrypoint: entry,
+		Kernel:     cfg.Kernel,
+		Args:       bootArgs,
+	}
+}
+
+// k3sAgentRunOpts mirrors k3sServerRunOpts for workers.
+func k3sAgentRunOpts(cfg Config, nodeName string, env []string) runtime.RunOpts {
+	entry, bootArgs := k3sBoot(k3sAgentArgs(nodeName))
+	return runtime.RunOpts{
+		Name:       nodeName,
+		Image:      cfg.Image,
+		CPUs:       cfg.CPUs,
+		Memory:     cfg.Memory,
+		Env:        env,
+		Entrypoint: entry,
+		Kernel:     cfg.Kernel,
+		Args:       bootArgs,
 	}
 }
 
@@ -133,6 +169,10 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", cfg.Name)
 	}
 	cp := ControlPlane(cfg.Name)
+	nodes := []string{cp}
+	for i := 1; i <= cfg.Workers; i++ {
+		nodes = append(nodes, worker(cfg.Name, i))
+	}
 	// Same hostname limit as Create: node name == container name == VM
 	// hostname, and Linux caps hostnames at 63 chars.
 	if len(cp) > maxNodeNameLen {
@@ -164,16 +204,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	}
 
 	if err := ui.Step("Booting k3s server VM", func() error {
-		entry, bootArgs := k3sBoot(k3sServerArgs(cfg, cp))
-		if err := m.rt.RunDetached(runtime.RunOpts{
-			Name:       cp,
-			Image:      cfg.Image,
-			CPUs:       cfg.CPUs,
-			Memory:     cfg.CPMemory,
-			Env:        []string{"K3S_TOKEN=" + token},
-			Entrypoint: entry,
-			Args:       bootArgs,
-		}); err != nil {
+		if err := m.rt.RunDetached(k3sServerRunOpts(cfg, cp, token)); err != nil {
 			return err
 		}
 		// WaitReady polls systemd/containerd and cannot work here (k3s
@@ -206,16 +237,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			env := k3sAgentEnv(serverIP, token)
 			for i := 1; i <= cfg.Workers; i++ {
 				w := worker(cfg.Name, i)
-				entry, bootArgs := k3sBoot(k3sAgentArgs(w))
-				if err := m.rt.RunDetached(runtime.RunOpts{
-					Name:       w,
-					Image:      cfg.Image,
-					CPUs:       cfg.CPUs,
-					Memory:     cfg.Memory,
-					Env:        env,
-					Entrypoint: entry,
-					Args:       bootArgs,
-				}); err != nil {
+				if err := m.rt.RunDetached(k3sAgentRunOpts(cfg, w, env)); err != nil {
 					return err
 				}
 			}
@@ -253,6 +275,13 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			_, err := m.k3sKubectl(cp, "label", "node", primary, "kiac.io/lb-primary=true", "--overwrite")
 			return err
 		}); err != nil {
+			m.cleanupOnFailure(cfg.Name)
+			return err
+		}
+	}
+
+	if !cfg.NoEdgeProxy {
+		if err := m.installEdgeProxyK3s(cp, cfg, nodes); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
 		}

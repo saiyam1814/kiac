@@ -2,6 +2,10 @@ version: 2
 
 project_name: kiac
 
+before:
+  hooks:
+    - make edge-proxy-asset
+
 builds:
   - main: .
     binary: kiac

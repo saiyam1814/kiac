@@ -113,6 +113,7 @@ spec:
           ports:
             - containerPort: 8080</code></pre>
   <p>Scraped series arrive with <code>namespace</code> and <code>pod</code> labels attached. The other preconfigured jobs are <code>node-exporter</code>, <code>kube-state-metrics</code>, <code>kubelet</code>, and <code>cadvisor</code> (container-level CPU/memory).</p>
+  <p>For a full copy-paste walkthrough, see <a href="https://github.com/saiyam1814/kiac/blob/main/examples/observability-lab.md">examples/observability-lab.md</a>. It creates the addon, deploys the sample exporter app, generates traffic, and queries both Prometheus and Grafana.</p>
   <p>Prometheus itself is ClusterIP-only, reachable in-cluster at <code>prometheus.kiac-observability.svc:9090</code>. To poke at it from your Mac:</p>
   <pre><code>kubectl port-forward -n kiac-observability svc/prometheus 9090:9090
 <span class="c"># open http://localhost:9090</span></code></pre>

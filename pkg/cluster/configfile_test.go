@@ -38,6 +38,7 @@ addons:
   metrics: false
   storage: false
   loadBalancer: false
+  edgeProxy: false
   observability: true
   gateway: true
 `,
@@ -52,8 +53,8 @@ addons:
 					t.Errorf("cni/cpus/memory/wait = %q/%q/%q/%q", fc.CNI, fc.CPUs, fc.Memory, fc.Wait)
 				}
 				a := fc.Addons
-				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer {
-					t.Errorf("metrics/storage/loadBalancer = %v/%v/%v", a.Metrics, a.Storage, a.LoadBalancer)
+				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer || a.EdgeProxy == nil || *a.EdgeProxy {
+					t.Errorf("metrics/storage/loadBalancer/edgeProxy = %v/%v/%v/%v", a.Metrics, a.Storage, a.LoadBalancer, a.EdgeProxy)
 				}
 				if a.Observability == nil || !*a.Observability || a.Gateway == nil || !*a.Gateway {
 					t.Errorf("observability/gateway = %v/%v", a.Observability, a.Gateway)
@@ -132,7 +133,8 @@ func cliDefaults() (Config, string) {
 		Workers:     0,
 		CNI:         "kindnet",
 		CPUs:        "4",
-		Memory:      "4G",
+		Memory:      "2G",
+		CPMemory:    "4G",
 		WaitTimeout: 5 * time.Minute,
 	}, DefaultK8sVersion
 }
@@ -154,6 +156,7 @@ func TestMerge(t *testing.T) {
 			Metrics:       boolPtr(false),
 			Storage:       boolPtr(false),
 			LoadBalancer:  boolPtr(false),
+			EdgeProxy:     boolPtr(false),
 			Observability: boolPtr(true),
 			Gateway:       boolPtr(true),
 		},
@@ -173,9 +176,12 @@ func TestMerge(t *testing.T) {
 			file: full,
 			wantCfg: Config{
 				Name: "demo", Workers: 3,
-				Image: "docker.io/kindest/node:v1.34.8",
-				CNI:   "none", CPUs: "8", Memory: "8G",
-				NoMetrics: true, NoStorage: true, NoLB: true,
+				Image:     "docker.io/kindest/node:v1.34.8",
+				CNI:       "none",
+				CPUs:      "8",
+				Memory:    "8G",
+				CPMemory:  "4G",
+				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -185,7 +191,7 @@ func TestMerge(t *testing.T) {
 			name: "empty file keeps CLI defaults",
 			file: FileConfig{},
 			wantCfg: Config{
-				Name: "dev", CNI: "kindnet", CPUs: "4", Memory: "4G",
+				Name: "dev", CNI: "kindnet", CPUs: "4", Memory: "2G", CPMemory: "4G",
 				WaitTimeout: 5 * time.Minute,
 			},
 			wantVersion: DefaultK8sVersion,
@@ -201,9 +207,12 @@ func TestMerge(t *testing.T) {
 			},
 			wantCfg: Config{
 				Name: "cli", Workers: 1,
-				Image: "docker.io/kindest/node:v1.34.8",
-				CNI:   "none", CPUs: "8", Memory: "8G",
-				NoMetrics: false, NoStorage: true, NoLB: true,
+				Image:     "docker.io/kindest/node:v1.34.8",
+				CNI:       "none",
+				CPUs:      "8",
+				Memory:    "8G",
+				CPMemory:  "4G",
+				NoMetrics: false, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 5 * time.Minute,
 			},
@@ -212,12 +221,15 @@ func TestMerge(t *testing.T) {
 		{
 			name:    "explicit addon flags override file toggles",
 			file:    full,
-			changed: map[string]bool{"observability": true, "gateway": true, "no-lb": true},
+			changed: map[string]bool{"observability": true, "gateway": true, "no-lb": true, "no-edge-proxy": true},
 			wantCfg: Config{
 				Name: "demo", Workers: 3,
-				Image: "docker.io/kindest/node:v1.34.8",
-				CNI:   "none", CPUs: "8", Memory: "8G",
-				NoMetrics: true, NoStorage: true, NoLB: false,
+				Image:     "docker.io/kindest/node:v1.34.8",
+				CNI:       "none",
+				CPUs:      "8",
+				Memory:    "8G",
+				CPMemory:  "4G",
+				NoMetrics: true, NoStorage: true, NoLB: false, NoEdgeProxy: false,
 				Observability: false, Gateway: false,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -227,7 +239,7 @@ func TestMerge(t *testing.T) {
 			name: "explicit workers 0 in file wins over default",
 			file: FileConfig{Workers: intPtr(0), Name: "demo"},
 			wantCfg: Config{
-				Name: "demo", Workers: 0, CNI: "kindnet", CPUs: "4", Memory: "4G",
+				Name: "demo", Workers: 0, CNI: "kindnet", CPUs: "4", Memory: "2G", CPMemory: "4G",
 				WaitTimeout: 5 * time.Minute,
 			},
 			wantVersion: DefaultK8sVersion,

@@ -99,6 +99,38 @@ func TestK3sAgentArgsAndEnv(t *testing.T) {
 	}
 }
 
+func TestK3sRunOptsCarryKernel(t *testing.T) {
+	cfg := Config{
+		Image:    "docker.io/rancher/k3s:v1.36.2-k3s1",
+		CPUs:     "4",
+		Memory:   "2G",
+		CPMemory: "4G",
+		Kernel:   "/tmp/kiac-kernel-full",
+	}
+	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123")
+	if server.Kernel != cfg.Kernel {
+		t.Errorf("server Kernel = %q, want %q", server.Kernel, cfg.Kernel)
+	}
+	if server.Memory != cfg.CPMemory || server.Entrypoint == "" || len(server.Args) == 0 {
+		t.Errorf("server opts lost k3s boot settings: %+v", server)
+	}
+	if len(server.Env) != 1 || server.Env[0] != "K3S_TOKEN=tok123" {
+		t.Errorf("server Env = %q", server.Env)
+	}
+
+	env := k3sAgentEnv("192.168.64.5", "tok123")
+	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env)
+	if agent.Kernel != cfg.Kernel {
+		t.Errorf("agent Kernel = %q, want %q", agent.Kernel, cfg.Kernel)
+	}
+	if agent.Memory != cfg.Memory || agent.Entrypoint == "" || len(agent.Args) == 0 {
+		t.Errorf("agent opts lost k3s boot settings: %+v", agent)
+	}
+	if strings.Join(agent.Env, "\n") != strings.Join(env, "\n") {
+		t.Errorf("agent Env = %q, want %q", agent.Env, env)
+	}
+}
+
 func TestK3sToken(t *testing.T) {
 	a, err := k3sToken()
 	if err != nil {

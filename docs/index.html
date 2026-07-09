@@ -281,7 +281,7 @@
   <h2>Usable the moment it is up.</h2>
   <p class="lede">A default StorageClass, metrics-server, and node IPs your Mac can reach directly come standard on every cluster. Then it keeps going.</p>
   <div class="grid">
-    <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>kiac-lb ships by default: a tiny controller inside the control-plane VM assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds. No pods, no webhooks, no <code>&lt;pending&gt;</code>.</p></div>
+    <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>kiac-lb ships by default: a tiny controller inside the control-plane VM assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds. The edge proxy keeps large external uploads flowing.</p></div>
     <div class="card"><div class="emoji">📈</div><h3>Observability built in</h3><p><code>--observability</code> installs Prometheus and Grafana on a real LoadBalancer IP, dashboards already provisioned. Works on kubeadm, k3s, and Cilium clusters.</p></div>
     <div class="card"><div class="emoji">🚪</div><h3>Gateway API built in</h3><p><code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway, so an HTTPRoute just works.</p></div>
     <div class="card"><div class="emoji">🔁</div><h3>Survives reboots</h3><p><code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals the control-plane IP everywhere: cert, kubeconfigs, kube-proxy. Idempotent.</p></div>
@@ -322,6 +322,7 @@ const lines = [
   [3600, ' <span class="ok">✓</span> Installing CNI (kindnet) <span class="d">(0.4s)</span>'],
   [3900, ' <span class="ok">✓</span> Installing addons (storage, metrics-server) <span class="d">(0.8s)</span>'],
   [4300, ' <span class="ok">✓</span> Installing LoadBalancer (kiac-lb) <span class="d">(0.4s)</span>'],
+  [4800, ' <span class="ok">✓</span> Installing edge proxy (large upload fix) <span class="d">(0.8s)</span>'],
   [4700, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(9.7s)</span>'],
   [5000, ' <span class="ok">✓</span> Writing kubeconfig <span class="d">(0.2s)</span>'],
   [5400, ''],

@@ -55,6 +55,11 @@ addons:
   # examples/loadbalancer.yaml). Required by observability and gateway.
   loadBalancer: true
 
+  # kiac-edge-proxy terminates externally-entering TCP on each node and
+  # re-opens it locally before kube-proxy forwards to pods. This avoids
+  # apple/container vmnet TSO stalls on large VM-originated uploads.
+  edgeProxy: true
+
   # Prometheus v3.5.0 + Grafana 12.0.2 + kube-state-metrics +
   # node-exporter in namespace kiac-observability. Grafana gets a
   # LoadBalancer IP on port 3000, anonymous admin, with two provisioned

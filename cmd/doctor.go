@@ -39,6 +39,7 @@ var doctorCmd = &cobra.Command{
 			failures++
 			ui.Check(false, "apple/container CLI", "not found - install from https://github.com/apple/container/releases")
 		case majorVersion(ver) < 1:
+			failures++
 			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.0.0+ for best results")
 		default:
 			ui.Check(true, "apple/container CLI", ver)

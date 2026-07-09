@@ -34,6 +34,7 @@ type FileAddons struct {
 	Metrics       *bool `yaml:"metrics"`
 	Storage       *bool `yaml:"storage"`
 	LoadBalancer  *bool `yaml:"loadBalancer"`
+	EdgeProxy     *bool `yaml:"edgeProxy"`
 	Observability *bool `yaml:"observability"`
 	Gateway       *bool `yaml:"gateway"`
 }
@@ -103,6 +104,9 @@ func (fc *FileConfig) Merge(cfg *Config, k8sVersion *string, changed func(string
 	}
 	if fc.Addons.LoadBalancer != nil && !changed("no-lb") {
 		cfg.NoLB = !*fc.Addons.LoadBalancer
+	}
+	if fc.Addons.EdgeProxy != nil && !changed("no-edge-proxy") {
+		cfg.NoEdgeProxy = !*fc.Addons.EdgeProxy
 	}
 	if fc.Addons.Observability != nil && !changed("observability") {
 		cfg.Observability = *fc.Addons.Observability

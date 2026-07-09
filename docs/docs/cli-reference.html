@@ -76,6 +76,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--no-metrics</code></td><td><code>false</code></td><td>skip installing metrics-server</td></tr>
     <tr><td><code>--no-storage</code></td><td><code>false</code></td><td>skip installing the local-path default StorageClass</td></tr>
     <tr><td><code>--no-lb</code></td><td><code>false</code></td><td>skip installing kiac-lb (<code>type: LoadBalancer</code> support); on k3s, disables the bundled servicelb instead</td></tr>
+    <tr><td><code>--no-edge-proxy</code></td><td><code>false</code></td><td>skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers</td></tr>
     <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP</td></tr>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
     <tr><td><code>--wait</code></td><td><code>5m</code></td><td>timeout for nodes to become ready</td></tr>

@@ -66,7 +66,7 @@
     <li><b>Three node VMs boot</b> in parallel (1 control plane + 2 workers), each with 4 vCPUs; the control plane gets 4G of memory and workers 2G by default (<code>--cpus</code>, <code>--cp-memory</code>, <code>--memory</code>).</li>
     <li><b>kubeadm</b> initializes the control plane and joins the workers concurrently.</li>
     <li><b>kindnet</b> (the CNI) is applied, then the default addons install: local-path storage and metrics-server in parallel, followed by the <b>kiac-lb</b> LoadBalancer (a tiny systemd service inside the control-plane VM).</li>
-    <li>Nodes are waited on until <b>Ready</b>, a primary LoadBalancer node is labeled, and the kubeconfig is written.</li>
+    <li>Nodes are waited on until <b>Ready</b>, a primary LoadBalancer node is labeled, the <b>kiac-edge-proxy</b> node process is installed for large external uploads, and the kubeconfig is written.</li>
   </ol>
   <p>Useful variations:</p>
   <pre><code>kiac create cluster                          <span class="c"># single node named "dev", control plane untainted</span>
