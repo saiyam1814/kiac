@@ -98,6 +98,7 @@ curl -H "Host: web.local" http://$GW/
   <pre><code>echo "$GW web.local" | sudo tee -a /etc/hosts
 curl http://web.local/</code></pre>
   <p>Path matching, header matching, traffic splitting, and everything else in the <a href="https://gateway-api.sigs.k8s.io/">Gateway API spec</a> work the same way; kiac only pre-creates the Gateway so you can start at the HTTPRoute.</p>
+  <p>For a full copy-paste walkthrough, see <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gateway-api-lab.md">examples/gateway-api-lab.md</a>. It covers GatewayClass, Gateway, HTTPRoute attachment, hostname and path matches, status checks, and troubleshooting.</p>
 
   <h2 id="details">Operational details</h2>
   <ul>
