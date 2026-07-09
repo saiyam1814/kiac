@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -21,10 +22,13 @@ type proxyApp struct {
 	listenAddr    string
 	proxyPort     string
 	nodePortRange string
+	backendMSS    int
 	kubeconfig    string
 	iptables      string
 	kubectl       []string
 	lastSnapshot  string
+	lbMu          sync.RWMutex
+	lbTargets     map[string]string
 }
 
 func main() {
@@ -34,6 +38,7 @@ func main() {
 	flag.StringVar(&app.listenAddr, "listen", "0.0.0.0:15080", "TCP address to receive redirected Service traffic")
 	flag.StringVar(&app.proxyPort, "proxy-port", "15080", "local redirect port")
 	flag.StringVar(&app.nodePortRange, "nodeport-range", "30000:32767", "NodePort range to redirect")
+	flag.IntVar(&app.backendMSS, "backend-mss", 1200, "TCP_MAXSEG value for backend connections; 0 disables MSS clamping")
 	flag.StringVar(&app.kubeconfig, "kubeconfig", "", "kubeconfig path for polling LoadBalancer Services")
 	flag.Parse()
 
@@ -124,11 +129,11 @@ func (a *proxyApp) serve(ctx context.Context) error {
 			_ = conn.Close()
 			continue
 		}
-		go handleConn(tcp)
+		go a.handleConn(tcp)
 	}
 }
 
-func handleConn(client *net.TCPConn) {
+func (a *proxyApp) handleConn(client *net.TCPConn) {
 	defer client.Close()
 
 	dst, err := originalDst(client)
@@ -137,9 +142,10 @@ func handleConn(client *net.TCPConn) {
 		return
 	}
 
-	backendConn, err := net.DialTimeout("tcp4", dst, 10*time.Second)
+	backendDst := a.backendDst(dst)
+	backendConn, err := a.dialBackend(backendDst)
 	if err != nil {
-		log.Printf("dial %s: %v", dst, err)
+		log.Printf("dial %s: %v", backendDst, err)
 		return
 	}
 	backend := backendConn.(*net.TCPConn)
@@ -149,6 +155,34 @@ func handleConn(client *net.TCPConn) {
 	go copyTCP(backend, client, errc)
 	go copyTCP(client, backend, errc)
 	<-errc
+}
+
+func (a *proxyApp) dialBackend(dst string) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			if a.backendMSS <= 0 {
+				return nil
+			}
+			return setTCPMaxSeg(c, a.backendMSS)
+		},
+	}
+	return dialer.Dial("tcp4", dst)
+}
+
+func (a *proxyApp) backendDst(original string) string {
+	a.lbMu.RLock()
+	defer a.lbMu.RUnlock()
+	if dst := a.lbTargets[original]; dst != "" {
+		return dst
+	}
+	return original
+}
+
+func (a *proxyApp) setLBTargets(targets map[string]string) {
+	a.lbMu.Lock()
+	defer a.lbMu.Unlock()
+	a.lbTargets = targets
 }
 
 func copyTCP(dst, src *net.TCPConn, errc chan<- error) {
@@ -192,24 +226,42 @@ func (a *proxyApp) iptOK(args ...string) bool {
 
 func (a *proxyApp) resetHook() error {
 	_ = a.ipt("-N", "KIAC-EDGE")
+	_ = a.ipt("-N", "KIAC-EDGE-OUTPUT")
 	for a.ipt("-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
 	}
-	return a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE")
+	for a.ipt("-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
+	}
+	if err := a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
+		return err
+	}
+	return a.ipt("-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT")
 }
 
 func (a *proxyApp) ensureHook() error {
 	_ = a.ipt("-N", "KIAC-EDGE")
-	if a.iptOK("-C", "PREROUTING", "-j", "KIAC-EDGE") {
-		return nil
+	_ = a.ipt("-N", "KIAC-EDGE-OUTPUT")
+	if !a.iptOK("-C", "PREROUTING", "-j", "KIAC-EDGE") {
+		if err := a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
+			return err
+		}
 	}
-	return a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE")
+	if !a.iptOK("-C", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") {
+		if err := a.ipt("-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *proxyApp) cleanup() {
 	for a.ipt("-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
 	}
+	for a.ipt("-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
+	}
 	_ = a.ipt("-F", "KIAC-EDGE")
 	_ = a.ipt("-X", "KIAC-EDGE")
+	_ = a.ipt("-F", "KIAC-EDGE-OUTPUT")
+	_ = a.ipt("-X", "KIAC-EDGE-OUTPUT")
 }
 
 func (a *proxyApp) syncRules() error {
@@ -223,23 +275,32 @@ func (a *proxyApp) syncRules() error {
 	if err := a.ipt("-F", "KIAC-EDGE"); err != nil {
 		return err
 	}
+	if err := a.ipt("-F", "KIAC-EDGE-OUTPUT"); err != nil {
+		return err
+	}
 	if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
+		return err
+	}
+	if err := a.ipt("-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
 		return err
 	}
 	if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 		return err
 	}
+	lbTargets := map[string]string{}
 	if snapshot != "" {
-		if err := a.addLoadBalancerRules(snapshot); err != nil {
+		if err := a.addLoadBalancerRules(snapshot, lbTargets); err != nil {
 			log.Printf("loadbalancer rules: %v", err)
 		}
 	}
+	a.setLBTargets(lbTargets)
 	a.lastSnapshot = snapshot
 	return nil
 }
 
 func (a *proxyApp) rulesMissing() bool {
 	return !a.iptOK("-C", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
+		!a.iptOK("-C", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
 		!a.iptOK("-C", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort)
 }
 
@@ -262,7 +323,8 @@ type serviceList struct {
 		Spec struct {
 			Type  string `json:"type"`
 			Ports []struct {
-				Port int `json:"port"`
+				Port     int `json:"port"`
+				NodePort int `json:"nodePort"`
 			} `json:"ports"`
 		} `json:"spec"`
 		Status struct {
@@ -275,7 +337,7 @@ type serviceList struct {
 	} `json:"items"`
 }
 
-func (a *proxyApp) addLoadBalancerRules(raw string) error {
+func (a *proxyApp) addLoadBalancerRules(raw string, targets map[string]string) error {
 	var services serviceList
 	if err := json.Unmarshal([]byte(raw), &services); err != nil {
 		return err
@@ -294,6 +356,12 @@ func (a *proxyApp) addLoadBalancerRules(raw string) error {
 				}
 				if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "-d", ingress.IP, "--dport", strconv.Itoa(port.Port), "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 					return err
+				}
+				if err := a.ipt("-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "-d", ingress.IP, "--dport", strconv.Itoa(port.Port), "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
+					return err
+				}
+				if port.NodePort > 0 {
+					targets[net.JoinHostPort(ingress.IP, strconv.Itoa(port.Port))] = net.JoinHostPort(ingress.IP, strconv.Itoa(port.NodePort))
 				}
 			}
 		}

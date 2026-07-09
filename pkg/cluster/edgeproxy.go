@@ -147,7 +147,8 @@ func (m *Manager) waitEdgeProxyRules(nodes []string) error {
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/bin/aux:$PATH"
 IPT="$(command -v iptables-legacy || command -v iptables)"
 for i in $(seq 1 20); do
-  if "$IPT" -w -t nat -C PREROUTING -j KIAC-EDGE 2>/dev/null; then
+  if "$IPT" -w -t nat -C PREROUTING -j KIAC-EDGE 2>/dev/null &&
+     "$IPT" -w -t nat -C OUTPUT -j KIAC-EDGE-OUTPUT 2>/dev/null; then
     exit 0
   fi
   sleep 1
