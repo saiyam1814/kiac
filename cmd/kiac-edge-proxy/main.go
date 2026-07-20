@@ -21,11 +21,13 @@ import (
 
 type proxyApp struct {
 	listenAddr    string
+	listenAddr6   string
 	proxyPort     string
 	nodePortRange string
 	backendMSS    int
 	kubeconfig    string
 	iptables      string
+	ip6tables     string // "" when the node kernel has no IPv6 netfilter
 	kubectl       []string
 	lastSnapshot  string
 	routeMu       sync.RWMutex
@@ -34,8 +36,16 @@ type proxyApp struct {
 }
 
 type routeTable struct {
-	loadBalancers map[string]backendRoute
-	nodePorts     map[int]backendRoute
+	loadBalancers map[string]backendRoute // key: "host:port" (v6 host bracketed)
+	nodePorts     map[nodePortKey]backendRoute
+}
+
+// nodePortKey routes a NodePort per family: a dual-stack Service is
+// reached over both v4 and v6, and each family may resolve to a
+// different endpoint or tunnel target.
+type nodePortKey struct {
+	port int
+	v6   bool
 }
 
 type backendRoute struct {
@@ -47,7 +57,8 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	app := &proxyApp{}
-	flag.StringVar(&app.listenAddr, "listen", "0.0.0.0:15080", "TCP address to receive redirected Service traffic")
+	flag.StringVar(&app.listenAddr, "listen", "0.0.0.0:15080", "IPv4 TCP address to receive redirected Service traffic")
+	flag.StringVar(&app.listenAddr6, "listen6", "[::]:15080", "IPv6 TCP address to receive redirected Service traffic")
 	flag.StringVar(&app.proxyPort, "proxy-port", "15080", "local redirect port")
 	flag.StringVar(&app.nodePortRange, "nodeport-range", "30000:32767", "NodePort range to redirect")
 	flag.IntVar(&app.backendMSS, "backend-mss", 1200, "TCP_MAXSEG value for backend connections; 0 disables MSS clamping")
@@ -70,6 +81,17 @@ func (a *proxyApp) run(ctx context.Context) error {
 		return err
 	}
 	a.iptables = ipt
+	// IPv6 is best-effort: on a stock (IPv4-only) kernel ip6tables cannot
+	// initialize its tables, so a dual-stack cluster is not possible and
+	// there is nothing to intercept. Detect that and run IPv4-only rather
+	// than failing, so the proxy still fixes v4 uploads there.
+	if ip6t, err := lookPath("ip6tables-legacy", "ip6tables"); err == nil {
+		if ip6tablesUsable(ip6t) {
+			a.ip6tables = ip6t
+		} else {
+			log.Printf("ip6tables has no usable nat table (IPv4-only kernel); running IPv4-only")
+		}
+	}
 
 	a.kubectl = []string{"kubectl"}
 	if _, err := exec.LookPath("kubectl"); err != nil {
@@ -89,6 +111,14 @@ func (a *proxyApp) run(ctx context.Context) error {
 	go a.syncLoop(ctx)
 
 	return a.serve(ctx)
+}
+
+// ip6tablesUsable reports whether the IPv6 nat table initializes. On a
+// kernel without IPv6 netfilter the first table access fails ("Table
+// does not exist"), which is exactly issue #10's symptom on the stock
+// kernel; the full kernel initializes it.
+func ip6tablesUsable(bin string) bool {
+	return exec.Command(bin, "-w", "-t", "nat", "-L", "-n").Run() == nil
 }
 
 func relinkLegacyIptables() {
@@ -112,7 +142,34 @@ func lookPath(names ...string) (string, error) {
 }
 
 func (a *proxyApp) serve(ctx context.Context) error {
-	ln, err := net.Listen("tcp4", a.listenAddr)
+	errc := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	start := func(network, addr string) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := a.listenAndServe(ctx, network, addr); err != nil {
+				errc <- err
+			}
+		}()
+	}
+	start("tcp4", a.listenAddr)
+	if a.ip6tables != "" {
+		start("tcp6", a.listenAddr6)
+	}
+
+	go func() { wg.Wait(); close(errc) }()
+	// Return the first listener error; ctx cancellation closes listeners
+	// and the loops return nil, so errc closing with no value is success.
+	if err, ok := <-errc; ok {
+		return err
+	}
+	return nil
+}
+
+func (a *proxyApp) listenAndServe(ctx context.Context, network, addr string) error {
+	ln, err := net.Listen(network, addr)
 	if err != nil {
 		return err
 	}
@@ -123,7 +180,7 @@ func (a *proxyApp) serve(ctx context.Context) error {
 		_ = ln.Close()
 	}()
 
-	log.Printf("listening on %s", a.listenAddr)
+	log.Printf("listening on %s (%s)", addr, network)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -149,7 +206,8 @@ func (a *proxyApp) serve(ctx context.Context) error {
 func (a *proxyApp) handleConn(client *net.TCPConn) {
 	defer client.Close()
 
-	dst, err := originalDst(client)
+	v6 := connIsV6(client)
+	dst, err := originalDst(client, v6)
 	if err != nil {
 		log.Printf("original dst: %v", err)
 		return
@@ -178,6 +236,14 @@ func (a *proxyApp) handleConn(client *net.TCPConn) {
 		}
 	}
 	proxyTCP(client, backend, client)
+}
+
+// connIsV6 reports whether the accepted connection arrived over IPv6.
+// The listeners are family-specific (tcp4/tcp6), so the remote address
+// family is authoritative.
+func connIsV6(c *net.TCPConn) bool {
+	ra, ok := c.RemoteAddr().(*net.TCPAddr)
+	return ok && ra.IP.To4() == nil
 }
 
 func (a *proxyApp) handleTunnel(client *net.TCPConn) {
@@ -217,7 +283,9 @@ func (a *proxyApp) dialBackend(dst string) (net.Conn, error) {
 			return setTCPMaxSeg(c, a.backendMSS)
 		},
 	}
-	return dialer.Dial("tcp4", dst)
+	// "tcp" so the same dial path serves IPv4 and IPv6 backends; the MSS
+	// clamp is set on the socket regardless of family.
+	return dialer.Dial("tcp", dst)
 }
 
 func isProxyPort(dst, proxyPort string) bool {
@@ -227,7 +295,7 @@ func isProxyPort(dst, proxyPort string) bool {
 
 func validBackendTarget(target string) bool {
 	host, port, err := net.SplitHostPort(target)
-	if err != nil || net.ParseIP(host).To4() == nil {
+	if err != nil || net.ParseIP(host) == nil {
 		return false
 	}
 	p, err := strconv.Atoi(port)
@@ -240,7 +308,7 @@ func (a *proxyApp) backendRoute(original string) backendRoute {
 	if route := a.routes.loadBalancers[original]; route.dial != "" {
 		return route
 	}
-	_, port, err := net.SplitHostPort(original)
+	host, port, err := net.SplitHostPort(original)
 	if err != nil {
 		return backendRoute{}
 	}
@@ -248,7 +316,7 @@ func (a *proxyApp) backendRoute(original string) backendRoute {
 	if err != nil {
 		return backendRoute{}
 	}
-	return a.routes.nodePorts[p]
+	return a.routes.nodePorts[nodePortKey{port: p, v6: isV6Host(host)}]
 }
 
 func (a *proxyApp) setRoutes(routes routeTable) {
@@ -295,57 +363,85 @@ func (a *proxyApp) syncLoop(ctx context.Context) {
 	}
 }
 
-func (a *proxyApp) ipt(args ...string) error {
+// families returns the iptables binaries to program: always IPv4, plus
+// IPv6 when the kernel supports it.
+func (a *proxyApp) families() []string {
+	bins := []string{a.iptables}
+	if a.ip6tables != "" {
+		bins = append(bins, a.ip6tables)
+	}
+	return bins
+}
+
+// binFor returns the iptables binary for an address family.
+func (a *proxyApp) binFor(v6 bool) string {
+	if v6 {
+		return a.ip6tables
+	}
+	return a.iptables
+}
+
+// ipt runs one nat-table command against a specific xtables binary.
+func (a *proxyApp) ipt(bin string, args ...string) error {
 	cmdArgs := append([]string{"-w", "-t", "nat"}, args...)
-	out, err := exec.Command(a.iptables, cmdArgs...).CombinedOutput()
+	out, err := exec.Command(bin, cmdArgs...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("iptables %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%s %s: %w: %s", bin, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-func (a *proxyApp) iptOK(args ...string) bool {
-	return a.ipt(args...) == nil
+func (a *proxyApp) iptOK(bin string, args ...string) bool {
+	return a.ipt(bin, args...) == nil
 }
 
 func (a *proxyApp) resetHook() error {
-	_ = a.ipt("-N", "KIAC-EDGE")
-	_ = a.ipt("-N", "KIAC-EDGE-OUTPUT")
-	for a.ipt("-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
-	}
-	for a.ipt("-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
-	}
-	if err := a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
-		return err
-	}
-	return a.ipt("-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT")
-}
-
-func (a *proxyApp) ensureHook() error {
-	_ = a.ipt("-N", "KIAC-EDGE")
-	_ = a.ipt("-N", "KIAC-EDGE-OUTPUT")
-	if !a.iptOK("-C", "PREROUTING", "-j", "KIAC-EDGE") {
-		if err := a.ipt("-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
+	for _, bin := range a.families() {
+		_ = a.ipt(bin, "-N", "KIAC-EDGE")
+		_ = a.ipt(bin, "-N", "KIAC-EDGE-OUTPUT")
+		for a.ipt(bin, "-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
+		}
+		for a.ipt(bin, "-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
+		}
+		if err := a.ipt(bin, "-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
+			return err
+		}
+		if err := a.ipt(bin, "-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT"); err != nil {
 			return err
 		}
 	}
-	if !a.iptOK("-C", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") {
-		if err := a.ipt("-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT"); err != nil {
-			return err
+	return nil
+}
+
+func (a *proxyApp) ensureHook() error {
+	for _, bin := range a.families() {
+		_ = a.ipt(bin, "-N", "KIAC-EDGE")
+		_ = a.ipt(bin, "-N", "KIAC-EDGE-OUTPUT")
+		if !a.iptOK(bin, "-C", "PREROUTING", "-j", "KIAC-EDGE") {
+			if err := a.ipt(bin, "-I", "PREROUTING", "1", "-j", "KIAC-EDGE"); err != nil {
+				return err
+			}
+		}
+		if !a.iptOK(bin, "-C", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") {
+			if err := a.ipt(bin, "-I", "OUTPUT", "1", "-j", "KIAC-EDGE-OUTPUT"); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 func (a *proxyApp) cleanup() {
-	for a.ipt("-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
+	for _, bin := range a.families() {
+		for a.ipt(bin, "-D", "PREROUTING", "-j", "KIAC-EDGE") == nil {
+		}
+		for a.ipt(bin, "-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
+		}
+		_ = a.ipt(bin, "-F", "KIAC-EDGE")
+		_ = a.ipt(bin, "-X", "KIAC-EDGE")
+		_ = a.ipt(bin, "-F", "KIAC-EDGE-OUTPUT")
+		_ = a.ipt(bin, "-X", "KIAC-EDGE-OUTPUT")
 	}
-	for a.ipt("-D", "OUTPUT", "-j", "KIAC-EDGE-OUTPUT") == nil {
-	}
-	_ = a.ipt("-F", "KIAC-EDGE")
-	_ = a.ipt("-X", "KIAC-EDGE")
-	_ = a.ipt("-F", "KIAC-EDGE-OUTPUT")
-	_ = a.ipt("-X", "KIAC-EDGE-OUTPUT")
 }
 
 func (a *proxyApp) syncRules() error {
@@ -356,24 +452,28 @@ func (a *proxyApp) syncRules() error {
 	if snapshot == a.lastSnapshot && !a.rulesMissing() {
 		return nil
 	}
-	if err := a.ipt("-F", "KIAC-EDGE"); err != nil {
-		return err
-	}
-	if err := a.ipt("-F", "KIAC-EDGE-OUTPUT"); err != nil {
-		return err
-	}
-	if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
-		return err
-	}
-	if err := a.ipt("-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
-		return err
-	}
-	if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
-		return err
+	// Base rules per family: skip the proxy's own port, then redirect the
+	// NodePort range destined to a local address into the proxy.
+	for _, bin := range a.families() {
+		if err := a.ipt(bin, "-F", "KIAC-EDGE"); err != nil {
+			return err
+		}
+		if err := a.ipt(bin, "-F", "KIAC-EDGE-OUTPUT"); err != nil {
+			return err
+		}
+		if err := a.ipt(bin, "-A", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
+			return err
+		}
+		if err := a.ipt(bin, "-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN"); err != nil {
+			return err
+		}
+		if err := a.ipt(bin, "-A", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
+			return err
+		}
 	}
 	routes := routeTable{
 		loadBalancers: map[string]backendRoute{},
-		nodePorts:     map[int]backendRoute{},
+		nodePorts:     map[nodePortKey]backendRoute{},
 	}
 	if snapshot != "" {
 		if err := a.addServiceRules(snapshot, routes); err != nil {
@@ -386,9 +486,14 @@ func (a *proxyApp) syncRules() error {
 }
 
 func (a *proxyApp) rulesMissing() bool {
-	return !a.iptOK("-C", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
-		!a.iptOK("-C", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
-		!a.iptOK("-C", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort)
+	for _, bin := range a.families() {
+		if !a.iptOK(bin, "-C", "KIAC-EDGE", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
+			!a.iptOK(bin, "-C", "KIAC-EDGE-OUTPUT", "-p", "tcp", "--dport", a.proxyPort, "-j", "RETURN") ||
+			!a.iptOK(bin, "-C", "KIAC-EDGE", "-p", "tcp", "-m", "addrtype", "--dst-type", "LOCAL", "--dport", a.nodePortRange, "-j", "REDIRECT", "--to-ports", a.proxyPort) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *proxyApp) clusterSnapshot() string {
@@ -459,9 +564,10 @@ func (v *intOrString) UnmarshalJSON(raw []byte) error {
 }
 
 type endpointSliceItem struct {
-	Metadata  objectMeta      `json:"metadata"`
-	Ports     []endpointPort  `json:"ports"`
-	Endpoints []endpointEntry `json:"endpoints"`
+	Metadata    objectMeta      `json:"metadata"`
+	AddressType string          `json:"addressType"`
+	Ports       []endpointPort  `json:"ports"`
+	Endpoints   []endpointEntry `json:"endpoints"`
 }
 
 type endpointPort struct {
@@ -488,10 +594,24 @@ type nodeItem struct {
 	} `json:"status"`
 }
 
+// nodeAddrs holds a node's InternalIP for each family, so a tunnel to a
+// remote endpoint node uses the node address of the endpoint's family.
+type nodeAddrs struct {
+	v4 string
+	v6 string
+}
+
+func (n nodeAddrs) forFamily(v6 bool) string {
+	if v6 {
+		return n.v6
+	}
+	return n.v4
+}
+
 type clusterState struct {
 	services       []serviceItem
 	endpointSlices []endpointSliceItem
-	nodeIPs        map[string]string
+	nodeIPs        map[string]nodeAddrs
 }
 
 type endpointTarget struct {
@@ -507,31 +627,46 @@ func (a *proxyApp) addServiceRules(raw string, routes routeTable) error {
 	for _, svc := range state.services {
 		for _, port := range svc.Spec.Ports {
 			if port.NodePort > 0 {
-				routes.nodePorts[port.NodePort] = state.routeFor(a.nodeName, a.proxyPort, svc, port)
+				// Route each family independently: a dual-stack Service is
+				// reached over both, and the proxy must pick a same-family
+				// endpoint (and same-family tunnel node IP).
+				routes.nodePorts[nodePortKey{port: port.NodePort, v6: false}] =
+					state.routeFor(a.nodeName, a.proxyPort, svc, port, false)
+				if a.ip6tables != "" {
+					routes.nodePorts[nodePortKey{port: port.NodePort, v6: true}] =
+						state.routeFor(a.nodeName, a.proxyPort, svc, port, true)
+				}
 			}
 		}
 		if svc.Spec.Type != "LoadBalancer" {
 			continue
 		}
 		for _, ingress := range svc.Status.LoadBalancer.Ingress {
-			if net.ParseIP(ingress.IP).To4() == nil {
+			ip := net.ParseIP(ingress.IP)
+			if ip == nil {
 				continue
 			}
+			v6 := ip.To4() == nil
+			if v6 && a.ip6tables == "" {
+				continue // no IPv6 netfilter on this kernel
+			}
+			bin := a.binFor(v6)
 			for _, port := range svc.Spec.Ports {
 				if port.Port <= 0 || strconv.Itoa(port.Port) == a.proxyPort {
 					continue
 				}
-				if err := a.ipt("-A", "KIAC-EDGE", "-p", "tcp", "-d", ingress.IP, "--dport", strconv.Itoa(port.Port), "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
+				portStr := strconv.Itoa(port.Port)
+				if err := a.ipt(bin, "-A", "KIAC-EDGE", "-p", "tcp", "-d", ingress.IP, "--dport", portStr, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 					return err
 				}
-				if err := a.ipt("-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "-d", ingress.IP, "--dport", strconv.Itoa(port.Port), "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
+				if err := a.ipt(bin, "-A", "KIAC-EDGE-OUTPUT", "-p", "tcp", "-d", ingress.IP, "--dport", portStr, "-j", "REDIRECT", "--to-ports", a.proxyPort); err != nil {
 					return err
 				}
-				route := state.routeFor(a.nodeName, a.proxyPort, svc, port)
+				route := state.routeFor(a.nodeName, a.proxyPort, svc, port, v6)
 				if route.dial == "" && port.NodePort > 0 {
 					route.dial = net.JoinHostPort(ingress.IP, strconv.Itoa(port.NodePort))
 				}
-				routes.loadBalancers[net.JoinHostPort(ingress.IP, strconv.Itoa(port.Port))] = route
+				routes.loadBalancers[net.JoinHostPort(ingress.IP, portStr)] = route
 			}
 		}
 	}
@@ -539,7 +674,7 @@ func (a *proxyApp) addServiceRules(raw string, routes routeTable) error {
 }
 
 func parseClusterState(raw string) (clusterState, error) {
-	state := clusterState{nodeIPs: map[string]string{}}
+	state := clusterState{nodeIPs: map[string]nodeAddrs{}}
 	var list kubeList
 	if err := json.Unmarshal([]byte(raw), &list); err != nil {
 		return state, err
@@ -567,26 +702,38 @@ func parseClusterState(raw string) (clusterState, error) {
 			if err := json.Unmarshal(item, &node); err != nil {
 				return state, err
 			}
+			addrs := state.nodeIPs[node.Metadata.Name]
 			for _, addr := range node.Status.Addresses {
-				if addr.Type == "InternalIP" && net.ParseIP(addr.Address).To4() != nil {
-					state.nodeIPs[node.Metadata.Name] = addr.Address
-					break
+				if addr.Type != "InternalIP" {
+					continue
+				}
+				ip := net.ParseIP(addr.Address)
+				if ip == nil {
+					continue
+				}
+				if ip.To4() != nil {
+					if addrs.v4 == "" {
+						addrs.v4 = addr.Address
+					}
+				} else if addrs.v6 == "" {
+					addrs.v6 = addr.Address
 				}
 			}
+			state.nodeIPs[node.Metadata.Name] = addrs
 		}
 	}
 	return state, nil
 }
 
-func (s clusterState) routeFor(localNode, proxyPort string, svc serviceItem, port servicePort) backendRoute {
-	endpoints := s.matchingEndpoints(svc, port)
+func (s clusterState) routeFor(localNode, proxyPort string, svc serviceItem, port servicePort, v6 bool) backendRoute {
+	endpoints := s.matchingEndpoints(svc, port, v6)
 	for _, ep := range endpoints {
 		if ep.nodeName == "" || ep.nodeName == localNode {
 			return backendRoute{dial: ep.address}
 		}
 	}
 	for _, ep := range endpoints {
-		if nodeIP := s.nodeIPs[ep.nodeName]; nodeIP != "" {
+		if nodeIP := s.nodeIPs[ep.nodeName].forFamily(v6); nodeIP != "" {
 			return backendRoute{
 				dial:         net.JoinHostPort(nodeIP, proxyPort),
 				tunnelTarget: ep.address,
@@ -599,11 +746,16 @@ func (s clusterState) routeFor(localNode, proxyPort string, svc serviceItem, por
 	return backendRoute{}
 }
 
-func (s clusterState) matchingEndpoints(svc serviceItem, port servicePort) []endpointTarget {
+func (s clusterState) matchingEndpoints(svc serviceItem, port servicePort, v6 bool) []endpointTarget {
 	var out []endpointTarget
 	for _, slice := range s.endpointSlices {
 		if slice.Metadata.Namespace != svc.Metadata.Namespace ||
 			slice.Metadata.Labels["kubernetes.io/service-name"] != svc.Metadata.Name {
+			continue
+		}
+		// EndpointSlices are per-family (addressType IPv4/IPv6); skip the
+		// ones that do not match the family being routed.
+		if slice.AddressType != "" && (slice.AddressType == "IPv6") != v6 {
 			continue
 		}
 		for _, epPort := range slice.Ports {
@@ -615,7 +767,8 @@ func (s clusterState) matchingEndpoints(svc serviceItem, port servicePort) []end
 					continue
 				}
 				for _, addr := range ep.Addresses {
-					if net.ParseIP(addr).To4() == nil {
+					ip := net.ParseIP(addr)
+					if ip == nil || (ip.To4() == nil) != v6 {
 						continue
 					}
 					out = append(out, endpointTarget{
@@ -640,4 +793,10 @@ func servicePortMatchesEndpoint(svcPort servicePort, epPort endpointPort) bool {
 		return epPort.Port != nil && *epPort.Port == svcPort.TargetPort.IntVal
 	}
 	return epPort.Port != nil && *epPort.Port == svcPort.Port
+}
+
+// isV6Host reports whether a bare host (no port) is an IPv6 literal.
+func isV6Host(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.To4() == nil
 }

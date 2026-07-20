@@ -26,6 +26,10 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --distro k3s --workers 1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
+		// Seed the typed family from the string flag (default ipv4) before
+		// Merge, so a config-file value can still override it when the flag
+		// was not set on the command line.
+		createCfg.IPFamily = cluster.IPFamily(createIPFamily)
 		if createConfigFile != "" {
 			fc, err := cluster.LoadConfigFile(createConfigFile)
 			if err != nil {
@@ -37,6 +41,17 @@ var createClusterCmd = &cobra.Command{
 		}
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
+		}
+		if !createCfg.IPFamily.Valid() {
+			return fmt.Errorf("invalid ip-family %q (supported: ipv4, dual, ipv6)", createCfg.IPFamily)
+		}
+		// A non-ipv4 family needs the full kernel (the stock kernel has no
+		// IPv6 netfilter). Auto-select it when the user did not name a
+		// kernel, so --ip-family dual "just works" without the user
+		// knowing which kernel carries IPv6; an explicit --kernel wins.
+		if createKernel == "" && createCfg.IPFamily.WantsIPv6() {
+			createKernel = "full"
+			ui.Infof("--ip-family %s needs the full node kernel; using --kernel full", createCfg.IPFamily)
 		}
 		if createKernel != "" {
 			kpath, err := cluster.ResolveKernel(createKernel)
@@ -84,6 +99,7 @@ var (
 	createDistro     string
 	createConfigFile string
 	createKernel     string
+	createIPFamily   string
 )
 
 func init() {
@@ -97,6 +113,7 @@ func init() {
 		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
 	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), or none (bring your own)")
+	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")

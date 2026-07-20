@@ -38,7 +38,7 @@ func TestEdgeProxySupervisorScript(t *testing.T) {
 }
 
 func TestK3sBootRestartsEdgeProxy(t *testing.T) {
-	_, args := k3sBoot([]string{"server"})
+	_, args := k3sBoot(Config{}, []string{"server"})
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		edgeProxyNodePath,

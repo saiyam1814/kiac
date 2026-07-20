@@ -102,3 +102,29 @@ CONFIG_IPVLAN=y
 # ipsets for policy; only hash:ip is required by Cilium above.
 CONFIG_IP_SET_HASH_NET=y
 CONFIG_IP_SET_HASH_IPPORTNET=y
+
+# --- IPv6 Services (--ip-family dual / ipv6) ----------------------------
+# Consumer: kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer
+# rules, and kubeadm/kindnet on a dual-stack cluster. These are all =y in
+# Apple's base config-arm64 today, so this fragment adds nothing
+# functional; it exists so the CI guard (build fails if any line here is
+# missing from the final .config) turns a future upstream base-config
+# regression that drops IPv6 netfilter into a red build instead of a
+# cluster whose IPv6 Services silently never connect (issue #10). Without
+# this table initializing, `ip6tables -L` fails with "Table does not
+# exist" and kube-proxy logs "No iptables support for family IPv6".
+CONFIG_IPV6=y
+CONFIG_NF_TABLES_IPV6=y
+CONFIG_NF_REJECT_IPV6=y
+CONFIG_NF_DEFRAG_IPV6=y
+CONFIG_IP6_NF_IPTABLES=y
+CONFIG_IP6_NF_FILTER=y
+CONFIG_IP6_NF_TARGET_REJECT=y
+CONFIG_IP6_NF_MANGLE=y
+CONFIG_IP6_NF_RAW=y
+CONFIG_IP6_NF_NAT=y
+CONFIG_IP6_NF_TARGET_MASQUERADE=y
+CONFIG_IP6_NF_MATCH_RPFILTER=y
+# kube-proxy's ipvs mode and dual-stack conntrack accounting.
+CONFIG_NF_CONNTRACK=y
+CONFIG_NF_NAT=y

@@ -78,6 +78,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🐝 **Cilium and eBPF, one flag pair** — `--cni cilium --kernel full` downloads a published, sha-pinned kernel build (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. Cross-node pod traffic runs at ~285MB/s and Mac-to-pod at ~1GB/s on Cilium's vxlan datapath.
 - 🔁 **Clusters survive reboots** — `kiac resume cluster` restarts the VMs after a host reboot and heals the control-plane IP everywhere it is pinned (apiserver cert, kubeconfigs, kube-proxy). Idempotent, and verified across a vmnet subnet change in 46 seconds.
 - 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
+- 🌍 **IPv6 and dual-stack** — `--ip-family dual` (or `ipv6`) gives pods, Services, and nodes real IPv6, with kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer rules on the full kernel. kiac-lb hands out both families, the edge proxy fixes v6 large uploads too, and `kiac resume` heals both. See [docs/design/ipv6-dual-stack.md](docs/design/ipv6-dual-stack.md).
 - 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
@@ -223,6 +224,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--cp-memory` | `4G` | memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon) |
 | `--no-metrics` | `false` | skip metrics-server |
 | `--no-storage` | `false` | skip the local-path default StorageClass |
+| `--ip-family` | `ipv4` | address families: `ipv4`, `dual` (IPv4+IPv6), or `ipv6` (v6-primary, kubeadm only). Non-ipv4 auto-selects `--kernel full` and needs macOS 26+ |
 | `--no-lb` | `false` | skip kiac-lb (`type: LoadBalancer` support) |
 | `--no-edge-proxy` | `false` | skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers |
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |

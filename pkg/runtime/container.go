@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -196,6 +197,72 @@ func (c *Client) IP(name string) (string, error) {
 		return "", fmt.Errorf("could not determine IP address of node %s", name)
 	}
 	return m[1], nil
+}
+
+// IPv6 returns the node's global IPv6 address, the mirror of IP: it asks
+// the guest for the source address of its default IPv6 route, which is
+// the vmnet-assigned global address (link-local fe80:: is never the
+// route source for off-link traffic). Returns "" with no error when the
+// node has no global IPv6 address, so callers can tell "IPv6 disabled"
+// apart from a lookup failure.
+func (c *Client) IPv6(name string) (string, error) {
+	// Preferred: the source address the kernel would use for off-link
+	// traffic, i.e. the vmnet global address. Fallback: the first
+	// global-scope inet6 address on any interface, which appears the
+	// moment SLAAC assigns it even if the default route lags a beat
+	// behind (both arrive from the same router advertisement at boot).
+	out, err := c.Exec(name, "sh", "-c",
+		"ip -6 route get 2606:4700:4700::1111 2>/dev/null | awk '{for(i=1;i<NF;i++) if ($i==\"src\") print $(i+1)}' | head -n1; "+
+			"ip -6 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Fields(out) {
+		parsed := net.ParseIP(line)
+		if parsed == nil || parsed.To4() != nil || parsed.To16() == nil {
+			continue
+		}
+		// Reject loopback (::1, which `route get` returns before a v6
+		// default route exists) and link-local (fe80::), so only a real
+		// vmnet global address is ever returned.
+		if parsed.IsLoopback() || parsed.IsLinkLocalUnicast() {
+			continue
+		}
+		return line, nil
+	}
+	return "", nil
+}
+
+// NetworkHasIPv6 reports whether the container network the nodes attach
+// to advertises an IPv6 subnet. vmnet's default network is dual-stack on
+// macOS 26+, but a host on older macOS (or a custom v4-only network)
+// hands out no IPv6, and --ip-family dual/ipv6 cannot work there. The
+// check reads `container network inspect default` (status.ipv6Subnet),
+// tolerating the CLI's differing 0.x/1.x JSON shapes by scanning for any
+// ipv6Subnet-like field.
+func (c *Client) NetworkHasIPv6(network string) (bool, error) {
+	if network == "" {
+		network = "default"
+	}
+	out, err := c.run("network", "inspect", network)
+	if err != nil {
+		return false, err
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rows); err != nil {
+		// A single object rather than an array on some CLI versions.
+		var one map[string]any
+		if err2 := json.Unmarshal([]byte(strings.TrimSpace(out)), &one); err2 != nil {
+			return false, fmt.Errorf("parsing network inspect output: %w", err)
+		}
+		rows = []map[string]any{one}
+	}
+	for _, row := range rows {
+		if v6 := firstString(row, "status.ipv6Subnet", "ipv6Subnet"); v6 != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Info is one row from `container ls`.
