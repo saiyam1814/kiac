@@ -96,12 +96,17 @@ On macOS with `apple/container` 1.0.0 and the full kernel, per distro:
 | Node InternalIPs are dual / v6 | ✅ | ✅ | ✅ (v6) |
 | ClusterIP over IPv6 (the issue) | ✅ | ✅ | ✅ |
 | ClusterIP over IPv4 (no regression) | ✅ | ✅ | n/a |
-| DNS returns A and AAAA | ✅ | ✅ | AAAA |
-| NodePort over IPv6 from the Mac (cross-node) | ✅ | ✅ | — |
-| LoadBalancer dual ingress + v6 reachable | ✅ | ✅ | — |
-| Large upload over v6 (TSO) | ✅ ~1.8GB/s | — | — |
+| DNS returns A and AAAA | ✅ | ✅ | ✅ (AAAA) |
+| NodePort over IPv6 from the Mac (cross-node) | ✅ | ✅ | ✅ |
+| LoadBalancer v6 ingress reachable from the Mac | ✅ (dual) | ✅ (dual) | ✅ (v6) |
+| Large upload over v6 (TSO), cross-node | ✅ ~1.8GB/s | — | ✅ ~1.5GB/s |
 | Host kubectl over bracketed v6 endpoint | n/a | n/a | ✅ |
-| `kiac resume` heals both families | ✅ | — | recreate |
+| Two-node (worker join) | ✅ | ✅ | ✅ |
+| `kiac resume` heals both families | ✅ | — | recreate (gated) |
+
+Both dual columns were run with a worker; the k3s TSO cell and k3s
+resume were not exercised (same edge-proxy/heal code as kubeadm). ipv6
+resume is intentionally gated to recreate.
 
 ## Limitations
 
