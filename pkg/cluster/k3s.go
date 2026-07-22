@@ -47,6 +47,17 @@ func k3sServerArgs(cfg Config, nodeName string) []string {
 		"--disable=traefik",
 		"--disable=servicelb",
 	}
+	// Dual-stack: give k3s both pod and Service CIDRs (v4 primary). The
+	// node --node-ip is set at boot in k3sBoot, once the VM knows its own
+	// addresses. Only "dual" reaches here; ipv6-only k3s is rejected in
+	// CreateK3s because it needs pre-boot cert SAN handling the kubeadm
+	// path covers instead.
+	if cfg.family() == DualStack {
+		args = append(args,
+			"--cluster-cidr="+cfg.family().podCIDR(k3sPodCIDRv4, k3sPodCIDRv6),
+			"--service-cidr="+cfg.family().serviceCIDR(k3sServiceCIDRv4, k3sServiceCIDRv6),
+		)
+	}
 	// k3s bundles metrics-server and local-path storage, so kiac's own
 	// addon installs are skipped for those parts and the --no-* flags map
 	// onto k3s --disable switches instead. LoadBalancer support uses the
@@ -73,7 +84,7 @@ func k3sAgentArgs(nodeName string) []string {
 // and, k3s being PID 1, takes the whole VM down with it. The legacy
 // backend (CONFIG_IP_NF_IPTABLES_LEGACY=y) is fully supported. Both
 // variants ship in the image under /bin/aux.
-func k3sBoot(k3sArgs []string) (entrypoint string, args []string) {
+func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
 	cmd := "for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
 		"if [ -x " + kiacLBScriptPath + " ]; then " +
 		"mkdir -p /var/log /var/run; " +
@@ -83,10 +94,42 @@ func k3sBoot(k3sArgs []string) (entrypoint string, args []string) {
 		"if [ -x " + edgeProxyNodePath + " ] && [ -f " + edgeProxyKubeconfigPath + " ]; then " +
 		"if ! kill -0 \"$(cat " + edgeProxySupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
 		"nohup sh -c 'while :; do " + edgeProxyNodePath + " --kubeconfig " + edgeProxyKubeconfigPath + " >>" + edgeProxyLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + edgeProxySupervisorPID + "; " +
-		"fi; fi; exec k3s"
+		"fi; fi; "
+	// Dual-stack: k3s needs --node-ip with both families, but the VM only
+	// learns its addresses after it boots, so compute them here (mirroring
+	// runtime.IP/IPv6's default-route source lookup) and append the flag
+	// to the k3s exec. sysctl enables v6 forwarding, matching the kubeadm
+	// path's post-boot step; k3s is PID 1 so there is no separate hook.
+	nodeIPExpr := ""
+	if cfg.family() == DualStack {
+		// k3s runs as PID 1, so this preamble executes before SLAAC has
+		// assigned the vmnet global IPv6 (it waits on a router
+		// advertisement). Two things matter here:
+		//
+		//  1. accept_ra=2 on the primary interface BEFORE enabling
+		//     forwarding. Enabling net.ipv6 forwarding turns off the
+		//     default accept_ra=1, so the kernel would ignore the router
+		//     advertisement and never get a v6 address; =2 keeps accepting
+		//     RAs even with forwarding on.
+		//  2. Poll up to ~30s for the address, so --node-ip never gets a
+		//     trailing-comma half value. The scope-global scan is the same
+		//     fallback runtime.IPv6 uses when the default route lags.
+		cmd += ipv6BootPrep +
+			`KIAC_V4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if ($i=="src") print $(i+1)}' | head -n1)"; ` +
+			`KIAC_V6=""; KIAC_I=0; while [ "$KIAC_I" -lt 45 ]; do ` +
+			// scope-global scan first: it lists only real global addresses,
+			// never ::1 (which route-get returns before the v6 default
+			// route exists) or fe80:: link-local. The grep -v is a
+			// belt-and-braces filter for either sneaking through.
+			`KIAC_V6="$(ip -6 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -v '^fe80' | grep -v '^::1$' | head -n1)"; ` +
+			`[ -n "$KIAC_V6" ] && break; sleep 1; KIAC_I=$((KIAC_I+1)); done; `
+		nodeIPExpr = ` --node-ip="$KIAC_V4,$KIAC_V6"`
+	}
+	cmd += "exec k3s"
 	for _, a := range k3sArgs {
 		cmd += " " + shQuote(a)
 	}
+	cmd += nodeIPExpr
 	return "/bin/sh", []string{"-c", cmd}
 }
 
@@ -108,7 +151,7 @@ func k3sAgentEnv(serverIP, token string) []string {
 // this in one place so flags like --kernel cannot silently apply to the
 // kubeadm path only.
 func k3sServerRunOpts(cfg Config, nodeName, token string) runtime.RunOpts {
-	entry, bootArgs := k3sBoot(k3sServerArgs(cfg, nodeName))
+	entry, bootArgs := k3sBoot(cfg, k3sServerArgs(cfg, nodeName))
 	return runtime.RunOpts{
 		Name:       nodeName,
 		Image:      cfg.Image,
@@ -123,7 +166,7 @@ func k3sServerRunOpts(cfg Config, nodeName, token string) runtime.RunOpts {
 
 // k3sAgentRunOpts mirrors k3sServerRunOpts for workers.
 func k3sAgentRunOpts(cfg Config, nodeName string, env []string) runtime.RunOpts {
-	entry, bootArgs := k3sBoot(k3sAgentArgs(nodeName))
+	entry, bootArgs := k3sBoot(cfg, k3sAgentArgs(nodeName))
 	return runtime.RunOpts{
 		Name:       nodeName,
 		Image:      cfg.Image,
@@ -188,13 +231,24 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	if cfg.Gateway && cfg.NoLB {
 		return fmt.Errorf("--gateway needs the built-in LoadBalancer; drop --no-lb")
 	}
+	if err := validateIPFamily(cfg); err != nil {
+		return err
+	}
+	if cfg.family() == IPv6 {
+		return fmt.Errorf("--ip-family ipv6 is not supported on --distro k3s yet (it needs pre-boot apiserver cert SANs the kubeadm path handles); use --distro kubeadm for IPv6-only, or --ip-family dual on k3s")
+	}
 
 	existing, err := m.rt.List(prefix(cfg.Name))
 	if err == nil && len(existing) > 0 {
 		return fmt.Errorf("cluster %q already exists; delete it first with: kiac delete cluster --name %s", cfg.Name, cfg.Name)
 	}
 
-	if err := ui.Step("Preflight checks", func() error { return m.preflight() }); err != nil {
+	if err := ui.Step("Preflight checks", func() error {
+		if err := m.preflight(); err != nil {
+			return err
+		}
+		return m.preflightIPv6Network(cfg)
+	}); err != nil {
 		return err
 	}
 
@@ -225,7 +279,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		if err := m.ensureK3sCNIPlugins(cp); err != nil {
 			return err
 		}
-		return m.k3sKubectlStdin(cp, strings.NewReader(k3sKindnetManifest),
+		return m.k3sKubectlStdin(cp, strings.NewReader(k3sKindnetManifestFor(cfg.family())),
 			"apply", "-f", "-")
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)

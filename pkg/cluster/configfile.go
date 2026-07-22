@@ -20,6 +20,7 @@ type FileConfig struct {
 	K8sVersion string     `yaml:"k8sVersion"`
 	Image      string     `yaml:"image"`
 	CNI        string     `yaml:"cni"`
+	IPFamily   string     `yaml:"ipFamily"`
 	CPUs       string     `yaml:"cpus"`
 	Memory     string     `yaml:"memory"`
 	CPMemory   string     `yaml:"cpMemory"`
@@ -79,6 +80,9 @@ func (fc *FileConfig) Merge(cfg *Config, k8sVersion *string, changed func(string
 	}
 	if fc.CNI != "" && !changed("cni") {
 		cfg.CNI = fc.CNI
+	}
+	if fc.IPFamily != "" && !changed("ip-family") {
+		cfg.IPFamily = IPFamily(fc.IPFamily)
 	}
 	if fc.CPUs != "" && !changed("cpus") {
 		cfg.CPUs = fc.CPUs

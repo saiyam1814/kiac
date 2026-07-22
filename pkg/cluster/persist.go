@@ -72,8 +72,15 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 				return err
 			}
 			// ip_forward is runtime state; the reboot reset it.
-			_, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1")
-			return err
+			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+				return err
+			}
+			// A dual-stack node's kubelet --node-ip pins the OLD v4 and v6
+			// addresses; the reboot changed both, so re-pin from the
+			// node's current addresses before the control-plane heal
+			// restarts kubelet. A no-op on IPv4-only clusters (nothing was
+			// pinned).
+			return m.repinNodeIPIfNeeded(n)
 		})
 	}); err != nil {
 		return err
@@ -96,6 +103,12 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 	// rewrites, which makes it the durable record of the pre-reboot IP.
 	oldIP, err := apiServerIP(adminRaw)
 	if err != nil {
+		// IPv6-only clusters point the endpoint at a bracketed v6 literal,
+		// which the v4-based heal below cannot rewrite; fail with a clear
+		// path instead of a confusing regex error. dual and ipv4 stay v4.
+		if strings.Contains(adminRaw, "https://[") {
+			return fmt.Errorf("resume does not yet support --ip-family ipv6 clusters (the control-plane endpoint is IPv6); recreate it with: kiac delete cluster --name %s, then kiac create cluster --name %s --ip-family ipv6 ...", name, name)
+		}
 		return err
 	}
 
@@ -354,6 +367,65 @@ fi
 if systemctl is-enabled kiac-lb.service >/dev/null 2>&1; then
   systemctl restart kiac-lb.service
 fi`, old, newIP)
+}
+
+// repinNodeIPIfNeeded rewrites a node's kubelet --node-ip after a reboot
+// changed its vmnet addresses. It only acts on nodes that were created
+// with a pinned node-ip (dual-stack or ipv6), detected from the existing
+// /etc/default/kubelet, so IPv4-only clusters are untouched. The file is
+// rewritten from the node's CURRENT addresses rather than sed'd from an
+// old value, which is simpler and correct regardless of how many boots
+// happened; kubelet is restarted only when the value actually changed.
+func (m *Manager) repinNodeIPIfNeeded(node string) error {
+	out, err := m.rt.Exec(node, "sh", "-c", "cat /etc/default/kubelet 2>/dev/null || true")
+	if err != nil {
+		return err
+	}
+	fam, ok := pinnedFamily(out)
+	if !ok {
+		return nil
+	}
+	if _, err := m.rt.Exec(node, "sh", "-c", ipv6BootPrep); err != nil {
+		return err
+	}
+	nodeIP, err := m.nodeIPArg(node, fam)
+	if err != nil {
+		return err
+	}
+	desired := "KUBELET_EXTRA_ARGS=--node-ip=" + nodeIP
+	if strings.Contains(out, desired) {
+		return nil // already current
+	}
+	if _, err := m.rt.Exec(node, "sh", "-c",
+		fmt.Sprintf("printf '%s\\n' > /etc/default/kubelet", desired)); err != nil {
+		return err
+	}
+	_, err = m.rt.Exec(node, "systemctl", "restart", "kubelet")
+	return err
+}
+
+// pinnedFamily reads the --node-ip kiac pinned in /etc/default/kubelet
+// and reports the family it encodes: a comma means dual-stack (v4,v6), a
+// lone colon means ipv6-only. An IPv4-only cluster pins nothing, so the
+// second return is false and the caller leaves the node alone.
+func pinnedFamily(kubeletDefault string) (IPFamily, bool) {
+	const key = "--node-ip="
+	idx := strings.Index(kubeletDefault, key)
+	if idx < 0 {
+		return "", false
+	}
+	val := kubeletDefault[idx+len(key):]
+	if i := strings.IndexAny(val, " \t\r\n"); i >= 0 {
+		val = val[:i]
+	}
+	switch {
+	case strings.Contains(val, ","):
+		return DualStack, true
+	case strings.Contains(val, ":"):
+		return IPv6, true
+	default:
+		return "", false
+	}
 }
 
 // healWorkerScript points a worker's kubelet at the control plane's

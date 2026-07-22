@@ -33,6 +33,19 @@ k8sVersion: "1.36"
 # flannel/calico/cilium need a custom kernel.
 cni: kindnet
 
+# IP family for pods, Services, and nodes:
+#   ipv4 (default) - single-stack IPv4, stock kernel, today's behavior.
+#   dual           - IPv4-primary with IPv6 secondary. Pods and nodes get
+#                    both; Services default to IPv4 and opt into IPv6 with
+#                    spec.ipFamilyPolicy: PreferDualStack / RequireDualStack.
+#   ipv6           - IPv6-primary (single-stack v6 pods/Services/node IPs).
+#                    Nodes keep an IPv4 address for image pulls and egress.
+#                    kubeadm only; not yet supported on --distro k3s.
+# dual and ipv6 auto-select the kiac full kernel (the stock kernel has no
+# IPv6 netfilter, so IPv6 Services would never connect) and need an
+# IPv6-enabled container network (macOS 26+).
+ipFamily: ipv4
+
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G

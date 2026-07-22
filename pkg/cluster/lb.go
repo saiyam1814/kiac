@@ -46,24 +46,52 @@ DIR=/run/kiac-lb
 INTERVAL=3
 
 NODE_FMT='{range .items[*]}{.metadata.name} {.status.addresses[?(@.type=="InternalIP")].address} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
-SVC_FMT='{{range .items}}{{if eq .spec.type "LoadBalancer"}}{{.metadata.namespace}}|{{.metadata.name}}|{{if .status.loadBalancer}}{{if .status.loadBalancer.ingress}}{{range .status.loadBalancer.ingress}}{{if .ip}}{{.ip}} {{end}}{{end}}{{end}}{{end}}|{{range .spec.ports}}{{.port}} {{end}}{{"\n"}}{{end}}{{end}}'
+SVC_FMT='{{range .items}}{{if eq .spec.type "LoadBalancer"}}{{.metadata.namespace}}|{{.metadata.name}}|{{if .status.loadBalancer}}{{if .status.loadBalancer.ingress}}{{range .status.loadBalancer.ingress}}{{if .ip}}{{.ip}} {{end}}{{end}}{{end}}{{end}}|{{range .spec.ports}}{{.port}} {{end}}|{{range .spec.ipFamilies}}{{.}} {{end}}{{"\n"}}{{end}}{{end}}'
 EP_FMT='{{range .items}}{{if .endpoints}}{{range .endpoints}}{{if .conditions}}{{if .conditions.ready}}{{if .nodeName}}{{.nodeName}}{{"\n"}}{{end}}{{end}}{{end}}{{end}}{{end}}{{end}}'
 
-# eligible_nodes prints "name ip" for each node whose IP may carry
+# fam_of IP: prints v4 or v6 for an address (a colon means IPv6). Used to
+# match a Service's requested ipFamily to a node's address of that family.
+fam_of() {
+    case "$1" in
+        *:*) echo v6 ;;
+        *)   echo v4 ;;
+    esac
+}
+
+# eligible_nodes prints "name v4 v6" for each node whose IPs may carry
 # LoadBalancer traffic: Ready workers when the cluster has workers, the
 # control plane only when it is the sole node (keeps :6443 off the LB
-# surface). $NF guards nodes still missing an address or Ready condition.
+# surface). A dual-stack node reports both an IPv4 and an IPv6
+# InternalIP; either column is "-" when that family is absent. $NF is the
+# Ready status, so addresses are every field between the name and it.
 eligible_nodes() {
     out=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o jsonpath="$NODE_FMT") || return 1
     if [ -z "$out" ]; then
         out=$(kubectl get nodes -o jsonpath="$NODE_FMT") || return 1
     fi
-    printf '%s\n' "$out" | awk 'NF >= 3 && $NF == "True" { print $1, $2 }'
+    printf '%s\n' "$out" | awk 'NF >= 3 && $NF == "True" {
+        v4 = "-"; v6 = "-"
+        for (i = 2; i < NF; i++) {
+            if (index($i, ":") > 0) { v6 = $i } else { v4 = $i }
+        }
+        print $1, v4, v6
+    }'
 }
 
-# is_eligible_ip IP: succeeds when IP belongs to an eligible node.
+# node_addr NAME FAMILY: prints the eligible node NAME address for FAMILY
+# (v4 or v6), or nothing when the node has no address of that family.
+node_addr() {
+    awk -v n="$1" -v fam="$2" '$1 == n {
+        addr = (fam == "v6") ? $3 : $2
+        if (addr != "-") print addr
+        exit
+    }' "$DIR/nodes"
+}
+
+# is_eligible_ip IP: succeeds when IP is an eligible node address of
+# either family.
 is_eligible_ip() {
-    awk -v ip="$1" '$2 == ip { found = 1 } END { exit !found }' "$DIR/nodes"
+    awk -v ip="$1" '$2 == ip || $3 == ip { found = 1 } END { exit !found }' "$DIR/nodes"
 }
 
 # claim IP PORT...: records IP+port pairs taken by an assigned Service.
@@ -87,18 +115,19 @@ conflicts() {
     return 1
 }
 
-# choose_ip NS NAME "PORTS": prints the best conflict-free eligible node
-# IP. Preference order: a node hosting a ready endpoint of the Service
-# (delivery stays pod-local; traffic NATed to another node crosses
-# vmnet's slow forwarding path), then the kiac.io/lb-primary node, then
-# any eligible node.
-choose_ip() {
-    sel_ns=$1; sel_name=$2; sel_ports=$3
+# choose_addr NS NAME FAMILY "PORTS": prints the best conflict-free
+# eligible node address of FAMILY (v4/v6). Preference order: a node
+# hosting a ready endpoint of the Service (delivery stays pod-local;
+# traffic NATed to another node crosses vmnet's slow forwarding path),
+# then the kiac.io/lb-primary node, then any eligible node. A node with
+# no address of FAMILY is skipped.
+choose_addr() {
+    sel_ns=$1; sel_name=$2; sel_fam=$3; sel_ports=$4
     eps=$(kubectl get endpointslices -n "$sel_ns" \
         -l "kubernetes.io/service-name=$sel_name" \
         -o go-template="$EP_FMT" 2>/dev/null)
     for cand in $eps $(cat "$DIR/primary" 2>/dev/null) $(awk '{ print $1 }' "$DIR/nodes"); do
-        cand_ip=$(awk -v n="$cand" '$1 == n { print $2; exit }' "$DIR/nodes")
+        cand_ip=$(node_addr "$cand" "$sel_fam")
         [ -n "$cand_ip" ] || continue
         if ! conflicts "$cand_ip" $sel_ports; then
             printf '%s\n' "$cand_ip"
@@ -108,10 +137,31 @@ choose_ip() {
     return 1
 }
 
-# patch_svc NS NAME IP: writes the ingress IP into the Service status.
+# svc_families "FAMILIES": echoes the requested families as v4/v6 tokens,
+# defaulting to v4 when a Service declares none (single-stack IPv4, the
+# only case on a v4 cluster). Keeps output stable so v4 clusters assign
+# exactly one IPv4 ingress as before.
+svc_families() {
+    got=""
+    for f in $1; do
+        case "$f" in
+            IPv4) got="$got v4" ;;
+            IPv6) got="$got v6" ;;
+        esac
+    done
+    [ -n "$got" ] && echo "$got" || echo v4
+}
+
+# patch_svc NS NAME IP...: writes one ingress entry per IP into status.
 patch_svc() {
-    kubectl patch svc -n "$1" "$2" --subresource=status --type=merge \
-        -p '{"status":{"loadBalancer":{"ingress":[{"ip":"'"$3"'"}]}}}'
+    p_ns=$1; p_name=$2; shift 2
+    ingress=""
+    for p_ip in "$@"; do
+        [ -n "$ingress" ] && ingress="$ingress,"
+        ingress="$ingress{\"ip\":\"$p_ip\"}"
+    done
+    kubectl patch svc -n "$p_ns" "$p_name" --subresource=status --type=merge \
+        -p '{"status":{"loadBalancer":{"ingress":['"$ingress"']}}}'
 }
 
 pass() {
@@ -123,37 +173,57 @@ pass() {
         -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
         | head -n 1 > "$DIR/primary"
 
-    # First sweep: Services whose ingress IP is still an eligible node IP
-    # keep it; record their IP+port claims so the second sweep only
-    # shares an IP with a disjoint port set.
+    # First sweep: every ingress IP that is still an eligible node address
+    # keeps its port claims, so the second sweep only shares an IP with a
+    # disjoint port set (across both families).
     : > "$DIR/used"
-    while IFS='|' read -r ns name ips ports; do
+    while IFS='|' read -r ns name ips ports families; do
         [ -n "$ns" ] || continue
-        set -- $ips
-        cur=${1:-}
-        [ -n "$cur" ] || continue
-        if is_eligible_ip "$cur"; then
-            claim "$cur" $ports
-        fi
+        for cur in $ips; do
+            if is_eligible_ip "$cur"; then
+                claim "$cur" $ports
+            fi
+        done
     done < "$DIR/svcs"
 
-    # Second sweep: assign Services with no IP and re-point Services
-    # whose IP stopped being an eligible node IP (node gone, or back
-    # from a restart with a new vmnet address).
-    while IFS='|' read -r ns name ips ports; do
+    # Second sweep: for each requested family, keep an existing eligible
+    # ingress IP of that family or assign a new one, then patch the
+    # Service once with the full set. A Service is re-pointed when a node
+    # died or came back from a restart with a new vmnet address.
+    while IFS='|' read -r ns name ips ports families; do
         [ -n "$ns" ] || continue
-        set -- $ips
-        cur=${1:-}
-        if [ -n "$cur" ] && is_eligible_ip "$cur"; then
-            continue
-        fi
-        new=$(choose_ip "$ns" "$name" "$ports") || {
-            echo "kiac-lb: no conflict-free node IP for $ns/$name (ports: $ports)"
-            continue
-        }
-        if patch_svc "$ns" "$name" "$new"; then
-            claim "$new" $ports
-            echo "kiac-lb: $ns/$name -> $new"
+        want_ips=""
+        changed=0
+        for fam in $(svc_families "$families"); do
+            keep=""
+            for cur in $ips; do
+                if [ "$(fam_of "$cur")" = "$fam" ] && is_eligible_ip "$cur"; then
+                    keep=$cur
+                    break
+                fi
+            done
+            if [ -z "$keep" ]; then
+                keep=$(choose_addr "$ns" "$name" "$fam" "$ports") || {
+                    echo "kiac-lb: no conflict-free $fam node IP for $ns/$name (ports: $ports)"
+                    continue
+                }
+                changed=1
+            fi
+            want_ips="$want_ips $keep"
+            claim "$keep" $ports
+        done
+        [ -n "$want_ips" ] || continue
+        # Re-point when the assigned set differs from what status holds
+        # (order-insensitive): a family was added, or an address changed.
+        for cur in $ips; do
+            case " $want_ips " in
+                *" $cur "*) ;;
+                *) changed=1 ;;
+            esac
+        done
+        [ "$changed" = 1 ] || continue
+        if patch_svc "$ns" "$name" $want_ips; then
+            echo "kiac-lb: $ns/$name ->$want_ips"
         fi
     done < "$DIR/svcs"
 }

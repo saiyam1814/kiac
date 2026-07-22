@@ -17,6 +17,80 @@ import (
 
 const adminConf = "/etc/kubernetes/admin.conf"
 
+// IPFamily selects the address families a cluster's pods, Services, and
+// nodes use. Anything but IPv4 needs the kiac full kernel: the runtime's
+// default kernel ships no IPv6 netfilter, so kube-proxy silently programs
+// only IPv4 rules and IPv6 Services never connect (issue #10).
+type IPFamily string
+
+const (
+	// IPv4 is today's behavior: single-stack IPv4, stock kernel.
+	IPv4 IPFamily = "ipv4"
+	// DualStack runs IPv4-primary with IPv6 secondary: pods and nodes get
+	// both, Services default to IPv4 and opt into IPv6 via ipFamilies.
+	DualStack IPFamily = "dual"
+	// IPv6 runs IPv6-primary at the Kubernetes layer (pod/Service/node
+	// InternalIP all IPv6). Nodes keep their vmnet IPv4 for image pulls
+	// and other host egress; this is not a link-level IPv6-only node.
+	IPv6 IPFamily = "ipv6"
+)
+
+// Dual-stack and IPv6 CIDRs, kept in one place so kubeadm init, the k3s
+// server args, and the kindnet POD_SUBNET template always agree. The
+// IPv6 ranges follow kind's own dual-stack defaults (ULA space, no
+// relation to any real routable prefix). kubeadm and k3s use different
+// IPv4 ranges, so each distro has its own pair.
+const (
+	kubeadmPodCIDRv4     = "10.244.0.0/16"
+	kubeadmPodCIDRv6     = "fd00:10:244::/56"
+	kubeadmServiceCIDRv4 = "10.96.0.0/12"
+	kubeadmServiceCIDRv6 = "fd00:10:96::/112"
+
+	k3sPodCIDRv4     = "10.42.0.0/16"
+	k3sPodCIDRv6     = "fd00:10:42::/56"
+	k3sServiceCIDRv4 = "10.43.0.0/16"
+	k3sServiceCIDRv6 = "fd00:10:43::/112"
+)
+
+// podCIDR returns the pod network CIDR string for the family, ordered
+// primary-first: IPv4 for dual (v4-primary), IPv6 for ipv6-only.
+func (f IPFamily) podCIDR(v4, v6 string) string {
+	switch f {
+	case DualStack:
+		return v4 + "," + v6
+	case IPv6:
+		return v6
+	default:
+		return v4
+	}
+}
+
+// serviceCIDR mirrors podCIDR for the Service network.
+func (f IPFamily) serviceCIDR(v4, v6 string) string { return f.podCIDR(v4, v6) }
+
+// ipv6BootPrep readies a node's networking for IPv6 before anything reads
+// its address. accept_ra=2 on the primary interface must be set BEFORE
+// forwarding: enabling IPv6 forwarding turns off the default accept_ra=1,
+// so without =2 the kernel ignores the vmnet router advertisement and the
+// node never acquires (or later loses, at RA-lifetime expiry) its global
+// v6 address. Safe to run on any node; a no-op where already set.
+const ipv6BootPrep = `KIAC_IF="$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')"; ` +
+	`[ -n "$KIAC_IF" ] && sysctl -w "net.ipv6.conf.$KIAC_IF.accept_ra=2" >/dev/null 2>&1; ` +
+	`sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1 || true; `
+
+// WantsIPv6 reports whether the family carries IPv6 traffic at all.
+func (f IPFamily) WantsIPv6() bool { return f == DualStack || f == IPv6 }
+
+// Valid reports whether f is a supported family value.
+func (f IPFamily) Valid() bool {
+	switch f {
+	case IPv4, DualStack, IPv6:
+		return true
+	default:
+		return false
+	}
+}
+
 // Config describes a cluster to create.
 type Config struct {
 	Name          string
@@ -26,7 +100,8 @@ type Config struct {
 	Memory        string // worker VMs; measured idle usage is ~400Mi, so 2G default
 	CPMemory      string // control plane; etcd+apiserver (and all addons on single-node) need headroom
 	CNI           string
-	Kernel        string // resolved kernel Image path; empty = runtime default
+	Kernel        string   // resolved kernel Image path; empty = runtime default
+	IPFamily      IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
@@ -34,6 +109,15 @@ type Config struct {
 	Observability bool
 	Gateway       bool
 	WaitTimeout   time.Duration
+}
+
+// family returns the configured IP family, defaulting an empty value to
+// IPv4 so a zero Config behaves exactly as before this feature existed.
+func (c Config) family() IPFamily {
+	if c.IPFamily == "" {
+		return IPv4
+	}
+	return c.IPFamily
 }
 
 // Manager orchestrates cluster lifecycle on top of the container runtime.
@@ -89,6 +173,10 @@ func (m *Manager) Create(cfg Config) error {
 		return fmt.Errorf("cluster %q already exists; delete it first with: kiac delete cluster --name %s", cfg.Name, cfg.Name)
 	}
 
+	if err := validateIPFamily(cfg); err != nil {
+		return err
+	}
+
 	// Fail cilium prerequisites before any VM boots, not minutes later
 	// when the CNI step runs.
 	if cfg.CNI == "cilium" {
@@ -100,7 +188,12 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
-	if err := ui.Step("Preflight checks", func() error { return m.preflight() }); err != nil {
+	if err := ui.Step("Preflight checks", func() error {
+		if err := m.preflight(); err != nil {
+			return err
+		}
+		return m.preflightIPv6Network(cfg)
+	}); err != nil {
 		return err
 	}
 
@@ -125,15 +218,23 @@ func (m *Manager) Create(cfg Config) error {
 				return err
 			}
 		}
-		// Each node boots independently, so readiness polling and the
-		// sysctl run concurrently across nodes.
+		// Each node boots independently, so readiness polling, the sysctl,
+		// and the dual-stack kubelet pin run concurrently across nodes.
 		return inParallel(len(nodes), func(i int) error {
 			n := nodes[i]
 			if err := m.rt.WaitReady(n, cfg.WaitTimeout); err != nil {
 				return err
 			}
-			_, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1")
-			return err
+			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+				return err
+			}
+			if cfg.family().WantsIPv6() {
+				if _, err := m.rt.Exec(n, "sh", "-c", ipv6BootPrep); err != nil {
+					return err
+				}
+				return m.pinKubeletNodeIP(n, cfg.family())
+			}
+			return nil
 		})
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
@@ -141,10 +242,26 @@ func (m *Manager) Create(cfg Config) error {
 	}
 
 	if err := ui.Step("Initializing Kubernetes control plane", func() error {
-		_, err := m.rt.Exec(cp, "kubeadm", "init",
-			"--pod-network-cidr=10.244.0.0/16",
+		args := []string{"init",
+			"--pod-network-cidr=" + cfg.family().podCIDR(kubeadmPodCIDRv4, kubeadmPodCIDRv6),
 			"--node-name", cp,
-			"--ignore-preflight-errors=all")
+			"--ignore-preflight-errors=all"}
+		if cfg.family().WantsIPv6() {
+			args = append(args, "--service-cidr="+cfg.family().serviceCIDR(kubeadmServiceCIDRv4, kubeadmServiceCIDRv6))
+		}
+		if cfg.family() == IPv6 {
+			// IPv6-only: kubeadm's default advertise-address detection
+			// picks the v4 default-route source, which conflicts with a
+			// v6-only service CIDR. Pin it to the node's v6 so the
+			// apiserver serves and certs itself on the family the cluster
+			// actually uses; the host then connects over v6 too.
+			v6, err := m.waitNodeIPv6(cp, 45*time.Second)
+			if err != nil {
+				return err
+			}
+			args = append(args, "--apiserver-advertise-address="+v6)
+		}
+		_, err := m.rt.Exec(cp, append([]string{"kubeadm"}, args...)...)
 		return err
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
@@ -294,7 +411,7 @@ func (m *Manager) Create(cfg Config) error {
 		if err != nil {
 			return err
 		}
-		serverIP, err = m.rt.IP(cp)
+		serverIP, err = m.serverIP(cp, cfg.family())
 		if err != nil {
 			return err
 		}
@@ -330,6 +447,75 @@ func (m *Manager) Create(cfg Config) error {
 	return nil
 }
 
+// serverIP returns the control-plane address the host kubeconfig should
+// target for the family: the vmnet IPv4 for ipv4/dual (the host reaches
+// the VM over v4, and the apiserver advertises v4), the vmnet IPv6 for
+// ipv6-only (where the apiserver advertises and certs itself on v6).
+func (m *Manager) serverIP(cp string, family IPFamily) (string, error) {
+	if family == IPv6 {
+		return m.waitNodeIPv6(cp, 45*time.Second)
+	}
+	return m.rt.IP(cp)
+}
+
+// pinKubeletNodeIP writes the node's own addresses into
+// /etc/default/kubelet as --node-ip before kubeadm ever starts kubelet,
+// so the node registers the InternalIPs we intend instead of relying on
+// kubelet's single-family auto-detection (which picks one address and,
+// on dual-stack, often the wrong family). The kindest/node kubelet
+// systemd drop-in sources /etc/default/kubelet last via
+// KUBELET_EXTRA_ARGS, so this overrides kubeadm's own flags. For dual
+// the value is "v4,v6" (v4 primary); for ipv6 it is the v6 alone.
+func (m *Manager) pinKubeletNodeIP(node string, family IPFamily) error {
+	nodeIP, err := m.nodeIPArg(node, family)
+	if err != nil {
+		return err
+	}
+	_, err = m.rt.Exec(node, "sh", "-c",
+		fmt.Sprintf("printf 'KUBELET_EXTRA_ARGS=--node-ip=%s\\n' > /etc/default/kubelet", nodeIP))
+	return err
+}
+
+// nodeIPArg resolves the --node-ip value for a node under the given
+// family: "v4,v6" for dual, "v6" for ipv6. It fails if the node has no
+// global IPv6 address, since that means the family cannot be satisfied.
+func (m *Manager) nodeIPArg(node string, family IPFamily) (string, error) {
+	v6, err := m.waitNodeIPv6(node, 45*time.Second)
+	if err != nil {
+		return "", err
+	}
+	if family == IPv6 {
+		return v6, nil
+	}
+	v4, err := m.rt.IP(node)
+	if err != nil {
+		return "", fmt.Errorf("resolving IPv4 address of %s: %w", node, err)
+	}
+	return v4 + "," + v6, nil
+}
+
+// waitNodeIPv6 polls for a node's global IPv6 address, which is assigned
+// by SLAAC a moment after the VM boots (the vmnet router advertisement
+// has to arrive first), so a single lookup right after WaitReady often
+// races ahead of it. Returns a clear "no IPv6" error if none appears in
+// time, which for a create means the network is not IPv6-enabled.
+func (m *Manager) waitNodeIPv6(node string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		v6, err := m.rt.IPv6(node)
+		if err != nil {
+			return "", fmt.Errorf("resolving IPv6 address of %s: %w", node, err)
+		}
+		if v6 != "" {
+			return v6, nil
+		}
+		if !time.Now().Before(deadline) {
+			return "", fmt.Errorf("node %s got no global IPv6 address within %s; --ip-family dual/ipv6 needs an IPv6-enabled container network (macOS 26+); check: container network inspect default", node, timeout)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 // installCNI applies the selected pod network. kindnet ships inside the
 // node image; cilium requires the full custom kernel (--kernel full)
 // and the cilium CLI on the host; "none" skips installation for other
@@ -338,8 +524,9 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 	switch cfg.CNI {
 	case "", "kindnet":
 		return ui.Step("Installing CNI (kindnet)", func() error {
+			subnet := cfg.family().podCIDR(kubeadmPodCIDRv4, kubeadmPodCIDRv6)
 			_, err := m.rt.Exec(cp, "sh", "-euc",
-				`sed -e 's@{{ .PodSubnet }}@10.244.0.0/16@' /kind/manifests/default-cni.yaml | kubectl --kubeconfig `+adminConf+` apply -f -`)
+				`sed -e 's@{{ .PodSubnet }}@`+subnet+`@' /kind/manifests/default-cni.yaml | kubectl --kubeconfig `+adminConf+` apply -f -`)
 			return err
 		})
 	case "cilium":
@@ -401,6 +588,47 @@ func (m *Manager) preflight() error {
 		if err := m.rt.SystemStart(); err != nil {
 			return fmt.Errorf("container system service is not running and could not be started: %w", err)
 		}
+	}
+	return nil
+}
+
+// validateIPFamily rejects an IP family the host or the rest of the
+// config cannot satisfy, before any VM boots. It does not touch the
+// network (that is preflightIPv6Network, which needs the runtime); it
+// only enforces the value itself and its interaction with the kernel and
+// CNI. Kernel gating is by design: the stock kernel has no IPv6
+// netfilter, so a non-ipv4 family without the full kernel would create a
+// cluster whose IPv6 Services silently never connect.
+func validateIPFamily(cfg Config) error {
+	if !cfg.family().Valid() {
+		return fmt.Errorf("invalid --ip-family %q (supported: ipv4, dual, ipv6)", cfg.IPFamily)
+	}
+	if !cfg.family().WantsIPv6() {
+		return nil
+	}
+	if cfg.Kernel == "" {
+		return fmt.Errorf("--ip-family %s needs the full node kernel (the stock kernel has no IPv6 netfilter); this should have been auto-selected, pass --kernel full explicitly", cfg.family())
+	}
+	if cfg.CNI == "cilium" {
+		return fmt.Errorf("--ip-family %s does not support --cni cilium yet: Cilium's installer and IPAM are not wired for dual-stack CIDRs", cfg.family())
+	}
+	return nil
+}
+
+// preflightIPv6Network fails fast when an IPv6-carrying family is asked
+// for but the container network hands out no IPv6 (older macOS, or a
+// custom v4-only network). Without this the cluster would boot and only
+// reveal the problem when a pod fails to get a v6 address.
+func (m *Manager) preflightIPv6Network(cfg Config) error {
+	if !cfg.family().WantsIPv6() {
+		return nil
+	}
+	hasV6, err := m.rt.NetworkHasIPv6("default")
+	if err != nil {
+		return fmt.Errorf("checking the container network for IPv6 support: %w", err)
+	}
+	if !hasV6 {
+		return fmt.Errorf("--ip-family %s needs an IPv6-enabled container network, but the default network advertises no IPv6 subnet (needs macOS 26+); check: container network inspect default", cfg.family())
 	}
 	return nil
 }

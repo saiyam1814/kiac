@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,9 @@ func rewriteAdminConf(name, adminConf, serverIP string) (cluster0, user0, contex
 	clusterBody, _ := cluster0["cluster"].(map[string]any)
 	cluster0["name"] = entry
 	if clusterBody != nil {
-		clusterBody["server"] = fmt.Sprintf("https://%s:6443", serverIP)
+		// net.JoinHostPort brackets an IPv6 literal ([fd00::1]:6443) and
+		// leaves IPv4 untouched, so the ipv6-only server URL is valid.
+		clusterBody["server"] = "https://" + net.JoinHostPort(serverIP, "6443")
 	}
 
 	user0, _ = users[0].(map[string]any)
