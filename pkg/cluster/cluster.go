@@ -584,6 +584,12 @@ func (m *Manager) preflight() error {
 	if !m.rt.Available() {
 		return fmt.Errorf("apple/container CLI not found on PATH; install it from https://github.com/apple/container/releases")
 	}
+	// container 1.2.0 denies `sysctl -w net.ipv4.ip_forward=1` inside node
+	// VMs even with --cap-add ALL (permission denied on /proc/sys), which
+	// breaks every node boot. 1.1.0 is confirmed working; see issue #14.
+	if ver, err := m.rt.Version(); err == nil && ver == "1.2.0" {
+		return fmt.Errorf("apple/container 1.2.0 is known to break node VM boot (sysctl permission denied on net.ipv4.ip_forward); downgrade to 1.1.0 until this is fixed upstream, see https://github.com/saiyam1814/kiac/issues/14")
+	}
 	if !m.rt.SystemRunning() {
 		if err := m.rt.SystemStart(); err != nil {
 			return fmt.Errorf("container system service is not running and could not be started: %w", err)

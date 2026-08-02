@@ -41,6 +41,9 @@ var doctorCmd = &cobra.Command{
 		case majorVersion(ver) < 1:
 			failures++
 			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.0.0+ for best results")
+		case ver == "1.2.0":
+			failures++
+			ui.Check(false, "apple/container CLI", ver+" - known to break node VM boot (sysctl permission denied); downgrade to 1.1.0, see kiac#14")
 		default:
 			ui.Check(true, "apple/container CLI", ver)
 		}
