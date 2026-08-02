@@ -123,6 +123,7 @@ metadata:
   # the node kiac-lb prefers, so delivery is pod-local.
 spec:
   type: LoadBalancer
+  ipFamilyPolicy: PreferDualStack
   selector:
     app: traefik
   ports:
