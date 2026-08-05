@@ -225,7 +225,9 @@ func (m *Manager) Create(cfg Config) error {
 			if err := m.rt.WaitReady(n, cfg.WaitTimeout); err != nil {
 				return err
 			}
-			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+			// container CLI 1.2.0 mounts /proc/sys read-only (OCI readonlyPaths);
+			// the node VM has no user namespace, so root can lift it. No-op on <=1.1.0.
+			if _, err := m.rt.Exec(n, "sh", "-c", "mount -o remount,rw /proc/sys 2>/dev/null; sysctl -w net.ipv4.ip_forward=1"); err != nil {
 				return err
 			}
 			if cfg.family().WantsIPv6() {

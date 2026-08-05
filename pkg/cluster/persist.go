@@ -72,7 +72,9 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 				return err
 			}
 			// ip_forward is runtime state; the reboot reset it.
-			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+			// container CLI 1.2.0 mounts /proc/sys read-only (OCI readonlyPaths);
+			// the node VM has no user namespace, so root can lift it. No-op on <=1.1.0.
+			if _, err := m.rt.Exec(n, "sh", "-c", "mount -o remount,rw /proc/sys 2>/dev/null; sysctl -w net.ipv4.ip_forward=1"); err != nil {
 				return err
 			}
 			// A dual-stack node's kubelet --node-ip pins the OLD v4 and v6
