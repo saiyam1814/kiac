@@ -1,11 +1,14 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // container CLI 0.x ls --format json shape (nested configuration object).
@@ -29,6 +32,21 @@ func TestParseListShapes(t *testing.T) {
 	}
 	if len(infos) != 1 || infos[0].Name != "kiac-dev-worker-1" || infos[0].Status != "stopped" {
 		t.Errorf("v1 shape parsed wrong: %+v", infos)
+	}
+}
+
+func TestExecTimeout(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err := (&Client{Bin: bin}).ExecTimeout("node", 25*time.Millisecond, "true")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecTimeout error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("ExecTimeout took %s", elapsed)
 	}
 }
 

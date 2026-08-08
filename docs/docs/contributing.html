@@ -73,7 +73,7 @@ make ci             <span class="c"># exact formatting, generation, race, vet, a
   <table>
     <tr><th>Path</th><th>What lives there</th></tr>
     <tr><td><code>cmd/</code></td><td>cobra commands; deliberately thin shims over pkg/cluster</td></tr>
-    <tr><td><code>pkg/cluster/</code></td><td>cluster lifecycle: create, delete, addons, chaos, kubeconfig, status</td></tr>
+    <tr><td><code>pkg/cluster/</code></td><td>cluster lifecycle: create, delete, addons, chaos, diagnostics, kubeconfig, status</td></tr>
     <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, observability, gateway, k3s kindnet), versions pinned</td></tr>
     <tr><td><code>pkg/runtime/</code></td><td>wrapper around the apple/container CLI</td></tr>
     <tr><td><code>pkg/webui/</code></td><td>the local dashboard: Go handlers + one embedded HTML file</td></tr>

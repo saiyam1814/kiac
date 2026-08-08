@@ -4,6 +4,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,10 +42,21 @@ func (e *CommandError) Error() string {
 	return fmt.Sprintf("container %s failed: %v\n%s", strings.Join(e.Args, " "), e.Err, out)
 }
 
+// Unwrap lets callers distinguish timeouts and other execution failures
+// without losing the container command's captured diagnostic output.
+func (e *CommandError) Unwrap() error { return e.Err }
+
 func (c *Client) run(args ...string) (string, error) {
-	cmd := exec.Command(c.Bin, args...)
+	return c.runContext(context.Background(), args...)
+}
+
+func (c *Client) runContext(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, c.Bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		return string(out), &CommandError{Args: args, Output: string(out), Err: err}
 	}
 	return string(out), nil
@@ -77,6 +89,17 @@ func (c *Client) SystemRunning() bool {
 	}
 	low := strings.ToLower(out)
 	return !strings.Contains(low, "not running")
+}
+
+// SystemStatus returns the container service's human-readable status.
+// It is intended for diagnostics where the original output is useful.
+func (c *Client) SystemStatus(timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.runContext(ctx, "system", "status")
 }
 
 // SystemStart starts the container API server.
@@ -170,6 +193,28 @@ func ValidateNodeRuntimeVersion(version string) error {
 func (c *Client) Exec(name string, command ...string) (string, error) {
 	args := append([]string{"exec", name}, command...)
 	return c.run(args...)
+}
+
+// ExecTimeout runs a bounded command inside a node. Diagnostic commands
+// use this instead of risking an indefinitely wedged container exec.
+func (c *Client) ExecTimeout(name string, timeout time.Duration, command ...string) (string, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	args := append([]string{"exec", name}, command...)
+	return c.runContext(ctx, args...)
+}
+
+// Logs returns a bounded snapshot of the node VM's console output.
+func (c *Client) Logs(name string, timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.runContext(ctx, "logs", name)
 }
 
 // ExecStdin runs a command inside a node with r piped to stdin.
