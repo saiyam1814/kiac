@@ -20,7 +20,7 @@
 </p>
 
 ```bash
-brew install saiyam1814/tap/kiac
+brew install --cask saiyam1814/tap/kiac
 kiac create cluster --workers 2
 ```
 
@@ -98,7 +98,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 ### Install
 
 ```bash
-brew install saiyam1814/tap/kiac
+brew install --cask saiyam1814/tap/kiac
 ```
 
 <details>
@@ -112,6 +112,17 @@ go install github.com/saiyam1814/kiac@latest
 git clone https://github.com/saiyam1814/kiac && cd kiac && make build
 ```
 </details>
+
+### Verify a release
+
+Every release includes SHA-256 checksums and an SPDX SBOM. GitHub also signs build provenance for each artifact, and published releases are immutable.
+
+```bash
+gh release download vX.Y.Z --repo saiyam1814/kiac --dir kiac-release
+(cd kiac-release && shasum -a 256 -c checksums.txt)
+gh attestation verify kiac-release/kiac_X.Y.Z_darwin_arm64.tar.gz --repo saiyam1814/kiac
+gh release verify vX.Y.Z --repo saiyam1814/kiac
+```
 
 ### Create your first cluster
 
