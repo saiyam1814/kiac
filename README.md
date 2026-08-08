@@ -132,7 +132,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 ```
 
 ```text
-⬢ kiac v0.3.0 · Kubernetes in Apple Containers
+⬢ kiac · Kubernetes in Apple Containers
  ✓ Preflight checks (0.3s)
  ✓ Pulling node image kindest/node:v1.36.1 (8.4s)
  ✓ Booting 3 node VM(s) (9.8s)
