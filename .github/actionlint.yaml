@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - kiac-runtime
+
+config-variables:
+  - KIAC_RUNTIME_CI_ENABLED

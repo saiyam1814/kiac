@@ -1,0 +1,15 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: upload-server
+  namespace: kiac-e2e
+spec:
+  parentRefs:
+    - name: kiac
+      namespace: kiac-gateway
+  hostnames:
+    - runtime.kiac.test
+  rules:
+    - backendRefs:
+        - name: upload-server
+          port: 8080
