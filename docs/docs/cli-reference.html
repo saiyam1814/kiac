@@ -120,7 +120,7 @@ kiac stop node worker-2 --name staging</code></pre>
   </table>
 
   <h2 id="start-node">kiac start node</h2>
-  <p>Start a previously stopped node VM. Idempotent: on an already-running node the boot is simply skipped. The node's IP may change across restarts; the kubelet re-registers with the new address on its own, and kiac-lb re-points any LoadBalancer ingress IP pinned to the old address on its next pass. Note one <a href="troubleshooting.html#restarted-node-tcp">known host-to-node TCP limitation</a> for restarted VMs.</p>
+  <p>Start a previously stopped node VM. Idempotent: on an already-running node the boot is simply skipped. The node's IP may change across restarts; kubeadm re-registers it and kiac-lb re-points stale LoadBalancer IPs, while k3s runs the resume reconciler to update agent endpoints and host-network pods before returning. If several k3s nodes are stopped, use <code>kiac resume cluster</code> to recover them together. Note one <a href="troubleshooting.html#restarted-node-tcp">known host-to-node TCP limitation</a> for restarted VMs.</p>
   <pre><code>kiac start node worker-1
 kiac start node worker-2 --name staging</code></pre>
   <table>
@@ -129,7 +129,7 @@ kiac start node worker-2 --name staging</code></pre>
   </table>
 
   <h2 id="resume-cluster">kiac resume cluster</h2>
-  <p>Boot a stopped cluster's VMs and heal it after a host reboot. A reboot (or <code>container system stop</code>) halts every node VM, and vmnet hands out fresh IPs on the next boot; resume restarts the VMs, rewrites the control-plane address everywhere it is pinned (apiserver cert, kubeconfigs, kube-proxy), and waits for the nodes to come back Ready. Safe to re-run; a running cluster is a no-op. kubeadm clusters only. See <a href="persistence.html">Reboots &amp; resume</a>.</p>
+  <p>Boot a stopped kubeadm or k3s cluster and heal it after a host reboot. vmnet hands out fresh IPs on the next boot, so resume repairs the distro-specific state: kubeadm certificates, kubeconfigs, worker kubelets, and kube-proxy; or k3s agent endpoints, current Node addresses, and host-network pods. It also heals kiac networking helpers, rewrites the host kubeconfig, and waits for Ready nodes. Safe to re-run; a running cluster is a no-op. See <a href="persistence.html">Reboots &amp; resume</a>.</p>
   <pre><code>kiac resume cluster --name dev</code></pre>
   <table>
     <tr><th>Flag</th><th>Default</th><th>Description</th></tr>

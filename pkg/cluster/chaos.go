@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
@@ -37,11 +38,11 @@ func (m *Manager) StopNode(name, node string) error {
 
 // StartNode boots a previously stopped node VM back into the cluster.
 // It is safe to re-run on an already-running node: the boot is simply
-// skipped. vmnet may hand the VM a different IP on restart; the kubelet
-// re-registers itself with the new address and kiac-lb (see lb.go)
-// notices that any LoadBalancer ingress IP pinned to the old address is
-// no longer an eligible node IP and re-points it on its next pass, so
-// there is no pool state to resync here.
+// skipped. vmnet may hand the VM a different IP on restart; kubeadm
+// re-registers it and kiac-lb (see lb.go) re-points stale ingress IPs.
+// k3s also needs cluster-level endpoint and hostNetwork Pod healing, so
+// its single-node start delegates to Resume; several stopped nodes must
+// be resumed together explicitly.
 func (m *Manager) StartNode(name, node string) error {
 	infos, target, err := m.findNode(name, node)
 	if err != nil {
@@ -52,6 +53,21 @@ func (m *Manager) StartNode(name, node string) error {
 		if i.Name == target && strings.EqualFold(i.Status, "running") {
 			running = true
 		}
+	}
+	if !running && distroFromNodes(infos) == "k3s" {
+		stopped := 0
+		for _, info := range infos {
+			if !strings.EqualFold(info.Status, "running") {
+				stopped++
+			}
+		}
+		if stopped > 1 {
+			return fmt.Errorf("k3s cluster %q has %d stopped nodes; recover the topology together with: kiac resume cluster --name %s", name, stopped, name)
+		}
+		// A k3s node's new vmnet address can stale agent endpoints and
+		// hostNetwork Pod metadata. The resume path starts the one stopped
+		// VM and reconciles those cluster-level references before returning.
+		return m.Resume(name, 5*time.Minute)
 	}
 	if running {
 		ui.Infof("node %s is already running", target)

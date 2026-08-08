@@ -57,6 +57,17 @@ func TestVerifyReportsUnhealthyPod(t *testing.T) {
 	}
 }
 
+func TestVerifyReportsMissingBuiltInGateway(t *testing.T) {
+	t.Setenv("KIAC_TEST_GATEWAY_CRD", "true")
+	report, err := fakeVerificationManager(t).Verify("dev", 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := verificationStatus(report, "gateway.api"); got != VerificationFail {
+		t.Fatalf("Gateway check = %s, want fail when CRDs exist but the built-in Gateway is missing", got)
+	}
+}
+
 func TestDistroFromNodes(t *testing.T) {
 	if got := distroFromNodes([]runtime.Info{{Image: "docker.io/rancher/k3s:v1.36.2-k3s1"}}); got != "k3s" {
 		t.Errorf("k3s image detected as %q", got)
@@ -104,6 +115,11 @@ case "$*" in
     ;;
   *"get storageclass -o json"*)
     printf '%s\n' '{"items":[{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}]}'
+    ;;
+  *"get crd gateways.gateway.networking.k8s.io"*)
+    if [ "${KIAC_TEST_GATEWAY_CRD:-}" = true ]; then
+      printf '%s\n' 'customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io'
+    fi
     ;;
   *"get apiservice v1beta1.metrics.k8s.io"*|*"get gateway kiac -n kiac-gateway"*|*"get namespace kiac-observability"*)
     ;;

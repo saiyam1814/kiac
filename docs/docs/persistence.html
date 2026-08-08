@@ -60,7 +60,7 @@
     <li>The container service reports every node as <code>stopped</code>; <code>kiac get clusters</code> shows <code>0/N stopped</code>.</li>
     <li>vmnet hands out <b>fresh IPs</b>. Node addresses are not stored anywhere; every boot gets the next free one.</li>
   </ul>
-  <p>Worker addresses heal themselves (each kubelet re-detects its IP and re-registers). The control-plane address does not: it is baked into the apiserver's serving certificate, every kubeconfig, the static pod manifests, the workers' kubelet configs, and the kube-proxy ConfigMap. Come back on a new IP and all of them disagree with reality.</p>
+  <p>What becomes stale depends on the distro. kubeadm pins the control-plane address into its serving certificate, kubeconfigs, static pod manifests, worker kubelet configs, and kube-proxy ConfigMap. k3s persists the original server address in each agent VM's startup environment, while host-network pod objects can retain their previous Node IP. Resume detects the distro and repairs the corresponding state.</p>
 
   <h2 id="resume">kiac resume cluster</h2>
   <pre><code>kiac get clusters
@@ -77,7 +77,7 @@ control-plane IP changed 192.168.64.2 -&gt; 192.168.64.5; healing certs and kube
  ✓ Re-pointing kube-proxy and cluster-info
  ✓ Waiting for nodes to be Ready
  ✓ Writing kubeconfig</span></code></pre>
-  <p>What each step heals when the control-plane IP changed:</p>
+  <p>On a kubeadm cluster, the steps heal:</p>
   <ul>
     <li><b>Control-plane files</b>: the old IP is rewritten to the new one across <code>admin.conf</code>, <code>super-admin.conf</code>, the scheduler, controller-manager, and kubelet configs, and the four static pod manifests. The apiserver serving certificate is regenerated for the new address when needed, and the kubelet restarts to pick everything up.</li>
     <li><b>Workers</b>: each worker's <code>kubelet.conf</code> is pointed at the new control-plane address and its kubelet restarted.</li>
@@ -85,8 +85,9 @@ control-plane IP changed 192.168.64.2 -&gt; 192.168.64.5; healing certs and kube
     <li><b>Your kubeconfig</b>: the <code>kiac-&lt;name&gt;</code> context is re-merged with the new server address.</li>
     <li><b>LoadBalancer IPs</b>: nothing to do explicitly. kiac-lb reads the healed <code>admin.conf</code> on every pass, so any Service ingress IP pinned to a dead address is re-pointed within seconds. See <a href="networking.html#loadbalancer">Networking</a>.</li>
   </ul>
-  <p>One expected oddity: the control-plane VM may die once during its first boot after an IP change (an artifact of the node image's own IP fixup). resume detects that, boots it again, and says so; it is part of the normal flow, not a failure.</p>
-  <p>Measured end to end: a 3-node cluster resumed and Ready in <b>46 seconds</b>, verified even across a vmnet subnet change where every address moved.</p>
+  <p>One expected kubeadm oddity: the control-plane VM may die once during its first boot after an IP change (an artifact of the node image's own IP fixup). resume detects that, boots it again, and says so; it is part of the normal flow, not a failure.</p>
+  <p>On a k3s cluster, resume starts the server first, writes its current URL to a root-only file on each agent, and restarts only agents whose live <code>K3S_URL</code> is stale. The tiny transparent launcher execs the existing <code>/bin/k3s</code>; there is no sidecar, image, or background process. Resume then waits until every Kubernetes Node reports its VM's current address, recreates kindnet and optional node-exporter host-network pods, heals the node-local edge proxies, and writes the host kubeconfig. Clusters created before this support are migrated automatically on first resume without touching their join token.</p>
+  <p>Measured end to end: kubeadm resumed a 3-node cluster across a vmnet subnet change in <b>46 seconds</b>. k3s resume has also been exercised repeatedly across fresh addresses, including an existing-cluster migration and cross-node 1 MiB uploads after recovery.</p>
 
   <h2 id="idempotent">Idempotent by design</h2>
   <p>Every healing step is a no-op once applied, so <code>kiac resume cluster</code> is safe to run at any time:</p>
@@ -107,8 +108,8 @@ control-plane IP changed 192.168.64.2 -&gt; 192.168.64.5; healing certs and kube
 
   <h2 id="limits">Limits, honestly</h2>
   <ul>
-    <li><b>kubeadm clusters only.</b> resume heals kubeadm's files; <a href="k3s.html">k3s clusters</a> should be deleted and recreated after a reboot (they build in under a minute).</li>
     <li><b><code>--cni none</code> clusters</b> never report nodes Ready, so the final readiness wait warns instead of failing; the VMs and apiserver are still up.</li>
+    <li><b>IPv6-only kubeadm clusters</b> still require recreation after a reboot. IPv4 and dual-stack clusters are supported; k3s supports IPv4 and dual-stack creation and resume.</li>
     <li><b>resume is not <code>start node</code>.</b> A single node stopped with <code>kiac stop node</code> just needs <a href="node-chaos.html">kiac start node</a>; resume is for the whole-cluster outage a reboot causes (though running it in that state is harmless).</li>
   </ul>
 

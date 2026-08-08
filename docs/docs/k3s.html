@@ -91,7 +91,7 @@
 
   <h2 id="limits">Honest trade-offs</h2>
   <ul>
-    <li><b>No <code>kiac resume</code> yet.</b> The <a href="persistence.html">reboot-healing flow</a> rewrites kubeadm's files and is kubeadm-only today. After a Mac reboot, delete and recreate a k3s cluster; it comes back in under a minute.</li>
+    <li><b><code>kiac resume</code> is supported.</b> A tiny launcher stored on each agent replaces only its stale <code>K3S_URL</code> after vmnet changes the server address; no extra daemon, proxy image, or token copy is added. Resume also waits for current Node IPs, refreshes host-network pods, heals the edge proxy, and rewrites the host kubeconfig. Existing k3s clusters are upgraded in place on their first resume.</li>
     <li><b>No <code>--cni cilium</code>.</b> The Cilium path (and <code>--kernel</code> pairing) is a kubeadm-path feature; see <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
     <li><b>sqlite, single server.</b> There is one k3s server; workers are agents. Control-plane HA is out of scope for a laptop cluster.</li>
     <li>k3s's bundled ServiceLB is intentionally disabled. kiac-lb publishes one endpoint-local node IP instead of every node IP, so LoadBalancer clients do not accidentally choose a cross-node large-upload path.</li>

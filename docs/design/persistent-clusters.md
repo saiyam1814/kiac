@@ -1,14 +1,13 @@
 # Persistent clusters (`kiac resume`)
 
-Status: healing engine landed (`pkg/cluster/persist.go`,
-`Manager.Resume`), CLI wiring and on-cluster E2E validation pending.
-This doc records what exists in apple/container today, why a cluster
-does not survive a host reboot, and exactly how resume heals it.
+Status: implemented and live-validated for kubeadm and k3s. This doc
+records what exists in apple/container today, why a cluster does not
+survive a host reboot, and exactly how each resume path heals it.
 
 Problem: every kiac node VM dies with the `container` system service.
 After a Mac reboot (or `container system stop`), `kiac get clusters`
 shows `0/N stopped`. The VMs' disks survive; the cluster does not come
-back on its own, and until now kiac had no way to bring it back.
+back on its own until `kiac resume cluster` starts and repairs it.
 
 ## Findings (verified 2026-07-06 on this machine)
 
@@ -61,7 +60,7 @@ offers `--restart`, autostart, or static IPs anywhere (`container run
 So resurrection today is: `container start` every node, then heal every
 place the old IPs are baked in. That is `kiac resume`.
 
-## The control-plane IP problem, exactly
+## The kubeadm control-plane IP problem, exactly
 
 `kiac create` runs `kubeadm init` with flags and no
 `--control-plane-endpoint`, so the control-plane VM's IP is embedded in:
@@ -117,7 +116,7 @@ The SECOND boot survives, because the now-missing `apiserver.crt` makes
 crash-loops on the missing cert. Resume is built around this exact
 sequence.
 
-## The resume flow (implemented in `Manager.Resume`)
+## The kubeadm resume flow
 
 1. Preflight, then `container start` every stopped node and wait for
    containerd in parallel. `bootAndWait` watches for the VM dying
@@ -159,82 +158,58 @@ Every step is idempotent, so `kiac resume` re-runs safely after partial
 failures and also works when the IPs happen to come back unchanged (it
 degenerates to start + wait + no-op heals).
 
-## CLI wiring left to do (cmd/, not part of this change)
+## The k3s resume flow
 
-```go
-// cmd/resume.go
-var (
-	resumeName string
-	resumeWait time.Duration
-)
+k3s does not have kubeadm's static-pod and certificate rewrite problem,
+but every agent VM persists its original server address in `K3S_URL`.
+After vmnet changes the server IP, the agents keep retrying a dead
+endpoint. Rebuilding the VMs would throw away exactly the state resume
+is meant to preserve, and adding a proxy daemon would add steady-state
+cost to every cluster.
 
-var resumeCmd = &cobra.Command{
-	Use:   "resume cluster",
-	Short: "Boot a stopped cluster's VMs and heal it after a host reboot",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if args[0] != "cluster" {
-			return fmt.Errorf("unknown resource %q (supported: cluster)", args[0])
-		}
-		ui.Banner(Version)
-		return cluster.NewManager().Resume(resumeName, resumeWait)
-	},
-}
+The lightweight path in `pkg/cluster/k3s_resume.go` is:
 
-func init() {
-	resumeCmd.Flags().StringVar(&resumeName, "name", "dev", "cluster name")
-	resumeCmd.Flags().DurationVar(&resumeWait, "wait", 5*time.Minute, "how long to wait for boot, API server, and node readiness")
-	rootCmd.AddCommand(resumeCmd)
-}
-```
+1. Start the k3s server and wait for its API.
+2. Start each agent and atomically install a root-owned
+   `/usr/local/bin/k3s` launcher plus `/etc/kiac/k3s-server-url`. The
+   launcher only overrides `K3S_URL` for the `agent` command, then execs
+   the image's existing `/bin/k3s`. It never reads or rewrites
+   `K3S_TOKEN`, and creates no resident process.
+3. Compare the live PID 1 environment with the current server URL. Only
+   an agent still running against an old URL is stopped and started
+   once. This also migrates clusters created before the launcher existed.
+4. Wait for every Kubernetes Node to be Ready **and** to report the
+   current VM IPv4 address. A stale Node can remain Ready for about a
+   minute after a fast reboot, so readiness alone is not a sufficient
+   convergence check.
+5. If any VM restarted, roll kindnet and the optional node-exporter
+   DaemonSet. Their host-network Pod objects otherwise retain stale
+   PodIP metadata even after the Node address changes.
+6. Rewrite the restricted edge-proxy kubeconfig to the current server,
+   restart only stale helpers, wait for their iptables hooks, and merge
+   the current k3s admin kubeconfig on the host.
 
-`kiac get clusters` already prints `0/N stopped`; its hint text should
-point at `kiac resume cluster --name <name>`.
+The launcher is installed during new cluster creation too, so normal
+boots take one file read and one `exec`; there is no Envoy, sidecar,
+additional image, or steady-state memory overhead.
 
-## Validated vs. pending validation
+## Validation
 
-Validated in this spike: machine semantics (live, versioned), on-disk
-persistence and the absence of stored IPs, new-IP-per-boot, the
-entrypoint fixup and its `/kind/kubeadm.conf` trap (source-verified),
-and the worker half of the story indirectly through the shipped `kiac
-stop/start node` chaos path. NOT yet validated end to end: a full
-reboot-and-resume cycle on a real cluster, because this workspace could
-not create or stop clusters. Run the E2E checklist below before wiring
-the command into a release; the first item to confirm on a real node is
-that `/kind/old-ipv4` exists and matches the node IP (it is written only
-if `getent ahostsv4 $(hostname)` resolves in the guest; if it does not,
-the entrypoint fixup never fires and resume's own seds and cert regen
-carry the whole heal, which the script is written to do).
+The kubeadm path has been exercised repeatedly on real multi-node
+clusters, including a complete vmnet subnet change, workload and
+LoadBalancer recovery, and idempotent second resumes. The k3s path has
+been exercised across repeated full outages with new addresses, a
+pre-launcher cluster migration, exact 1 MiB cross-node NodePort uploads,
+LoadBalancer traffic, metrics recovery, edge-proxy RBAC and rules, and
+matching Node and host-network Pod addresses.
 
-## E2E validation checklist
+`test/e2e/run.sh k3s` keeps the release-level contract executable on a
+trusted Apple runtime host: one server plus three agents, Gateway API,
+observability, a complete stop/resume cycle, address convergence, and
+post-resume traffic and verification. The normal pull-request workflow
+stays on free hosted CI and does not require Apple virtualization.
 
-On a machine with container 1.0.0, from repo root, using a THROWAWAY
-cluster name:
-
-1. `go build -o dist/kiac .` after wiring cmd/resume.go.
-2. `dist/kiac create cluster --name resume-e2e --workers 2`
-3. `kubectl --context kiac-resume-e2e get nodes` -> 3 Ready.
-4. Deploy a canary: `kubectl create deploy web --image=nginx --replicas=2 && kubectl expose deploy web --port 80 --type LoadBalancer`; note the EXTERNAL-IP and `curl` it.
-5. `container exec kiac-resume-e2e-control-plane cat /kind/old-ipv4` -> must equal the control plane's current IP (entrypoint fixup armed).
-6. Reboot the Mac (or `container system stop && container system start`, which kills all VMs the same way).
-7. `dist/kiac get clusters` -> `resume-e2e 0/3 stopped`.
-8. `dist/kiac resume cluster --name resume-e2e` -> expect "control-plane IP changed a.b.c.d -> w.x.y.z" and exactly one "died during boot ... booting it again" for the control plane.
-9. `kubectl --context kiac-resume-e2e get nodes` -> 3 Ready within the wait timeout; `kubectl -n kube-system get pods` -> kube-proxy pods Running, not CrashLoopBackOff; apiserver TLS validates against the new IP (kubectl working is the proof).
-10. `kubectl get svc web` -> EXTERNAL-IP re-pointed by kiac-lb to a live node IP; `curl` it.
-11. Idempotency: run `dist/kiac resume cluster --name resume-e2e` again -> succeeds with every heal a no-op.
-12. Double-reboot: repeat steps 6-10 once more (exercises the any-old-IP worker sed and the second cert regen).
-13. `dist/kiac delete cluster --name resume-e2e`.
-
-## Effort estimates
-
-- cmd/resume.go wiring + `kiac get clusters` hint + README/website blurb: ~0.5 day including review.
-- E2E checklist on a real cluster, both reboot variants: ~half a day.
-- Optional create-time hardening (separate epic): write a minimal
-  `/kind/kubeadm.conf` during create, or init with
-  `--control-plane-endpoint` on a stable name once inter-VM DNS is
-  reliable (`container system dns` domains). Either defuses the
-  first-boot cert trap at the source and shrinks resume to
-  start+sysctl+kubeconfig; ~1-2 days with regression E2E.
-- `container machine`-based nodes: blocked on Apple shipping an
-  entrypoint/boot-command hook and stable addressing; re-evaluate each
-  apple/container release.
+`container machine` remains worth revisiting only if Apple adds a stable
+boot-command/entrypoint hook or stable addressing. Today it loses the
+node image entrypoint and changes address on every boot, so it does not
+remove either healing problem.

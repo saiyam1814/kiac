@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,5 +44,27 @@ func TestResolveNode(t *testing.T) {
 				t.Errorf("resolveNode(%q, %q) = %q, want %q", c.cluster, c.node, got, c.want)
 			}
 		})
+	}
+}
+
+func TestStartNodeK3sRequiresResumeForMultipleStoppedNodes(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "container")
+	script := `#!/bin/sh
+case "$*" in
+  "ls -a --format json")
+    printf '%s\n' '[{"configuration":{"id":"kiac-dev-control-plane","image":{"reference":"docker.io/rancher/k3s:v1.36.2-k3s1"}},"status":{"state":"stopped"}},{"configuration":{"id":"kiac-dev-worker-1","image":{"reference":"docker.io/rancher/k3s:v1.36.2-k3s1"}},"status":{"state":"stopped"}}]'
+    ;;
+  *)
+    printf 'unexpected command: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := (&Manager{rt: &runtime.Client{Bin: bin}}).StartNode("dev", "worker-1")
+	if err == nil || !strings.Contains(err.Error(), "has 2 stopped nodes") || !strings.Contains(err.Error(), "kiac resume cluster --name dev") {
+		t.Fatalf("StartNode error = %v, want explicit whole-cluster resume guidance", err)
 	}
 }

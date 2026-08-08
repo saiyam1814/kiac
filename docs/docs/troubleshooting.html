@@ -76,7 +76,7 @@ kiac verify cluster --name dev -o json</code></pre>
 dev   0/3 stopped</span></code></pre>
   <p>A reboot (or <code>container system stop</code>) halts every node VM; their disks persist. <code>0/N stopped</code> is the signal to resume:</p>
   <pre><code>kiac resume cluster --name dev</code></pre>
-  <p>resume boots the VMs and heals everything the fresh vmnet IPs broke: apiserver cert, kubeconfigs, worker kubelets, and kube-proxy. It is idempotent, so re-running after a partial failure is the retry. The full story is on <a href="persistence.html">Reboots &amp; resume</a>. Two caveats: it heals <b>kubeadm clusters only</b> (recreate <a href="k3s.html">k3s clusters</a>; they build in under a minute), and expect the control-plane VM to die and be rebooted once during resume after an IP change; that is part of the normal flow.</p>
+  <p>resume supports both kubeadm and <a href="k3s.html">k3s</a>, healing each distro's stale control-plane, node, kubeconfig, and networking addresses. It is idempotent, so re-running after a partial failure is the retry. The full story is on <a href="persistence.html">Reboots &amp; resume</a>. On kubeadm, expect the control-plane VM to die and be rebooted once during resume after an IP change; that is part of the node image's normal certificate-fixup flow.</p>
 
   <h2 id="create-fails">Create fails partway</h2>
   <p>kiac tears down the half-created node VMs automatically (you will see <code>cleaned up partial cluster "dev"</code>), so just fix the cause and re-run. Common causes:</p>
