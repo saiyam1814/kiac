@@ -198,6 +198,7 @@ metadata:
   # keeps the pod on the node kiac-lb prefers, so delivery is pod-local.
 spec:
   type: LoadBalancer
+  ipFamilyPolicy: PreferDualStack
   selector:
     app: grafana
   ports:
