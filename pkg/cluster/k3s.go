@@ -295,8 +295,10 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	if cfg.Workers > 0 {
 		if err := ui.Step(fmt.Sprintf("Joining %d k3s agent(s)", cfg.Workers), func() error {
 			env := k3sAgentEnv(serverIP, token)
+			workers := make([]string, 0, cfg.Workers)
 			for i := 1; i <= cfg.Workers; i++ {
 				w := worker(cfg.Name, i)
+				workers = append(workers, w)
 				if err := m.rt.RunDetached(k3sAgentRunOpts(cfg, w, env)); err != nil {
 					return err
 				}
@@ -304,9 +306,16 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			// Pod sandboxes on the agents need the standard CNI plugin
 			// names resolvable too; the helper's poll rides out each
 			// agent's k3s self-extraction.
-			return inParallel(cfg.Workers, func(i int) error {
+			if err := inParallel(cfg.Workers, func(i int) error {
 				return m.ensureK3sCNIPlugins(worker(cfg.Name, i+1))
-			})
+			}); err != nil {
+				return err
+			}
+			// The persisted VM command keeps the original K3S_URL in its
+			// environment. Install a transparent launcher now so resume can
+			// replace only that endpoint after vmnet assigns the server a new
+			// address, without rebuilding the worker VM.
+			return m.installK3sResumeHooks(workers, serverIP)
 		}); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err

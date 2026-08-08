@@ -20,9 +20,10 @@ var resumeCmd = &cobra.Command{
 	Long: `Boot a stopped cluster's VMs and heal it after a host reboot.
 
 A reboot (or 'container system stop') halts every node VM, and vmnet
-hands out fresh IPs on the next boot. resume restarts the VMs, rewrites
-the control-plane address everywhere it is pinned (apiserver cert,
-kubeconfigs, kube-proxy), and waits for the nodes to come back Ready.
+hands out fresh IPs on the next boot. resume restarts the VMs and heals
+the distro-specific state: kubeadm certificates and configs, or k3s
+agent endpoints and node-addressed pods. It also refreshes the host
+kubeconfig and networking helpers, then waits for current Ready nodes.
 Safe to re-run; a running cluster is a no-op.`,
 	Example: `  kiac resume cluster --name dev`,
 	Args:    cobra.ExactArgs(1),

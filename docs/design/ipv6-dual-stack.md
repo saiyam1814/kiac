@@ -79,13 +79,15 @@ IPv6 subnet (`container network inspect default`), which needs macOS 26+.
   family. After the fix the v6 transfer matched v4 (~1.8GB/s). On a stock
   (v4-only) kernel it detects the missing IPv6 nat table and runs
   IPv4-only rather than failing.
-- **resume/heal.** A reboot changes both a node's v4 and v6. The existing
+- **resume/heal.** A reboot changes both a node's v4 and v6. kubeadm's
   v4-primary heal (cert, kubeconfigs, kube-proxy ConfigMap) is unchanged;
   resume additionally re-pins each node's `--node-ip` from its current
   addresses when the node was created dual/ipv6 (detected from
-  `/etc/default/kubelet`, so ipv4 clusters are untouched). IPv6-only
-  resume is not yet supported and fails with a clear "recreate" message
-  rather than a confusing error.
+  `/etc/default/kubelet`, so ipv4 clusters are untouched). k3s agents
+  compute both node addresses at boot, while resume updates their server
+  URL, waits for the current Node address set, and refreshes host-network
+  pods. IPv6-only kubeadm resume still fails with a clear "recreate"
+  message rather than a confusing error.
 
 ## Verified end to end
 
@@ -102,11 +104,13 @@ On macOS with `apple/container` 1.0.0 and the full kernel, per distro:
 | Large upload over v6 (TSO), cross-node | ✅ ~1.8GB/s | — | ✅ ~1.5GB/s |
 | Host kubectl over bracketed v6 endpoint | n/a | n/a | ✅ |
 | Two-node (worker join) | ✅ | ✅ | ✅ |
-| `kiac resume` heals both families | ✅ | — | recreate (gated) |
+| `kiac resume` heals both families | ✅ | supported (IPv4 resume E2E) | recreate (gated) |
 
-Both dual columns were run with a worker; the k3s TSO cell and k3s
-resume were not exercised (same edge-proxy/heal code as kubeadm). ipv6
-resume is intentionally gated to recreate.
+Both dual columns were run with a worker. k3s resume is implemented for
+dual-stack clusters and its IPv4 path has full reboot E2E coverage; a
+separate dual-stack reboot run has not yet been benchmarked. The k3s TSO
+cell was not measured separately. IPv6-only kubeadm resume is
+intentionally gated to recreate.
 
 ## Limitations
 

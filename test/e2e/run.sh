@@ -15,6 +15,7 @@ TRAFFIC_BIN="${ROOT}/dist/e2e/kiac-e2e-traffic-linux-arm64"
 CURRENT_CLUSTER=""
 CURRENT_CONTEXT=""
 CURRENT_NODES=""
+TRAFFIC_POD=""
 
 umask 077
 mkdir -p "$(dirname "${TRAFFIC_BIN}")" "$(dirname "${KIAC_E2E_STATE_FILE}")" "$(dirname "${KUBECONFIG}")"
@@ -107,6 +108,16 @@ wait_for_server() {
   k -n kiac-e2e exec "${pod}" -- wget -q -O - http://127.0.0.1:8080/healthz >/dev/null
 }
 
+start_traffic_server() {
+  k -n kiac-e2e rollout status deployment/upload-server --timeout=180s
+  TRAFFIC_POD=$(k -n kiac-e2e get pod -l app=upload-server -o jsonpath='{.items[0].metadata.name}')
+  k -n kiac-e2e cp "${TRAFFIC_BIN}" "${TRAFFIC_POD}:/tmp/kiac-e2e-traffic"
+  k -n kiac-e2e exec "${TRAFFIC_POD}" -- chmod 0755 /tmp/kiac-e2e-traffic
+  k -n kiac-e2e exec "${TRAFFIC_POD}" -- sh -c \
+    'nohup /tmp/kiac-e2e-traffic server --listen :8080 >/tmp/kiac-e2e-server.log 2>&1 &'
+  retry 30 1 wait_for_server "${TRAFFIC_POD}"
+}
+
 wait_for_lb_ip() {
   local namespace=$1
   local service=$2
@@ -187,6 +198,46 @@ test_observability() {
     "http://$(url_host "${grafana_ip}"):3000/api/health" >/dev/null
 }
 
+assert_k3s_node_addresses() {
+  local node vm_ip internal_ips kindnet_ip node_exporter_ip saved_url live_url
+  local cp="kiac-${CURRENT_CLUSTER}-control-plane"
+  local server_url="https://$(node_ipv4 "${cp}"):6443"
+  for node in ${CURRENT_NODES}; do
+    vm_ip=$(node_ipv4 "${node}")
+    internal_ips=$(k get node "${node}" -o \
+      'jsonpath={range .status.addresses[?(@.type=="InternalIP")]}{.address}{" "}{end}')
+    [[ " ${internal_ips} " == *" ${vm_ip} "* ]] || {
+      printf '%s InternalIPs %q do not include current VM address %s\n' \
+        "${node}" "${internal_ips}" "${vm_ip}" >&2
+      return 1
+    }
+    kindnet_ip=$(k -n kube-system get pod -l k8s-app=kindnet \
+      --field-selector "spec.nodeName=${node}" -o jsonpath='{.items[0].status.podIP}')
+    [[ "${kindnet_ip}" == "${vm_ip}" ]] || {
+      printf '%s kindnet PodIP %q does not match current VM address %s\n' \
+        "${node}" "${kindnet_ip}" "${vm_ip}" >&2
+      return 1
+    }
+    node_exporter_ip=$(k -n kiac-observability get pod -l app=node-exporter \
+      --field-selector "spec.nodeName=${node}" -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
+    if [[ -n "${node_exporter_ip}" && "${node_exporter_ip}" != "${vm_ip}" ]]; then
+      printf '%s node-exporter PodIP %q does not match current VM address %s\n' \
+        "${node}" "${node_exporter_ip}" "${vm_ip}" >&2
+      return 1
+    fi
+    if [[ "${node}" != *-control-plane ]]; then
+      saved_url=$(container exec "${node}" cat /etc/kiac/k3s-server-url | tr -d '\r\n')
+      live_url=$(container exec "${node}" sh -c \
+        "tr '\\000' '\\n' < /proc/1/environ | sed -n 's/^K3S_URL=//p' | head -n1" | tr -d '\r\n')
+      [[ "${saved_url}" == "${server_url}" && "${live_url}" == "${server_url}" ]] || {
+        printf '%s k3s server URLs saved=%q live=%q, want %q\n' \
+          "${node}" "${saved_url}" "${live_url}" "${server_url}" >&2
+        return 1
+      }
+    fi
+  done
+}
+
 run_cluster() {
   local label=$1
   local distro=$2
@@ -248,13 +299,7 @@ run_cluster() {
   k -n kiac-e2e patch deployment upload-server --type=merge \
     -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${target}\"}}}}}"
   k -n kiac-e2e rollout status deployment/upload-server --timeout=180s
-  local pod
-  pod=$(k -n kiac-e2e get pod -l app=upload-server -o jsonpath='{.items[0].metadata.name}')
-  k -n kiac-e2e cp "${TRAFFIC_BIN}" "${pod}:/tmp/kiac-e2e-traffic"
-  k -n kiac-e2e exec "${pod}" -- chmod 0755 /tmp/kiac-e2e-traffic
-  k -n kiac-e2e exec "${pod}" -- sh -c \
-    'nohup /tmp/kiac-e2e-traffic server --listen :8080 >/tmp/kiac-e2e-server.log 2>&1 &'
-  retry 30 1 wait_for_server "${pod}"
+  start_traffic_server
   k -n kiac-e2e wait --for=jsonpath='{.endpoints[0].conditions.ready}'=true \
     endpointslice -l kubernetes.io/service-name=upload-server --timeout=120s
 
@@ -291,16 +336,54 @@ run_cluster() {
   fi
 
   if [[ "${restart}" == true ]]; then
-    "${KIAC_BIN}" stop node worker-1 --name "${name}"
-    "${KIAC_BIN}" get clusters -o json | grep -F "${name}" >/dev/null
-    "${KIAC_BIN}" start node worker-1 --name "${name}"
-    k wait --for=condition=Ready "node/${sender}" --timeout=300s
-    retry 30 1 edge_proxy_running "${sender}"
-    # The node VM keeps its root disk but receives a fresh /tmp on boot.
-    # Reinstall only the test client; the product proxy in /usr/local/bin
-    # must have persisted and is checked immediately above.
-    install_traffic_binary "${sender}"
-    test_upload "${sender}" "${ingress}" v4
+    if [[ "${distro}" == k3s ]]; then
+      # The single-node command delegates to the k3s reconciler so a new
+      # node address cannot leave stale hostNetwork metadata behind.
+      "${KIAC_BIN}" stop node worker-1 --name "${name}"
+      "${KIAC_BIN}" start node worker-1 --name "${name}"
+      assert_k3s_node_addresses
+      retry 30 1 edge_proxy_running "${sender}"
+      install_traffic_binary "${sender}"
+      test_upload "${sender}" "${ingress}" v4
+
+      # Reproduce a host reboot without resetting vmnet for unrelated
+      # clusters on the runner: halt every VM, then exercise the k3s-aware
+      # resume path against the resulting fresh addresses.
+      for ((i = 1; i <= workers; i++)); do
+        "${KIAC_BIN}" stop node "worker-${i}" --name "${name}"
+      done
+      "${KIAC_BIN}" stop node control-plane --name "${name}"
+      "${KIAC_BIN}" get clusters -o json | grep -F "\"name\": \"${name}\"" >/dev/null
+      "${KIAC_BIN}" resume cluster --name "${name}" --wait 8m
+      k wait --for=condition=Ready nodes --all --timeout=300s
+      assert_k3s_node_addresses
+      for node in ${CURRENT_NODES}; do
+        retry 30 1 edge_proxy_running "${node}"
+      done
+
+      # Every workload container and each VM's /tmp restarted. Restore only
+      # the test probes, then repeat the original cross-node data path.
+      start_traffic_server
+      sleep 5
+      install_traffic_binary "${sender}"
+      test_upload "${sender}" "${ingress}" v4
+      if [[ "${features}" == true ]]; then
+        test_gateway
+        test_observability
+      fi
+      "${KIAC_BIN}" verify cluster --name "${name}"
+    else
+      "${KIAC_BIN}" stop node worker-1 --name "${name}"
+      "${KIAC_BIN}" get clusters -o json | grep -F "${name}" >/dev/null
+      "${KIAC_BIN}" start node worker-1 --name "${name}"
+      k wait --for=condition=Ready "node/${sender}" --timeout=300s
+      retry 30 1 edge_proxy_running "${sender}"
+      # The node VM keeps its root disk but receives a fresh /tmp on boot.
+      # Reinstall only the test client; the product proxy in /usr/local/bin
+      # must have persisted and is checked immediately above.
+      install_traffic_binary "${sender}"
+      test_upload "${sender}" "${ingress}" v4
+    fi
   fi
 
   "${KIAC_BIN}" delete cluster --name "${name}"

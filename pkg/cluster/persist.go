@@ -39,6 +39,9 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 	if len(infos) == 0 {
 		return fmt.Errorf("no cluster named %q found", name)
 	}
+	if distroFromNodes(infos) == "k3s" {
+		return m.resumeK3s(name, infos, waitTimeout, start)
+	}
 	cp, workers, err := orderNodes(name, infos)
 	if err != nil {
 		return err

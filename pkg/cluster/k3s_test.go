@@ -146,6 +146,88 @@ func TestK3sToken(t *testing.T) {
 	}
 }
 
+func TestK3sResumeLauncher(t *testing.T) {
+	for _, want := range []string{
+		"Installed by kiac: refresh the k3s agent endpoint",
+		`[ "${1:-}" = "agent" ]`,
+		"K3S_URL=\"$(cat /etc/kiac/k3s-server-url)\"",
+		"exec /bin/k3s \"$@\"",
+	} {
+		if !strings.Contains(k3sResumeLauncher, want) {
+			t.Errorf("resume launcher missing %q:\n%s", want, k3sResumeLauncher)
+		}
+	}
+	if strings.Contains(k3sResumeLauncher, "K3S_TOKEN") {
+		t.Errorf("resume launcher must not read or rewrite the agent token:\n%s", k3sResumeLauncher)
+	}
+}
+
+func TestInstallK3sResumeHookScript(t *testing.T) {
+	for _, want := range []string{
+		"https://*:6443",
+		"install -d -m 0755 /usr/local/bin",
+		`target="$(readlink -f /usr/local/bin/k3s`,
+		"already exists and is not kiac-managed",
+		"chmod 0755",
+		"chmod 0600",
+		"mv \"$urltmp\" /etc/kiac/k3s-server-url",
+	} {
+		if !strings.Contains(installK3sResumeHookScript, want) {
+			t.Errorf("hook install script missing %q:\n%s", want, installK3sResumeHookScript)
+		}
+	}
+}
+
+func TestHealK3sEdgeProxyScript(t *testing.T) {
+	for _, want := range []string{
+		edgeProxyKubeconfigPath,
+		edgeProxySupervisorPID,
+		edgeProxyNodePath,
+		"server:[[:space:]]*",
+		"KIAC-EDGE-OUTPUT",
+	} {
+		if !strings.Contains(healK3sEdgeProxyScript, want) {
+			t.Errorf("edge-proxy heal script missing %q:\n%s", want, healK3sEdgeProxyScript)
+		}
+	}
+	for _, forbidden := range []string{edgeProxyTokenPath, "client-key-data", "token:"} {
+		if strings.Contains(healK3sEdgeProxyScript, forbidden) {
+			t.Errorf("edge-proxy heal script should not touch %q:\n%s", forbidden, healK3sEdgeProxyScript)
+		}
+	}
+}
+
+func TestNormalizeServerURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://192.168.64.2:6443":     "https://192.168.64.2:6443",
+		" https://192.168.64.2:6443/\n": "https://192.168.64.2:6443",
+		"":                              "",
+	} {
+		if got := normalizeServerURL(in); got != want {
+			t.Errorf("normalizeServerURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestK3sNodeAddressesCurrent(t *testing.T) {
+	state := k3sNodeStateList{Items: []k3sNodeState{{}}}
+	node := &state.Items[0]
+	node.Metadata.Name = "kiac-dev-worker-1"
+	node.Status.Addresses = []k3sNodeAddress{{Type: "InternalIP", Address: "192.168.64.3"}}
+	node.Status.Conditions = []k3sNodeCondition{{Type: "Ready", Status: "True"}}
+
+	if ok, _ := k3sNodeAddressesCurrent(state, map[string]string{"kiac-dev-worker-1": "192.168.64.4"}); ok {
+		t.Fatal("stale InternalIP reported current")
+	}
+	if ok, detail := k3sNodeAddressesCurrent(state, map[string]string{"kiac-dev-worker-1": "192.168.64.3"}); !ok {
+		t.Fatalf("current Ready node rejected: %s", detail)
+	}
+	node.Status.Conditions[0].Status = "False"
+	if ok, _ := k3sNodeAddressesCurrent(state, map[string]string{"kiac-dev-worker-1": "192.168.64.3"}); ok {
+		t.Fatal("NotReady node reported current")
+	}
+}
+
 func TestK3sNodesReady(t *testing.T) {
 	cases := []struct {
 		name string

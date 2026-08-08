@@ -72,6 +72,23 @@ func TestBuildStatusesEmpty(t *testing.T) {
 	}
 }
 
+func TestKubeconfigPathForNodes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		infos []runtime.Info
+		want  string
+	}{
+		{name: "kubeadm", infos: []runtime.Info{{Image: "docker.io/kindest/node:v1.36.1"}}, want: adminConf},
+		{name: "k3s", infos: []runtime.Info{{Image: "docker.io/rancher/k3s:v1.36.2-k3s1"}}, want: k3sKubeconfig},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := kubeconfigPathForNodes(tc.infos); got != tc.want {
+				t.Errorf("kubeconfigPathForNodes() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClusterNameFromNode(t *testing.T) {
 	cases := []struct {
 		in   string

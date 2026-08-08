@@ -89,6 +89,18 @@ func BuildStatuses(infos []runtime.Info) []ClusterStatus {
 	return out
 }
 
+// distroFromNodes identifies the lifecycle implementation from the node
+// image. The runtime may omit the tag after resolving a digest, but retains
+// the rancher/k3s repository name.
+func distroFromNodes(infos []runtime.Info) string {
+	for _, info := range infos {
+		if strings.Contains(strings.ToLower(info.Image), "rancher/k3s") {
+			return "k3s"
+		}
+	}
+	return "kubeadm"
+}
+
 // statusText renders running/total in the shape users scan for:
 // "3/3 running" is healthy, "0/3 stopped" means the VMs are gone
 // (typically after a reboot) and the cluster needs attention.

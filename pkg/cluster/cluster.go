@@ -684,16 +684,31 @@ func (m *Manager) Delete(name string) error {
 
 // Kubeconfig renders a standalone kubeconfig for one cluster.
 func (m *Manager) Kubeconfig(name string) (string, error) {
-	cp := ControlPlane(name)
-	raw, err := m.rt.Exec(cp, "cat", adminConf)
+	infos, err := m.rt.List(prefix(name))
 	if err != nil {
-		return "", fmt.Errorf("reading admin.conf from %s: %w", cp, err)
+		return "", err
+	}
+	if len(infos) == 0 {
+		return "", fmt.Errorf("no cluster named %q found", name)
+	}
+	cp := ControlPlane(name)
+	configPath := kubeconfigPathForNodes(infos)
+	raw, err := m.rt.Exec(cp, "cat", configPath)
+	if err != nil {
+		return "", fmt.Errorf("reading %s from %s: %w", configPath, cp, err)
 	}
 	ip, err := m.rt.IP(cp)
 	if err != nil {
 		return "", err
 	}
 	return standaloneKubeconfig(name, raw, ip)
+}
+
+func kubeconfigPathForNodes(infos []runtime.Info) string {
+	if distroFromNodes(infos) == "k3s" {
+		return k3sKubeconfig
+	}
+	return adminConf
 }
 
 // Clusters lists cluster names derived from running kiac containers.

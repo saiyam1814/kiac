@@ -369,14 +369,19 @@ func (m *Manager) verifyOptionalKubernetesAddons(report *VerificationReport, cp 
 		}
 	}
 
-	out, err = m.diagnosticKubectl(cp, report.Distro, timeout, "get", "gateway", "kiac", "-n", "kiac-gateway", "--ignore-not-found", "-o", "json")
+	out, err = m.diagnosticKubectl(cp, report.Distro, timeout, "get", "crd", "gateways.gateway.networking.k8s.io", "--ignore-not-found", "-o", "name")
 	if err != nil {
-		report.add(VerificationWarn, "gateway.api", "Gateway API", compactError(err), "kubectl get gateway -A")
+		report.add(VerificationWarn, "gateway.api", "Gateway API", compactError(err), "kubectl get crd gateways.gateway.networking.k8s.io")
 	} else if strings.TrimSpace(out) == "" {
 		report.add(VerificationSkip, "gateway.api", "Gateway API", "built-in Gateway is not installed", "")
 	} else {
+		out, err = m.diagnosticKubectl(cp, report.Distro, timeout, "get", "gateway", "kiac", "-n", "kiac-gateway", "--ignore-not-found", "-o", "json")
 		var gateway kubeGateway
-		if err := json.Unmarshal([]byte(out), &gateway); err != nil {
+		if err != nil {
+			report.add(VerificationFail, "gateway.api", "Gateway API", compactError(err), "kubectl get gateway -A")
+		} else if strings.TrimSpace(out) == "" {
+			report.add(VerificationFail, "gateway.api", "Gateway API", "Gateway API CRDs exist, but built-in Gateway kiac-gateway/kiac is missing", "kubectl get gateway -A")
+		} else if err := json.Unmarshal([]byte(out), &gateway); err != nil {
 			report.add(VerificationFail, "gateway.api", "Gateway API", "cannot parse kubectl output: "+err.Error(), "")
 		} else if len(gateway.Status.Addresses) == 0 || conditionFalse(gateway.Status.Conditions, "Programmed") {
 			report.add(VerificationFail, "gateway.api", "Gateway API", "Gateway kiac-gateway/kiac has no programmed address", "kubectl describe gateway -n kiac-gateway kiac")
@@ -481,15 +486,6 @@ func (m *Manager) diagnosticKubectl(cp, distro string, timeout time.Duration, ar
 		base = []string{"kubectl", "--kubeconfig", k3sKubeconfig}
 	}
 	return m.rt.ExecTimeout(cp, timeout, append(base, args...)...)
-}
-
-func distroFromNodes(infos []runtime.Info) string {
-	for _, info := range infos {
-		if strings.Contains(strings.ToLower(info.Image), "rancher/k3s") {
-			return "k3s"
-		}
-	}
-	return "kubeadm"
 }
 
 func nodeLogHint(distro string) string {
