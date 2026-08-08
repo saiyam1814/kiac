@@ -38,6 +38,9 @@ var doctorCmd = &cobra.Command{
 		case !cliOK:
 			failures++
 			ui.Check(false, "apple/container CLI", "not found - install from https://github.com/apple/container/releases")
+		case runtime.ValidateNodeRuntimeVersion(ver) != nil:
+			failures++
+			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.2.1 or newer; 1.2.0 cannot boot Kubernetes nodes")
 		case majorVersion(ver) < 1:
 			failures++
 			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.0.0+ for best results")

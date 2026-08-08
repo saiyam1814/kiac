@@ -103,6 +103,40 @@ func standaloneKubeconfig(name, adminConf, serverIP string) (string, error) {
 	return string(out), nil
 }
 
+// serviceAccountKubeconfig keeps the cluster CA and reachable API server
+// from admin.conf but replaces its administrator client certificate with a
+// narrowly scoped service-account token used only by the node edge proxy.
+func serviceAccountKubeconfig(name, adminConf, serverIP, token string) (string, error) {
+	entry := "kiac-" + name + "-edge-proxy"
+	cluster0, _, _, err := rewriteAdminConf(name+"-edge-proxy", adminConf, serverIP)
+	if err != nil {
+		return "", err
+	}
+	user := map[string]any{
+		"name": entry,
+		"user": map[string]any{"token": token},
+	}
+	context := map[string]any{
+		"name": entry,
+		"context": map[string]any{
+			"cluster": entry,
+			"user":    entry,
+		},
+	}
+	out, err := yaml.Marshal(map[string]any{
+		"apiVersion":      "v1",
+		"kind":            "Config",
+		"clusters":        []any{cluster0},
+		"users":           []any{user},
+		"contexts":        []any{context},
+		"current-context": entry,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // mergeKubeconfig rewrites the cluster's admin.conf to use kiac-<name>
 // entry names and the node's reachable IP, merges it into the user's
 // kubeconfig, and switches current-context. Returns the merged file path.

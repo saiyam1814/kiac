@@ -24,7 +24,7 @@ func TestObservabilityManifests(t *testing.T) {
 		{"node-exporter", obsNodeExporterManifest, []string{"quay.io/prometheus/node-exporter", "DaemonSet"}},
 		{"kube-state-metrics", obsKubeStateMetricsManifest, []string{"registry.k8s.io/kube-state-metrics/kube-state-metrics", "ClusterRoleBinding"}},
 		{"prometheus", obsPrometheusManifest, []string{"quay.io/prometheus/prometheus", "--storage.tsdb.retention.time=6h", "insecure_skip_verify: true"}},
-		{"grafana", obsGrafanaManifest, []string{"docker.io/grafana/grafana", "type: LoadBalancer", "GF_AUTH_ANONYMOUS_ENABLED"}},
+		{"grafana", obsGrafanaManifest, []string{"docker.io/grafana/grafana", "type: LoadBalancer", "ipFamilyPolicy: PreferDualStack", "GF_AUTH_ANONYMOUS_ENABLED"}},
 	}
 	if got := len(observabilityManifests()); got != len(cases) {
 		t.Fatalf("observabilityManifests() returned %d manifests, want %d", got, len(cases))

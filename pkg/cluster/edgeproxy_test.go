@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"bytes"
+	"encoding/hex"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -19,13 +21,59 @@ func TestEdgeProxyEmbeddedBinary(t *testing.T) {
 	}
 }
 
+func TestEdgeProxyTunnelToken(t *testing.T) {
+	token, err := newEdgeProxyTunnelToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := hex.DecodeString(token)
+	if err != nil {
+		t.Fatalf("token is not hex: %v", err)
+	}
+	if len(decoded) != 32 {
+		t.Fatalf("token contains %d random bytes, want 32", len(decoded))
+	}
+}
+
+func TestEdgeProxyUsesLeastPrivilegeRBAC(t *testing.T) {
+	for _, want := range []string{
+		"kind: ServiceAccount",
+		"resources: [services, nodes]",
+		"resources: [endpointslices]",
+		"verbs: [get, list]",
+		"kubernetes.io/service-account.name: kiac-edge-proxy",
+	} {
+		if !strings.Contains(edgeProxyRBAC, want) {
+			t.Errorf("edge proxy RBAC missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"verbs: [*]", "resources: [*]", "create", "update", "patch", "delete"} {
+		if strings.Contains(edgeProxyRBAC, forbidden) {
+			t.Errorf("edge proxy RBAC unexpectedly grants %q", forbidden)
+		}
+	}
+}
+
+func TestEdgeProxyKubectlCommand(t *testing.T) {
+	wantKubeadm := []string{"kubectl", "--kubeconfig", adminConf, "get", "nodes"}
+	if got := edgeProxyKubectl(adminConf, "get", "nodes"); !slices.Equal(got, wantKubeadm) {
+		t.Fatalf("kubeadm kubectl args = %q, want %q", got, wantKubeadm)
+	}
+	wantK3s := []string{"kubectl", "--kubeconfig", k3sKubeconfig, "get", "nodes"}
+	if got := edgeProxyKubectl(k3sKubeconfig, "get", "nodes"); !slices.Equal(got, wantK3s) {
+		t.Fatalf("k3s kubectl args = %q, want %q", got, wantK3s)
+	}
+}
+
 func TestEdgeProxySupervisorScript(t *testing.T) {
 	for _, want := range []string{
 		edgeProxyNodePath,
 		edgeProxyKubeconfigPath,
+		edgeProxyTokenPath,
 		edgeProxyLogPath,
 		edgeProxySupervisorPID,
 		"--kubeconfig",
+		"--token-file",
 		"while :;",
 	} {
 		if !strings.Contains(edgeProxySupervisorScript, want) {
@@ -43,9 +91,11 @@ func TestK3sBootRestartsEdgeProxy(t *testing.T) {
 	for _, want := range []string{
 		edgeProxyNodePath,
 		edgeProxyKubeconfigPath,
+		edgeProxyTokenPath,
 		edgeProxyLogPath,
 		edgeProxySupervisorPID,
 		"--kubeconfig",
+		"--token-file",
 		"exec k3s 'server'",
 	} {
 		if !strings.Contains(joined, want) {

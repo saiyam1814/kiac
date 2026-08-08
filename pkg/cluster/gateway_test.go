@@ -63,6 +63,7 @@ func TestGatewayManifests(t *testing.T) {
 				"namespace: kiac-gateway",
 				"--providers.kubernetesgateway=true",
 				"type: LoadBalancer",
+				"ipFamilyPolicy: PreferDualStack",
 			},
 		},
 		{

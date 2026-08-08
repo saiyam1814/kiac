@@ -70,3 +70,25 @@ func TestMergeAndRemoveKubeconfig(t *testing.T) {
 		t.Errorf("kiac-dev entries left after removal:\n%s", raw)
 	}
 }
+
+func TestServiceAccountKubeconfigDropsAdminCredentials(t *testing.T) {
+	got, err := serviceAccountKubeconfig("dev", sampleAdminConf, "192.168.64.2", "restricted-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"kiac-dev-edge-proxy",
+		"https://192.168.64.2:6443",
+		"certificate-authority-data: Zm9v",
+		"token: restricted-token",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("restricted kubeconfig missing %q:\n%s", want, got)
+		}
+	}
+	for _, forbidden := range []string{"client-certificate-data", "client-key-data", "kubernetes-admin"} {
+		if strings.Contains(got, forbidden) {
+			t.Errorf("restricted kubeconfig contains admin credential %q:\n%s", forbidden, got)
+		}
+	}
+}

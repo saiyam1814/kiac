@@ -91,7 +91,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 
 - An Apple silicon Mac
 - macOS 26+ for multi-node clusters (single-node works on macOS 15, with limitations)
-- [apple/container](https://github.com/apple/container/releases) 1.0.0+
+- [apple/container](https://github.com/apple/container/releases) 1.0.0+ (1.2.0 is incompatible; use 1.2.1 or newer)
 - `kubectl`
 
 ### Install

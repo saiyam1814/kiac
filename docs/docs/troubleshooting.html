@@ -77,6 +77,7 @@ dev   0/3 stopped</span></code></pre>
   <p>kiac tears down the half-created node VMs automatically (you will see <code>cleaned up partial cluster "dev"</code>), so just fix the cause and re-run. Common causes:</p>
   <ul>
     <li><b>macOS older than 26</b>: multi-node networking needs macOS 26+. Try a single-node cluster, or upgrade.</li>
+    <li><b>apple/container 1.2.0</b>: this release makes paths required by Kubernetes node images read-only and provides no opt-out. Upgrade to 1.2.1 or newer; kiac detects 1.2.0 before creating a VM.</li>
     <li><b>Timeout on a loaded machine</b>: raise it with <code>--wait 10m</code>.</li>
     <li><b>Cluster name too long</b>: a node's container name is also its Linux hostname, capped at 63 characters. kiac rejects names that would overflow; use a shorter name.</li>
   </ul>

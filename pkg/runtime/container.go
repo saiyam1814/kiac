@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,7 +19,8 @@ import (
 type Client struct {
 	Bin string
 
-	capAddProbe *bool
+	runHelpOnce sync.Once
+	runHelp     string
 }
 
 func New() *Client { return &Client{Bin: "container"} }
@@ -104,6 +106,14 @@ func (c *Client) RunDetached(o RunOpts) error {
 	if c.supportsCapAdd() {
 		args = append(args, "--cap-add", "ALL")
 	}
+	// container 1.2.0 began applying the OCI default masked/read-only
+	// paths, which make /proc/sys and other paths required by Kubernetes
+	// node images unusable. Version 1.2.1 added these opt-out flags. Probe
+	// the CLI instead of version-gating so older releases remain usable
+	// and future-compatible implementations get the correct node setup.
+	if c.supportsSecurityPathOverrides() {
+		args = append(args, "--masked-path", "NONE", "--read-only-path", "NONE")
+	}
 	if o.CPUs != "" {
 		args = append(args, "--cpus", o.CPUs)
 	}
@@ -128,12 +138,32 @@ func (c *Client) RunDetached(o RunOpts) error {
 // supportsCapAdd probes once whether this container CLI knows --cap-add
 // (added in 1.0.0); 0.x grants a wider default set and lacks the flag.
 func (c *Client) supportsCapAdd() bool {
-	if c.capAddProbe == nil {
-		out, _ := c.run("run", "--help")
-		v := strings.Contains(out, "--cap-add")
-		c.capAddProbe = &v
+	return strings.Contains(c.runHelpOutput(), "--cap-add")
+}
+
+func (c *Client) supportsSecurityPathOverrides() bool {
+	help := c.runHelpOutput()
+	return strings.Contains(help, "--masked-path") && strings.Contains(help, "--read-only-path")
+}
+
+// runHelpOutput probes once even when several nodes are launched in
+// parallel. Besides avoiding repeated subprocesses, sync.Once makes the
+// feature cache race-free during multi-node cluster creation.
+func (c *Client) runHelpOutput() string {
+	c.runHelpOnce.Do(func() {
+		c.runHelp, _ = c.run("run", "--help")
+	})
+	return c.runHelp
+}
+
+// ValidateNodeRuntimeVersion rejects releases that cannot boot Kubernetes
+// node images and offer no CLI escape hatch. container 1.2.1 introduced
+// --masked-path/--read-only-path, so only 1.2.0 is intrinsically broken.
+func ValidateNodeRuntimeVersion(version string) error {
+	if strings.TrimPrefix(strings.TrimSpace(version), "v") == "1.2.0" {
+		return fmt.Errorf("apple/container 1.2.0 cannot boot Kubernetes node images because required OCI paths are read-only; upgrade to apple/container 1.2.1 or newer")
 	}
-	return *c.capAddProbe
+	return nil
 }
 
 // Exec runs a command inside a node and returns combined output.

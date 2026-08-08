@@ -1,6 +1,12 @@
 package main
 
-import "testing"
+import (
+	"io"
+	"net"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestRouteForPrefersLocalEndpoint(t *testing.T) {
 	state, svc, port := routeTestState()
@@ -53,6 +59,138 @@ func TestServicePortMatchesNamedTargetPort(t *testing.T) {
 	) {
 		t.Fatal("named Service targetPort should match EndpointSlice port name")
 	}
+}
+
+func TestTunnelHeaderRequiresTokenAndValidTarget(t *testing.T) {
+	token := strings.Repeat("a", 64)
+	target := "10.0.0.10:8080"
+	valid := tunnelProtocol + " " + token + " " + target + "\n"
+
+	if got, ok := authenticateTunnelHeader(valid, token); !ok || got != target {
+		t.Fatalf("valid header = %q, %v", got, ok)
+	}
+	for _, header := range []string{
+		"KIACEDGE/1 " + target + "\n",
+		tunnelProtocol + " wrong-token " + target + "\n",
+		tunnelProtocol + " " + token + " localhost:8080\n",
+		tunnelProtocol + " " + token + " " + target + " extra\n",
+	} {
+		if _, ok := authenticateTunnelHeader(header, token); ok {
+			t.Errorf("accepted invalid tunnel header %q", header)
+		}
+	}
+}
+
+func TestTunnelAllowlistContainsOnlyLocalReadyEndpoints(t *testing.T) {
+	state, svc, port := routeTestState()
+	routes := routeTable{allowedTargets: map[string]struct{}{}}
+	allowLocalTargets(routes, state.matchingEndpoints(svc, port, false), "node-a")
+
+	app := &proxyApp{routes: routes}
+	if !app.tunnelTargetAllowed("10.0.0.10:8080") {
+		t.Fatal("local endpoint should be an allowed tunnel target")
+	}
+	if app.tunnelTargetAllowed("10.0.1.10:8080") {
+		t.Fatal("endpoint on another node must not be an allowed tunnel target")
+	}
+	if app.tunnelTargetAllowed("169.254.169.254:80") {
+		t.Fatal("arbitrary address must not be an allowed tunnel target")
+	}
+}
+
+func TestProxyTCPPreservesResponseAfterClientHalfClose(t *testing.T) {
+	testClient, proxyClient := tcpPair(t)
+	proxyBackend, testBackend := tcpPair(t)
+	for _, conn := range []*net.TCPConn{testClient, proxyClient, proxyBackend, testBackend} {
+		if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer proxyClient.Close()
+		defer proxyBackend.Close()
+		proxyTCP(proxyClient, proxyBackend, proxyClient)
+	}()
+
+	backendErr := make(chan error, 1)
+	go func() {
+		request, err := io.ReadAll(testBackend)
+		if err != nil {
+			backendErr <- err
+			return
+		}
+		if string(request) != "request-body" {
+			backendErr <- &unexpectedPayload{got: string(request), want: "request-body"}
+			return
+		}
+		// The proxy must remain alive after the request half closes so a
+		// delayed response can still travel in the reverse direction.
+		time.Sleep(50 * time.Millisecond)
+		if _, err := testBackend.Write([]byte("response-body")); err != nil {
+			backendErr <- err
+			return
+		}
+		if err := testBackend.CloseWrite(); err != nil {
+			backendErr <- err
+			return
+		}
+		backendErr <- nil
+	}()
+
+	if _, err := testClient.Write([]byte("request-body")); err != nil {
+		t.Fatal(err)
+	}
+	if err := testClient.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	response, err := io.ReadAll(testClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(response) != "response-body" {
+		t.Fatalf("response = %q, want response-body", response)
+	}
+	if err := <-backendErr; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("proxy did not finish after both directions closed")
+	}
+}
+
+type unexpectedPayload struct {
+	got  string
+	want string
+}
+
+func (e *unexpectedPayload) Error() string {
+	return "payload = " + e.got + ", want " + e.want
+}
+
+func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	dialed, err := net.Dial("tcp4", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := ln.Accept()
+	if err != nil {
+		dialed.Close()
+		t.Fatal(err)
+	}
+	return dialed.(*net.TCPConn), accepted.(*net.TCPConn)
 }
 
 func routeTestState() (clusterState, serviceItem, servicePort) {

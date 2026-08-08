@@ -91,9 +91,9 @@ func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
 		"if ! kill -0 \"$(cat " + kiacLBK3sSupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
 		"nohup sh -c 'while :; do KUBECONFIG=" + k3sKubeconfig + " " + kiacLBScriptPath + " >>" + kiacLBK3sLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + kiacLBK3sSupervisorPID + "; " +
 		"fi; fi; " +
-		"if [ -x " + edgeProxyNodePath + " ] && [ -f " + edgeProxyKubeconfigPath + " ]; then " +
+		"if [ -x " + edgeProxyNodePath + " ] && [ -f " + edgeProxyKubeconfigPath + " ] && [ -f " + edgeProxyTokenPath + " ]; then " +
 		"if ! kill -0 \"$(cat " + edgeProxySupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
-		"nohup sh -c 'while :; do " + edgeProxyNodePath + " --kubeconfig " + edgeProxyKubeconfigPath + " >>" + edgeProxyLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + edgeProxySupervisorPID + "; " +
+		"nohup sh -c 'while :; do " + edgeProxyNodePath + " --kubeconfig " + edgeProxyKubeconfigPath + " --token-file " + edgeProxyTokenPath + " >>" + edgeProxyLogPath + " 2>&1; sleep 1; done' >/dev/null 2>&1 & echo $! > " + edgeProxySupervisorPID + "; " +
 		"fi; fi; "
 	// Dual-stack: k3s needs --node-ip with both families, but the VM only
 	// learns its addresses after it boots, so compute them here (mirroring
