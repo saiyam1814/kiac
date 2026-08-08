@@ -54,7 +54,7 @@
 
   <h2 id="doctor">1. Check your setup</h2>
   <pre><code>kiac doctor</code></pre>
-  <p>Doctor verifies five things: macOS 26+ (multi-node networking needs it; single-node may still work on older versions), the <code>apple/container</code> CLI at 1.0.0 or newer, the container system service, <code>kubectl</code> on your PATH, and an arm64 CPU.</p>
+  <p>Doctor verifies five things: macOS 26+ (multi-node networking needs it; single-node may still work on older versions), the <code>apple/container</code> CLI at 1.0.0 or newer (excluding incompatible 1.2.0; use 1.2.1+), the container system service, <code>kubectl</code> on your PATH, and an arm64 CPU.</p>
   <p>If the container system service is stopped:</p>
   <pre><code>kiac doctor --fix    <span class="c"># runs: container system start</span></code></pre>
 
