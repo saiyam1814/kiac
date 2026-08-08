@@ -3,16 +3,21 @@ package cluster
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/saiyam1814/kiac/pkg/ui"
 )
 
 const (
 	edgeProxyNodePath       = "/usr/local/bin/kiac-edge-proxy"
-	edgeProxyKubeconfigPath = "/etc/kiac/admin.conf"
+	edgeProxyKubeconfigPath = "/etc/kiac/kubeconfig"
+	edgeProxyTokenPath      = "/etc/kiac/tunnel.token"
 	edgeProxyLogPath        = "/var/log/kiac-edge-proxy.log"
 	edgeProxySupervisorPID  = "/var/run/kiac-edge-proxy-supervisor.pid"
 )
@@ -32,7 +37,11 @@ func (m *Manager) installEdgeProxy(cp string, cfg Config, nodes []string) error 
 		if err != nil {
 			return err
 		}
-		if err := m.installEdgeProxyFiles(nodes, kubeconfig); err != nil {
+		tunnelToken, err := newEdgeProxyTunnelToken()
+		if err != nil {
+			return err
+		}
+		if err := m.installEdgeProxyFiles(nodes, kubeconfig, tunnelToken); err != nil {
 			return err
 		}
 		if err := m.installEdgeProxySystemd(nodes); err != nil {
@@ -48,7 +57,11 @@ func (m *Manager) installEdgeProxyK3s(cp string, cfg Config, nodes []string) err
 		if err != nil {
 			return err
 		}
-		if err := m.installEdgeProxyFiles(nodes, kubeconfig); err != nil {
+		tunnelToken, err := newEdgeProxyTunnelToken()
+		if err != nil {
+			return err
+		}
+		if err := m.installEdgeProxyFiles(nodes, kubeconfig, tunnelToken); err != nil {
 			return err
 		}
 		if err := m.startEdgeProxySupervised(nodes); err != nil {
@@ -59,6 +72,14 @@ func (m *Manager) installEdgeProxyK3s(cp string, cfg Config, nodes []string) err
 }
 
 func (m *Manager) edgeProxyKubeconfig(cp, name, path string) (string, error) {
+	args := edgeProxyKubectl(path, "apply", "-f", "-")
+	if err := m.rt.ExecStdin(cp, strings.NewReader(edgeProxyRBAC), args...); err != nil {
+		return "", fmt.Errorf("installing edge proxy RBAC: %w", err)
+	}
+	serviceAccountToken, err := m.waitEdgeProxyServiceAccountToken(cp, path)
+	if err != nil {
+		return "", err
+	}
 	raw, err := m.rt.Exec(cp, "cat", path)
 	if err != nil {
 		return "", err
@@ -67,7 +88,45 @@ func (m *Manager) edgeProxyKubeconfig(cp, name, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return standaloneKubeconfig(name, raw, serverIP)
+	return serviceAccountKubeconfig(name, raw, serverIP, serviceAccountToken)
+}
+
+func edgeProxyKubectl(kubeconfig string, args ...string) []string {
+	base := []string{"kubectl", "--kubeconfig", kubeconfig}
+	if kubeconfig == k3sKubeconfig {
+		base = []string{"k3s", "kubectl", "--kubeconfig", kubeconfig}
+	}
+	return append(base, args...)
+}
+
+func (m *Manager) waitEdgeProxyServiceAccountToken(cp, kubeconfig string) (string, error) {
+	args := edgeProxyKubectl(kubeconfig, "get", "secret", "kiac-edge-proxy-token", "-n", "kube-system", "-o", "jsonpath={.data.token}")
+	deadline := time.Now().Add(30 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		encoded, err := m.rt.Exec(cp, args...)
+		if err == nil && strings.TrimSpace(encoded) != "" {
+			token, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+			if decodeErr != nil {
+				return "", fmt.Errorf("decoding edge proxy service-account token: %w", decodeErr)
+			}
+			return string(token), nil
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return "", fmt.Errorf("waiting for edge proxy service-account token: %w", lastErr)
+	}
+	return "", fmt.Errorf("waiting for edge proxy service-account token: token was not populated within 30s")
+}
+
+func newEdgeProxyTunnelToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generating edge proxy tunnel token: %w", err)
+	}
+	return hex.EncodeToString(raw), nil
 }
 
 func edgeProxyBinary() ([]byte, error) {
@@ -79,7 +138,7 @@ func edgeProxyBinary() ([]byte, error) {
 	return io.ReadAll(gr)
 }
 
-func (m *Manager) installEdgeProxyFiles(nodes []string, kubeconfig string) error {
+func (m *Manager) installEdgeProxyFiles(nodes []string, kubeconfig, tunnelToken string) error {
 	bin, err := edgeProxyBinary()
 	if err != nil {
 		return fmt.Errorf("reading embedded edge proxy: %w", err)
@@ -95,10 +154,16 @@ mv "$tmp" /usr/local/bin/kiac-edge-proxy
 `); err != nil {
 			return err
 		}
-		return m.rt.ExecStdin(node, strings.NewReader(kubeconfig), "sh", "-euc", `
-mkdir -p /etc/kiac
-cat > /etc/kiac/admin.conf
-chmod 0600 /etc/kiac/admin.conf
+		if err := m.rt.ExecStdin(node, strings.NewReader(kubeconfig), "sh", "-euc", `
+install -d -m 0700 /etc/kiac
+cat > /etc/kiac/kubeconfig
+chmod 0600 /etc/kiac/kubeconfig
+`); err != nil {
+			return err
+		}
+		return m.rt.ExecStdin(node, strings.NewReader(tunnelToken), "sh", "-euc", `
+cat > /etc/kiac/tunnel.token
+chmod 0600 /etc/kiac/tunnel.token
 `)
 	})
 }
@@ -111,7 +176,7 @@ Wants=network-online.target
 
 [Service]
 Environment=KUBECONFIG=` + edgeProxyKubeconfigPath + `
-ExecStart=` + edgeProxyNodePath + ` --kubeconfig ` + edgeProxyKubeconfigPath + `
+ExecStart=` + edgeProxyNodePath + ` --kubeconfig ` + edgeProxyKubeconfigPath + ` --token-file ` + edgeProxyTokenPath + `
 Restart=always
 RestartSec=1s
 
@@ -173,6 +238,47 @@ if [ -r ` + edgeProxySupervisorPID + ` ]; then
     exit 0
   fi
 fi
-nohup sh -c 'while :; do ` + edgeProxyNodePath + ` --kubeconfig ` + edgeProxyKubeconfigPath + ` >>` + edgeProxyLogPath + ` 2>&1; sleep 1; done' >/dev/null 2>&1 &
+nohup sh -c 'while :; do ` + edgeProxyNodePath + ` --kubeconfig ` + edgeProxyKubeconfigPath + ` --token-file ` + edgeProxyTokenPath + ` >>` + edgeProxyLogPath + ` 2>&1; sleep 1; done' >/dev/null 2>&1 &
 echo $! > ` + edgeProxySupervisorPID + `
+`
+
+const edgeProxyRBAC = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kiac-edge-proxy
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiac-edge-proxy
+rules:
+  - apiGroups: [""]
+    resources: [services, nodes]
+    verbs: [get, list]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kiac-edge-proxy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kiac-edge-proxy
+subjects:
+  - kind: ServiceAccount
+    name: kiac-edge-proxy
+    namespace: kube-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kiac-edge-proxy-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: kiac-edge-proxy
+type: kubernetes.io/service-account-token
 `

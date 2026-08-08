@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ type proxyApp struct {
 	nodePortRange string
 	backendMSS    int
 	kubeconfig    string
+	tokenFile     string
 	iptables      string
 	ip6tables     string // "" when the node kernel has no IPv6 netfilter
 	kubectl       []string
@@ -33,11 +35,13 @@ type proxyApp struct {
 	routeMu       sync.RWMutex
 	routes        routeTable
 	nodeName      string
+	tunnelToken   string
 }
 
 type routeTable struct {
-	loadBalancers map[string]backendRoute // key: "host:port" (v6 host bracketed)
-	nodePorts     map[nodePortKey]backendRoute
+	loadBalancers  map[string]backendRoute // key: "host:port" (v6 host bracketed)
+	nodePorts      map[nodePortKey]backendRoute
+	allowedTargets map[string]struct{}
 }
 
 // nodePortKey routes a NodePort per family: a dual-stack Service is
@@ -63,6 +67,7 @@ func main() {
 	flag.StringVar(&app.nodePortRange, "nodeport-range", "30000:32767", "NodePort range to redirect")
 	flag.IntVar(&app.backendMSS, "backend-mss", 1200, "TCP_MAXSEG value for backend connections; 0 disables MSS clamping")
 	flag.StringVar(&app.kubeconfig, "kubeconfig", "", "kubeconfig path for polling LoadBalancer Services")
+	flag.StringVar(&app.tokenFile, "token-file", "", "root-readable file containing the inter-node tunnel token")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -74,6 +79,12 @@ func main() {
 }
 
 func (a *proxyApp) run(ctx context.Context) error {
+	token, err := readTunnelToken(a.tokenFile)
+	if err != nil {
+		return err
+	}
+	a.tunnelToken = token
+
 	relinkLegacyIptables()
 
 	ipt, err := lookPath("iptables-legacy", "iptables")
@@ -230,7 +241,7 @@ func (a *proxyApp) handleConn(client *net.TCPConn) {
 	defer backend.Close()
 
 	if route.tunnelTarget != "" {
-		if _, err := fmt.Fprintf(backend, "KIACEDGE/1 %s\n", route.tunnelTarget); err != nil {
+		if _, err := fmt.Fprintf(backend, "%s %s %s\n", tunnelProtocol, a.tunnelToken, route.tunnelTarget); err != nil {
 			log.Printf("tunnel header to %s for %s: %v", route.dial, route.tunnelTarget, err)
 			return
 		}
@@ -251,16 +262,20 @@ func (a *proxyApp) handleTunnel(client *net.TCPConn) {
 		log.Printf("tunnel deadline: %v", err)
 		return
 	}
-	br := bufio.NewReader(client)
-	line, err := br.ReadString('\n')
+	br := bufio.NewReaderSize(client, 512)
+	line, err := br.ReadSlice('\n')
 	_ = client.SetReadDeadline(time.Time{})
 	if err != nil {
 		log.Printf("tunnel header: %v", err)
 		return
 	}
-	target, ok := strings.CutPrefix(strings.TrimSpace(line), "KIACEDGE/1 ")
-	if !ok || !validBackendTarget(target) {
-		log.Printf("invalid tunnel header %q", strings.TrimSpace(line))
+	target, ok := authenticateTunnelHeader(string(line), a.tunnelToken)
+	if !ok {
+		log.Printf("rejected unauthenticated tunnel request")
+		return
+	}
+	if !a.tunnelTargetAllowed(target) {
+		log.Printf("rejected tunnel target not local to a ready Service endpoint")
 		return
 	}
 	backendConn, err := a.dialBackend(target)
@@ -302,6 +317,33 @@ func validBackendTarget(target string) bool {
 	return err == nil && p > 0 && p <= 65535
 }
 
+const tunnelProtocol = "KIACEDGE/2"
+
+func readTunnelToken(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("--token-file is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading tunnel token: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if len(token) < 32 || strings.ContainsAny(token, " \t\r\n") {
+		return "", fmt.Errorf("tunnel token must contain at least 32 non-whitespace characters")
+	}
+	return token, nil
+}
+
+func authenticateTunnelHeader(line, token string) (string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) != 3 || fields[0] != tunnelProtocol ||
+		subtle.ConstantTimeCompare([]byte(fields[1]), []byte(token)) != 1 ||
+		!validBackendTarget(fields[2]) {
+		return "", false
+	}
+	return fields[2], true
+}
+
 func (a *proxyApp) backendRoute(original string) backendRoute {
 	a.routeMu.RLock()
 	defer a.routeMu.RUnlock()
@@ -325,6 +367,13 @@ func (a *proxyApp) setRoutes(routes routeTable) {
 	a.routes = routes
 }
 
+func (a *proxyApp) tunnelTargetAllowed(target string) bool {
+	a.routeMu.RLock()
+	defer a.routeMu.RUnlock()
+	_, ok := a.routes.allowedTargets[target]
+	return ok
+}
+
 func proxyTCP(client, backend *net.TCPConn, clientReader io.Reader) {
 	errc := make(chan error, 2)
 	go copyTCP(backend, clientReader, func() {
@@ -335,6 +384,15 @@ func proxyTCP(client, backend *net.TCPConn, clientReader io.Reader) {
 		_ = client.CloseWrite()
 		_ = backend.CloseRead()
 	}, errc)
+	// A clean EOF is a TCP half-close: keep the opposite direction alive
+	// so request bodies can be followed by delayed responses. On a real
+	// copy error, force both goroutines out rather than waiting forever on
+	// a peer that may never close its remaining half.
+	if err := <-errc; err != nil {
+		now := time.Now()
+		_ = client.SetDeadline(now)
+		_ = backend.SetDeadline(now)
+	}
 	<-errc
 }
 
@@ -472,8 +530,9 @@ func (a *proxyApp) syncRules() error {
 		}
 	}
 	routes := routeTable{
-		loadBalancers: map[string]backendRoute{},
-		nodePorts:     map[nodePortKey]backendRoute{},
+		loadBalancers:  map[string]backendRoute{},
+		nodePorts:      map[nodePortKey]backendRoute{},
+		allowedTargets: map[string]struct{}{},
 	}
 	if snapshot != "" {
 		if err := a.addServiceRules(snapshot, routes); err != nil {
@@ -626,6 +685,12 @@ func (a *proxyApp) addServiceRules(raw string, routes routeTable) error {
 	}
 	for _, svc := range state.services {
 		for _, port := range svc.Spec.Ports {
+			for _, v6 := range []bool{false, true} {
+				if v6 && a.ip6tables == "" {
+					continue
+				}
+				allowLocalTargets(routes, state.matchingEndpoints(svc, port, v6), a.nodeName)
+			}
 			if port.NodePort > 0 {
 				// Route each family independently: a dual-stack Service is
 				// reached over both, and the proxy must pick a same-family
@@ -671,6 +736,14 @@ func (a *proxyApp) addServiceRules(raw string, routes routeTable) error {
 		}
 	}
 	return nil
+}
+
+func allowLocalTargets(routes routeTable, endpoints []endpointTarget, nodeName string) {
+	for _, ep := range endpoints {
+		if ep.nodeName == nodeName {
+			routes.allowedTargets[ep.address] = struct{}{}
+		}
+	}
 }
 
 func parseClusterState(raw string) (clusterState, error) {
