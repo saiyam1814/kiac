@@ -584,6 +584,13 @@ func (m *Manager) preflight() error {
 	if !m.rt.Available() {
 		return fmt.Errorf("apple/container CLI not found on PATH; install it from https://github.com/apple/container/releases")
 	}
+	version, err := m.rt.Version()
+	if err != nil {
+		return fmt.Errorf("checking apple/container version: %w", err)
+	}
+	if err := runtime.ValidateNodeRuntimeVersion(version); err != nil {
+		return err
+	}
 	if !m.rt.SystemRunning() {
 		if err := m.rt.SystemStart(); err != nil {
 			return fmt.Errorf("container system service is not running and could not be started: %w", err)
