@@ -14,7 +14,7 @@ Time: a few minutes. Everything runs on your Mac.
 Two host tools on top of apple/container:
 
 ```sh
-brew install saiyam1814/tap/kiac
+brew install --cask saiyam1814/tap/kiac
 brew install cilium-cli
 ```
 

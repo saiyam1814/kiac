@@ -7,7 +7,7 @@ the exact commands to run it.
 Prerequisite for all of them: a kiac cluster.
 
 ```sh
-brew install saiyam1814/tap/kiac
+brew install --cask saiyam1814/tap/kiac
 kiac create cluster --workers 2
 ```
 
@@ -36,6 +36,7 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [gateway-api-lab.md](gateway-api-lab.md) | Step-by-step Gateway API lab: inspect GatewayClass and Gateway, attach HTTPRoutes, test hostname/path matching, and troubleshoot route status. |
 | [chaos-drill.md](chaos-drill.md) | Step-by-step node-failure drill: spread an app across workers, `kiac stop node`, watch eviction and reschedule, `kiac start node`, watch the rejoin. |
 | [resume-drill.md](resume-drill.md) | Reboot-survival drill: stop the container system, see `0/3 stopped` in `kiac get clusters`, bring it all back with `kiac resume`, curl the app again. |
+| [k8gb-lab.md](k8gb-lab.md) | Real DNS-based failover across two kiac clusters: lightweight edge DNS, delegated regional CoreDNS, HTTP traffic validation, failover, and failback. |
 | [cluster.yaml](cluster.yaml) | Minimal `--config` file for `kiac create cluster`. |
 | [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, all addons on including observability and gateway. |
 

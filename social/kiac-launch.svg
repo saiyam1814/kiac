@@ -48,7 +48,7 @@
 
   <!-- install pill -->
   <rect x="72" y="510" width="448" height="58" rx="12" fill="#0D1426" stroke="#2A3554" stroke-width="1.5"/>
-  <text x="94" y="547" font-family="Menlo, Monaco, Courier New, monospace" font-size="19" fill="#32D74B">brew install saiyam1814/tap/kiac</text>
+  <text x="94" y="547" font-family="Menlo, Monaco, Courier New, monospace" font-size="16" fill="#32D74B">brew install --cask saiyam1814/tap/kiac</text>
 
   <text x="72" y="618" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="19" fill="#6B7287">Open source · MIT · Apple silicon</text>
 
@@ -71,7 +71,7 @@
     <text x="596" y="242" fill="#9BA3B5"><tspan fill="#32D74B">✓</tspan> Initializing control plane <tspan fill="#566080">(32.1s)</tspan></text>
     <text x="596" y="272" fill="#9BA3B5"><tspan fill="#32D74B">✓</tspan> Joining 2 worker(s) <tspan fill="#566080">(18.4s)</tspan></text>
     <text x="596" y="302" fill="#9BA3B5"><tspan fill="#32D74B">✓</tspan> CNI · storage · metrics-server</text>
-    <text x="596" y="332" fill="#9BA3B5"><tspan fill="#32D74B">✓</tspan> LoadBalancer (MetalLB) <tspan fill="#566080">(1.1s)</tspan></text>
+    <text x="596" y="332" fill="#9BA3B5"><tspan fill="#32D74B">✓</tspan> LoadBalancer (kiac-lb) <tspan fill="#566080">(1.1s)</tspan></text>
 
     <text x="596" y="376" fill="#FFFFFF">Cluster <tspan fill="#FEBC2E">"dev"</tspan> is ready in <tspan fill="#32D74B" font-weight="700">81s</tspan>.</text>
 
