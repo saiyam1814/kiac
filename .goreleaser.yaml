@@ -22,7 +22,7 @@ archives:
 checksum:
   name_template: checksums.txt
 
-brews:
+homebrew_casks:
   - repository:
       owner: saiyam1814
       name: homebrew-tap
@@ -30,7 +30,13 @@ brews:
     description: "Kubernetes in Apple Containers - every node is its own lightweight VM"
     license: MIT
     dependencies:
-      - name: kubernetes-cli
+      - formula: kubernetes-cli
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kiac"]
+          end
     caveats: |
       kiac needs apple/container 1.0+ (skip 1.2.0; use 1.2.1 or newer):
         https://github.com/apple/container/releases
