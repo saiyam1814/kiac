@@ -1,0 +1,76 @@
+name: Runtime smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "pkg/**"
+      - "test/e2e/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - ".github/workflows/runtime-smoke.yml"
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Runtime test profile
+        required: true
+        default: quick
+        type: choice
+        options:
+          - quick
+          - kubeadm
+          - k3s
+          - dual
+          - full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-smoke
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    if: vars.KIAC_RUNTIME_CI_ENABLED == 'true'
+    runs-on: [self-hosted, macOS, ARM64, kiac-runtime]
+    timeout-minutes: 120
+    env:
+      KIAC_E2E_KUBECONFIG: /tmp/kiac-e2e-${{ github.run_id }}-${{ github.run_attempt }}.kubeconfig
+      KIAC_E2E_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      KIAC_E2E_STATE_FILE: /tmp/kiac-e2e-${{ github.run_id }}-${{ github.run_attempt }}.clusters
+    steps:
+      - name: Check out trusted source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.25.12"
+          cache: true
+
+      - name: Select profile
+        id: profile
+        shell: bash
+        env:
+          DISPATCH_PROFILE: ${{ inputs.profile }}
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            schedule) profile=full ;;
+            workflow_dispatch) profile="${DISPATCH_PROFILE}" ;;
+            *) profile=quick ;;
+          esac
+          echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
+
+      - name: Exercise real Apple-container clusters
+        run: ./test/e2e/run.sh "${{ steps.profile.outputs.profile }}"
+
+      - name: Remove test clusters
+        if: always()
+        run: ./test/e2e/cleanup.sh

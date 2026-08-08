@@ -2,6 +2,8 @@ module github.com/saiyam1814/kiac
 
 go 1.25
 
+toolchain go1.25.12
+
 require (
 	github.com/spf13/cobra v1.10.1
 	gopkg.in/yaml.v3 v3.0.1

@@ -65,6 +65,7 @@ cd kiac
 make build          <span class="c"># builds bin/kiac with the version stamped in</span>
 make test           <span class="c"># go test ./...</span>
 make lint           <span class="c"># go vet ./...</span>
+make ci             <span class="c"># exact formatting, generation, race, vet, and build gate</span>
 ./bin/kiac doctor</code></pre>
   <p>You need Go, plus the same runtime requirements as any user (Apple silicon, apple/container 1.0+). Unit tests run anywhere; actually creating clusters needs the real runtime.</p>
 
@@ -77,6 +78,7 @@ make lint           <span class="c"># go vet ./...</span>
     <tr><td><code>pkg/runtime/</code></td><td>wrapper around the apple/container CLI</td></tr>
     <tr><td><code>pkg/webui/</code></td><td>the local dashboard: Go handlers + one embedded HTML file</td></tr>
     <tr><td><code>kernel/</code></td><td>the full node kernel: kconfig fragment; built by the kernel-build CI workflow</td></tr>
+    <tr><td><code>test/e2e/</code></td><td>trusted Apple silicon runtime tests for multi-node traffic, addons, security boundaries, and restart recovery</td></tr>
     <tr><td><code>docs/</code></td><td>this website (GitHub Pages serves the <code>docs/</code> directory)</td></tr>
     <tr><td><code>examples/</code></td><td>example configs like <code>cluster.yaml</code></td></tr>
   </table>
@@ -84,6 +86,7 @@ make lint           <span class="c"># go vet ./...</span>
   <h2 id="expectations">What a good PR looks like</h2>
   <ul>
     <li>Unit tests for new behavior (<code>make test</code> passes; CI runs it too).</li>
+    <li>Run <code>make ci</code> before pushing. Runtime-sensitive changes should also run <code>./test/e2e/run.sh kubeadm</code> or <code>k3s</code> on Apple silicon.</li>
     <li>Pinned versions for anything new that gets embedded: manifests in <code>pkg/cluster/assets/</code> pin exact image tags, and node images pin digests.</li>
     <li>Honest UX on failure: optional addons degrade the cluster rather than tearing it down, errors say what to do next. Keep that bar.</li>
     <li>Docs updated when flags or behavior change (this site plus the README).</li>

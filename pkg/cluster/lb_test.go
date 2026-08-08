@@ -35,11 +35,11 @@ func TestKiacLBScriptInvariants(t *testing.T) {
 		`${KUBECONFIG:=` + adminConf + `}`, // kubeadm default; k3s overrides it
 		"--subresource=status",
 		`{"status":{"loadBalancer":{"ingress":[`, // status patch (now one entry per family)
-		`{\"ip\":\"$p_ip\"}`,                      // each ingress entry built per address
-		"kiac.io/lb-primary=true",                 // prefers the labeled primary node
-		"kubernetes.io/service-name=",             // endpointslice lookup for pod-local IPs
-		"!node-role.kubernetes.io/control-plane",  // workers-first eligibility
-		"spec.ipFamilies",                         // reads each Service's requested families
+		`{\"ip\":\"$p_ip\"}`,                     // each ingress entry built per address
+		"kiac.io/lb-primary=true",                // prefers the labeled primary node
+		"kubernetes.io/service-name=",            // endpointslice lookup for pod-local IPs
+		"!node-role.kubernetes.io/control-plane", // workers-first eligibility
+		"spec.ipFamilies",                        // reads each Service's requested families
 	} {
 		if !strings.Contains(kiacLBScript, want) {
 			t.Errorf("kiac-lb.sh is missing %q", want)
