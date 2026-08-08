@@ -2,6 +2,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo v0.1
 LDFLAGS := -X github.com/saiyam1814/kiac/cmd.Version=$(VERSION)
 EDGE_PROXY_BIN := bin/kiac-edge-proxy-linux-arm64
 EDGE_PROXY_ASSET := pkg/cluster/assets/kiac-edge-proxy-linux-arm64.gz
+EDGE_PROXY_LDFLAGS := -s -w -buildid=
+ASSET_GZIP := go run ./internal/cmd/asset-gzip
 
 .PHONY: build edge-proxy-asset edge-proxy-check install test test-race lint fmt-check tidy-check ci runtime-smoke clean
 
@@ -10,13 +12,13 @@ build: edge-proxy-asset
 
 edge-proxy-asset:
 	mkdir -p bin pkg/cluster/assets
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath -ldflags "-s -w" -o $(EDGE_PROXY_BIN) ./cmd/kiac-edge-proxy
-	gzip -9nc $(EDGE_PROXY_BIN) > $(EDGE_PROXY_ASSET)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath -ldflags "$(EDGE_PROXY_LDFLAGS)" -o $(EDGE_PROXY_BIN) ./cmd/kiac-edge-proxy
+	$(ASSET_GZIP) $(EDGE_PROXY_BIN) $(EDGE_PROXY_ASSET)
 
 edge-proxy-check:
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath -ldflags "-s -w" -o "$$tmp/kiac-edge-proxy" ./cmd/kiac-edge-proxy; \
-	gzip -9nc "$$tmp/kiac-edge-proxy" > "$$tmp/kiac-edge-proxy.gz"; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath -ldflags "$(EDGE_PROXY_LDFLAGS)" -o "$$tmp/kiac-edge-proxy" ./cmd/kiac-edge-proxy; \
+	$(ASSET_GZIP) "$$tmp/kiac-edge-proxy" "$$tmp/kiac-edge-proxy.gz"; \
 	cmp -s "$$tmp/kiac-edge-proxy.gz" $(EDGE_PROXY_ASSET) || { \
 		echo "$(EDGE_PROXY_ASSET) is stale; run: make edge-proxy-asset"; exit 1; \
 	}
