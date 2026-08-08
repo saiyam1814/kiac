@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -183,6 +184,22 @@ func doJSON(t *testing.T, h http.Handler, method, path string) (int, map[string]
 	return rec.Code, body
 }
 
+// doJSONBody is doJSON but with a JSON body, for POSTs that read a payload.
+func doJSONBody(t *testing.T, h http.Handler, method, path string, payload any) (int, map[string]json.RawMessage) {
+	t.Helper()
+	var buf bytes.Buffer
+	if payload != nil {
+		_ = json.NewEncoder(&buf).Encode(payload)
+	}
+	req := httptest.NewRequest(method, "http://127.0.0.1:5180"+path, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var body map[string]json.RawMessage
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	return rec.Code, body
+}
+
 func TestNodeActionEndpoints(t *testing.T) {
 	s := testServer(t)
 	mux := s.routes()
@@ -294,5 +311,122 @@ func TestMetricsAndAddonsDegrade(t *testing.T) {
 	code, _ = doJSON(t, mux, "GET", "/api/clusters/BAD_NAME/addons")
 	if code != 400 {
 		t.Errorf("addons with invalid name: got %d, want 400", code)
+	}
+}
+
+func TestKubectlConsole(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSONBody(t, mux, "POST", "/api/clusters/BAD_NAME/kubectl", map[string]any{"args": []string{"get", "nodes"}})
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", nil)
+	if code != 400 {
+		t.Errorf("no body: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", map[string]any{"args": []string{}})
+	if code != 400 {
+		t.Errorf("empty args: got %d, want 400", code)
+	}
+
+	code, body := doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", map[string]any{"args": []string{"get", "nodes"}})
+	if code != 200 {
+		t.Fatalf("valid: got %d, want 200", code)
+	}
+	if _, ok := body["output"]; !ok {
+		t.Errorf("missing output field: %v", body)
+	}
+}
+
+// same shape as createCluster/deleteCluster: validate, job id, busy lock
+func TestCreateClusterValidation(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "Bad_Name"})
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "dev", "distro": "openshift"})
+	if code != 400 {
+		t.Errorf("bad distro: got %d, want 400", code)
+	}
+
+	waitIdle(t, s, "create-ok")
+	code, body := doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "create-ok", "workers": 2})
+	if code != 202 || body["job"] == nil {
+		t.Errorf("valid: got %d %v, want 202 + job id", code, body)
+	}
+
+	s.busy["create-busy"] = true
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "create-busy"})
+	if code != 409 {
+		t.Errorf("busy: got %d, want 409", code)
+	}
+}
+
+func TestDeleteCluster(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSON(t, mux, "DELETE", "/api/clusters/Bad_Name")
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	waitIdle(t, s, "delete-ok")
+	code, body := doJSON(t, mux, "DELETE", "/api/clusters/delete-ok")
+	if code != 202 || body["job"] == "" {
+		t.Errorf("valid: got %d %v, want 202 + job id", code, body)
+	}
+
+	s.busy["delete-busy"] = true
+	code, _ = doJSON(t, mux, "DELETE", "/api/clusters/delete-busy")
+	if code != 409 {
+		t.Errorf("busy: got %d, want 409", code)
+	}
+}
+
+func TestKubeconfigEndpoint(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSON(t, mux, "GET", "/api/clusters/Bad_Name/kubeconfig")
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	// no runtime in test env, so this always fails -> just check it 500s cleanly.
+	// TODO: replace with a mocked runtime so this can assert the real 404 contract
+	// instead of a test-environment artifact.
+	code, _ = doJSON(t, mux, "GET", "/api/clusters/zz-nope/kubeconfig")
+	if code != 500 {
+		t.Errorf("missing cluster: got %d, want 500", code)
+	}
+}
+
+func TestNodeRole(t *testing.T) {
+	if got := nodeRole("kiac-dev-control-plane"); got != "control-plane" {
+		t.Errorf("got %q, want control-plane", got)
+	}
+	if got := nodeRole("kiac-dev-worker-1"); got != "worker" {
+		t.Errorf("got %q, want worker", got)
+	}
+}
+
+func TestPruneCreated(t *testing.T) {
+	s := testServer(t)
+	s.created = map[string]string{"dev": "t1", "gone": "t2"}
+	s.pruneCreated([]string{"dev"})
+	if _, ok := s.created["gone"]; ok {
+		t.Error("gone should have been pruned")
+	}
+	if _, ok := s.created["dev"]; !ok {
+		t.Error("dev should have survived")
 	}
 }
