@@ -93,9 +93,6 @@ func (m *Manager) edgeProxyKubeconfig(cp, name, path string) (string, error) {
 
 func edgeProxyKubectl(kubeconfig string, args ...string) []string {
 	base := []string{"kubectl", "--kubeconfig", kubeconfig}
-	if kubeconfig == k3sKubeconfig {
-		base = []string{"k3s", "kubectl", "--kubeconfig", kubeconfig}
-	}
 	return append(base, args...)
 }
 

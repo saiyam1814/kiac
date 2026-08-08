@@ -59,7 +59,7 @@ func TestEdgeProxyKubectlCommand(t *testing.T) {
 	if got := edgeProxyKubectl(adminConf, "get", "nodes"); !slices.Equal(got, wantKubeadm) {
 		t.Fatalf("kubeadm kubectl args = %q, want %q", got, wantKubeadm)
 	}
-	wantK3s := []string{"k3s", "kubectl", "--kubeconfig", k3sKubeconfig, "get", "nodes"}
+	wantK3s := []string{"kubectl", "--kubeconfig", k3sKubeconfig, "get", "nodes"}
 	if got := edgeProxyKubectl(k3sKubeconfig, "get", "nodes"); !slices.Equal(got, wantK3s) {
 		t.Fatalf("k3s kubectl args = %q, want %q", got, wantK3s)
 	}
