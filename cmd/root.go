@@ -35,5 +35,5 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.AddCommand(createCmd, deleteCmd, getCmd, loadCmd, doctorCmd, versionCmd)
+	rootCmd.AddCommand(createCmd, deleteCmd, getCmd, loadCmd, doctorCmd, verifyCmd, supportCmd, versionCmd)
 }

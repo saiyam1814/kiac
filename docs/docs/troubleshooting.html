@@ -65,6 +65,11 @@ kiac doctor --fix  <span class="c"># also starts the container system service if
 kiac delete cluster --name dev
 kiac create cluster --name dev --workers 2</code></pre>
 
+  <h2 id="verify-cluster">Second move: verify the cluster</h2>
+  <pre><code>kiac verify cluster --name dev
+kiac verify cluster --name dev -o json</code></pre>
+  <p>The check is read-only and follows the complete user path: VM and node services, Kubernetes API and Ready state, workloads, DNS, storage and metrics, edge-proxy process plus iptables hooks, LoadBalancer assignment, optional Gateway and observability stacks, and the Mac-to-API connection. A failed required check exits nonzero and includes the next command to inspect; an addon you intentionally disabled is shown as skipped.</p>
+
   <h2 id="reboot">After a reboot: clusters show 0/N</h2>
   <pre><code>kiac get clusters
 <span class="o">NAME  STATUS
@@ -128,7 +133,7 @@ dev   0/3 stopped</span></code></pre>
 container exec kiac-dev-control-plane kubectl get nodes
 
 <span class="c"># restore kubectl from your Mac: reset vmnet, then heal the cluster</span>
-container system stop && container system start
+container system stop &amp;&amp; container system start
 kiac resume cluster --name dev</code></pre>
   <p>A full <code>container system</code> restart tears down and rebuilds vmnet (clearing the stale ARP state), and <code>kiac resume</code> re-points every node, kubeconfig, and certificate SAN at the fresh IPs. This is being tracked upstream at apple/container; see <a href="https://github.com/saiyam1814/kiac/issues/6">issue #6</a>.</p>
 
@@ -158,7 +163,10 @@ container exec kiac-dev-control-plane tail -50 /var/log/kiac-edge-proxy.log</cod
   <p>kiac only touches entries named <code>kiac-&lt;cluster&gt;</code>, and the first time it modifies your kubeconfig it saves the original to <code>~/.kube/config.kiac.bak</code>. <code>kiac delete cluster</code> removes exactly the cluster's entries and clears <code>current-context</code> if it pointed there.</p>
 
   <h2 id="still-stuck">Still stuck?</h2>
-  <p>Open an issue with the failing command's output: <a href="https://github.com/saiyam1814/kiac/issues">github.com/saiyam1814/kiac/issues</a>.</p>
+  <p>Generate a support archive, review its contents, and attach it with the failing command's output:</p>
+  <pre><code>kiac support bundle --name dev
+tar -tzf kiac-support-dev-*.tar.gz</code></pre>
+  <p>The bundle is mode <code>0600</code>, bounded, and redacted. It excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. It still contains operational names, IPs, events, and system logs, so review it before opening an issue at <a href="https://github.com/saiyam1814/kiac/issues">github.com/saiyam1814/kiac/issues</a>.</p>
 
   <div class="pn">
     <a href="dashboard.html"><span>Previous</span>Dashboard (kiac ui)</a>

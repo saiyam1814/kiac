@@ -81,6 +81,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🌍 **IPv6 and dual-stack** — `--ip-family dual` (or `ipv6`) gives pods, Services, and nodes real IPv6, with kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer rules on the full kernel. kiac-lb hands out both families, the edge proxy fixes v6 large uploads too, and `kiac resume` heals both. See [docs/design/ipv6-dual-stack.md](docs/design/ipv6-dual-stack.md).
 - 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
+- **Diagnostics with an exit code** — `kiac verify cluster` checks the VM, Kubernetes, DNS, storage, metrics, edge proxy, LoadBalancer, Gateway, observability, and host API paths without changing the cluster. JSON output is stable for automation; `kiac support bundle` writes a bounded, redacted archive for issue reports.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
 - 🖥️ **A console when you want one** — `kiac ui` opens a local web console: cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, a create form, and a per-cluster kubectl Console drawer (loopback-only, no shell). Works on every distro. Same engine as the CLI.
 - 🍎 **Native stack** — one Swift runtime from Apple, one Go binary from us. Coexists with Docker Desktop, kind, and k3d; never touches the Docker socket.
@@ -198,6 +199,9 @@ kiac get nodes --name dev
 kiac stop node worker-1 --name dev           # real node failure: NotReady, eviction, rescheduling
 kiac start node worker-1 --name dev          # node rejoins; idempotent
 kiac resume cluster --name dev               # bring a cluster back after a host reboot; idempotent
+kiac verify cluster --name dev               # read-only end-to-end health checks
+kiac verify cluster --name dev -o json       # stable schema + nonzero exit on required failures
+kiac support bundle --name dev               # redacted diagnostic archive for an issue
 container build -t myapp:dev .               # build with apple/container
 kiac load image myapp:dev --name dev         # push it into every node
 kiac completion zsh                          # bash|zsh|fish|powershell; see kiac completion -h

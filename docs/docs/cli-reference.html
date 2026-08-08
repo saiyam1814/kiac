@@ -137,6 +137,28 @@ kiac start node worker-2 --name staging</code></pre>
     <tr><td><code>--wait</code></td><td><code>5m</code></td><td>how long to wait for boot, API server, and node readiness</td></tr>
   </table>
 
+  <h2 id="verify-cluster">kiac verify cluster</h2>
+  <p>Run read-only health checks across the node VMs, required node services, API readiness, Kubernetes nodes and workloads, DNS, storage, metrics, the edge proxy and its redirect rules, LoadBalancer assignments, optional Gateway and observability addons, and reachability from the Mac. Intentionally disabled addons report <code>skip</code>; required failures make the command exit nonzero.</p>
+  <pre><code>kiac verify cluster --name dev
+kiac verify cluster --name dev -o json</code></pre>
+  <table>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name</td></tr>
+    <tr><td><code>-o, --output</code></td><td><code>text</code></td><td>output format: <code>text</code> or stable-schema <code>json</code></td></tr>
+    <tr><td><code>--timeout</code></td><td><code>10s</code></td><td>maximum duration of each node diagnostic command</td></tr>
+  </table>
+
+  <h2 id="support-bundle">kiac support bundle</h2>
+  <p>Write a mode-<code>0600</code>, bounded, redacted <code>tar.gz</code> with the verification report, host and Apple container runtime status, safe Kubernetes listings, and node system logs. Collection is read-only and excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. Names, IPs, events, and system logs remain operational data, so review the archive before sharing it.</p>
+  <pre><code>kiac support bundle --name dev
+kiac support bundle --name dev --output /tmp/dev-support.tar.gz</code></pre>
+  <table>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name</td></tr>
+    <tr><td><code>-o, --output</code></td><td>timestamped file</td><td>archive path; an existing file is never overwritten</td></tr>
+    <tr><td><code>--timeout</code></td><td><code>10s</code></td><td>maximum duration of each diagnostic command</td></tr>
+  </table>
+
   <h2 id="load-image">kiac load image</h2>
   <p>Copy images from the apple/container local image store into the containerd instance of every node VM, so pods can run them without pushing to a registry. Build first with <code>container build -t myapp .</code>, and set <code>imagePullPolicy: IfNotPresent</code> (or <code>Never</code>) in your pod spec.</p>
   <pre><code>kiac load image myapp:dev --name dev
