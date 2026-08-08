@@ -197,8 +197,8 @@
     <a class="btn btn-ghost" href="docs/index.html">Read the docs</a>
   </div>
   <div class="install">
-    <code><span class="dollar">$</span> brew install saiyam1814/tap/kiac</code>
-    <button class="copy" onclick="navigator.clipboard.writeText('brew install saiyam1814/tap/kiac');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+    <code><span class="dollar">$</span> brew install --cask saiyam1814/tap/kiac</code>
+    <button class="copy" onclick="navigator.clipboard.writeText('brew install --cask saiyam1814/tap/kiac');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
   </div>
   <p class="install-note">Prefer Go? <code>go install github.com/saiyam1814/kiac@latest</code></p>
 
@@ -299,7 +299,7 @@
   <h2>Three commands to a cluster.</h2>
   <div class="grid">
     <div class="card"><h3>1 · Install the runtime</h3><p>Grab <a href="https://github.com/apple/container/releases" style="color:var(--accent);font-weight:600;text-decoration:none">apple/container 1.0</a> (signed pkg from Apple). Requires an Apple silicon Mac; macOS 26+ for multi-node.</p></div>
-    <div class="card"><h3>2 · Install kiac</h3><p><code>brew install saiyam1814/tap/kiac</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
+    <div class="card"><h3>2 · Install kiac</h3><p><code>brew install --cask saiyam1814/tap/kiac</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
     <div class="card"><h3>3 · Create</h3><p><code>kiac create cluster --workers 2</code><br><br>Kubernetes 1.32-1.36, then <code>kubectl get nodes</code> and you are flying.</p></div>
   </div>
   <p style="margin-top:26px;color:var(--mid)">From there the <a href="docs/index.html" style="color:var(--accent);font-weight:600;text-decoration:none">documentation</a> covers networking, the k3s distro, Cilium and custom kernels, reboots and resume, observability, Gateway API, node chaos, the dashboard, and every CLI flag.</p>
