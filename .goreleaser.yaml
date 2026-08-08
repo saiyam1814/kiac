@@ -22,10 +22,23 @@ archives:
 checksum:
   name_template: checksums.txt
 
+sboms:
+  - artifacts: archive
+
 homebrew_casks:
-  - repository:
+  - directory: Casks
+    repository:
       owner: saiyam1814
       name: homebrew-tap
+      branch: main
+      git:
+        url: git@github.com:saiyam1814/homebrew-tap.git
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY_PATH }}"
+    commit_author:
+      name: kiac release bot
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    url:
+      verified: github.com/saiyam1814/kiac/
     homepage: https://github.com/saiyam1814/kiac
     description: "Kubernetes in Apple Containers - every node is its own lightweight VM"
     license: MIT

@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.25.12"
+          cache: true
+
+      - name: Validate release tag and source
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must be valid SemVer prefixed with v: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "release commit ${GITHUB_SHA} is not on main" >&2
+            exit 1
+          fi
+
+      - name: Configure Homebrew tap deploy key
+        shell: bash
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [[ -z "${HOMEBREW_TAP_DEPLOY_KEY}" ]]; then
+            echo "HOMEBREW_TAP_DEPLOY_KEY is not configured" >&2
+            exit 1
+          fi
+          key_path="${RUNNER_TEMP}/homebrew-tap-deploy-key"
+          umask 077
+          printf '%s\n' "${HOMEBREW_TAP_DEPLOY_KEY}" > "${key_path}"
+          echo "HOMEBREW_TAP_DEPLOY_KEY_PATH=${key_path}" >> "${GITHUB_ENV}"
+          echo "GIT_SSH_COMMAND=ssh -i ${key_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -F /dev/null" >> "${GITHUB_ENV}"
+
+      - name: Test release source
+        run: make ci
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          syft-version: v1.50.0
+
+      - name: Build and upload draft release
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HOMEBREW_TAP_DEPLOY_KEY_PATH: ${{ env.HOMEBREW_TAP_DEPLOY_KEY_PATH }}
+
+      - name: Verify release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          (cd dist && sha256sum --check checksums.txt)
+          archive="$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          if [[ -z "${archive}" || ! -f "${archive}.sbom.json" ]]; then
+            echo "release archive or its SBOM is missing" >&2
+            exit 1
+          fi
+          echo "archive=${archive}" >> "${GITHUB_OUTPUT}"
+          echo "sbom=${archive}.sbom.json" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest release provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Attest archive SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.artifacts.outputs.archive }}
+          sbom-path: ${{ steps.artifacts.outputs.sbom }}
+
+      - name: Complete Homebrew formula-to-cask migration
+        shell: bash
+        run: |
+          tap_dir="${RUNNER_TEMP}/homebrew-tap"
+          git clone --depth 1 git@github.com:saiyam1814/homebrew-tap.git "${tap_dir}"
+          test -f "${tap_dir}/Casks/kiac.rb"
+          rm -f "${tap_dir}/kiac.rb" "${tap_dir}/Formula/kiac.rb"
+          if [[ -f "${tap_dir}/tap_migrations.json" ]]; then
+            jq '. + {"kiac": "kiac"}' "${tap_dir}/tap_migrations.json" > "${tap_dir}/tap_migrations.json.tmp"
+            mv "${tap_dir}/tap_migrations.json.tmp" "${tap_dir}/tap_migrations.json"
+          else
+            printf '{\n  "kiac": "kiac"\n}\n' > "${tap_dir}/tap_migrations.json"
+          fi
+          git -C "${tap_dir}" add --all
+          if ! git -C "${tap_dir}" diff --cached --quiet; then
+            git -C "${tap_dir}" -c user.name='kiac release bot' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'kiac: migrate formula to cask'
+            git -C "${tap_dir}" push origin HEAD:main
+          fi
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --verify-tag
+
+      - name: Remove deploy key
+        if: always()
+        run: rm -f "${HOMEBREW_TAP_DEPLOY_KEY_PATH}"

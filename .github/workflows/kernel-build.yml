@@ -22,6 +22,9 @@ on:
 
 permissions:
   contents: write # release asset upload on tag builds
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 env:
   # 6.12.28 matches the Kata default kernel `container` 1.0.0 boots
@@ -39,7 +42,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Fetch pinned base config from apple/containerization
         run: |
@@ -62,7 +68,7 @@ jobs:
           docker run --rm \
             -v "$PWD:/w" -w /w \
             -e KERNEL_VERSION="${KERNEL_VERSION}" \
-            ubuntu:24.04 bash -euxc '
+            ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea bash -euxc '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update
               apt-get install -y --no-install-recommends \
@@ -88,13 +94,20 @@ jobs:
           sha256sum "kiac-kernel-${KERNEL_VERSION}-full" \
             | tee "kiac-kernel-${KERNEL_VERSION}-full.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload kernel build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kiac-kernel-${{ env.KERNEL_VERSION }}-full
           path: |
             kiac-kernel-${{ env.KERNEL_VERSION }}-full
             kiac-kernel-${{ env.KERNEL_VERSION }}-full.sha256
           if-no-files-found: error
+
+      - name: Attest kernel provenance
+        if: startsWith(github.ref, 'refs/tags/kernel-v')
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: kiac-kernel-${{ env.KERNEL_VERSION }}-full.sha256
 
       # Tag builds publish release assets; pkg/cluster/kernel.go pins
       # the sha256 printed above and downloads from this release.
@@ -104,8 +117,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" --notes "kiac full node kernel ${KERNEL_VERSION} (arm64 Image, monolithic, CNI-ready)" || true
-          gh release upload "$tag" \
-            "kiac-kernel-${KERNEL_VERSION}-full" \
-            "kiac-kernel-${KERNEL_VERSION}-full.sha256" \
-            --clobber
+          if draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [[ "${draft}" != "true" ]]; then
+              echo "release ${tag} is already published; immutable assets cannot be replaced" >&2
+              exit 1
+            fi
+            gh release upload "$tag" \
+              "kiac-kernel-${KERNEL_VERSION}-full" \
+              "kiac-kernel-${KERNEL_VERSION}-full.sha256" \
+              --clobber
+          else
+            gh release create "$tag" \
+              --draft \
+              --verify-tag \
+              --title "$tag" \
+              --notes "kiac full node kernel ${KERNEL_VERSION} (arm64 Image, monolithic, CNI-ready)" \
+              "kiac-kernel-${KERNEL_VERSION}-full" \
+              "kiac-kernel-${KERNEL_VERSION}-full.sha256"
+          fi
+          gh release edit "$tag" --draft=false --verify-tag
