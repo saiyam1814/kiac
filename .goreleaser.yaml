@@ -32,7 +32,7 @@ brews:
     dependencies:
       - name: kubernetes-cli
     caveats: |
-      kiac needs apple/container 1.0+:
+      kiac needs apple/container 1.0+ (skip 1.2.0; use 1.2.1 or newer):
         https://github.com/apple/container/releases
       Then: kiac doctor
 
