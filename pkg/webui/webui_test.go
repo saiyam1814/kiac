@@ -190,7 +190,9 @@ func doJSON(t *testing.T, h http.Handler, method, path string) (int, map[string]
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	var body map[string]string
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response body %q: %v", rec.Body.String(), err)
+	}
 	return rec.Code, body
 }
 
