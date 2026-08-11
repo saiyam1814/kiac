@@ -48,6 +48,11 @@ type server struct {
 	mgr  *cluster.Manager
 	self string
 
+	// kubectl runs one kubectl invocation for a cluster. Defaults to
+	// hostKubectl; tests swap it in so kubectlConsole can be exercised
+	// without a real kubectl binary or cluster on the machine.
+	kubectl func(name string, args ...string) (string, error)
+
 	mu      sync.Mutex
 	jobs    map[string]*job
 	busy    map[string]bool   // cluster names with an in-flight mutating job
@@ -60,7 +65,7 @@ func newServer() (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &server{mgr: cluster.NewManager(), self: self,
+	return &server{mgr: cluster.NewManager(), self: self, kubectl: hostKubectl,
 		jobs: map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}, nil
 }
 
@@ -362,7 +367,7 @@ func (s *server) kubectlConsole(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "args required"})
 		return
 	}
-	out, err := hostKubectl(name, req.Args...)
+	out, err := s.kubectl(name, req.Args...)
 	const maxOut = 256 << 10
 	if len(out) > maxOut {
 		out = out[:maxOut] + "\n... (output truncated)"

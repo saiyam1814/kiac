@@ -1,10 +1,12 @@
 package webui
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,7 +154,16 @@ func testServer(t *testing.T) *server {
 		t.Skip("no `true` binary on PATH")
 	}
 	return &server{mgr: cluster.NewManager(), self: noop,
-		jobs: map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}
+		kubectl: func(name string, args ...string) (string, error) { return "", nil },
+		jobs:    map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}
+}
+
+// setBusy marks name as busy under the server's lock, matching
+// startJob's own locking contract instead of writing s.busy directly.
+func setBusy(s *server, name string) {
+	s.mu.Lock()
+	s.busy[name] = true
+	s.mu.Unlock()
 }
 
 // waitIdle blocks until no job holds the cluster's in-flight lock.
@@ -179,7 +190,29 @@ func doJSON(t *testing.T, h http.Handler, method, path string) (int, map[string]
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	var body map[string]string
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response body %q: %v", rec.Body.String(), err)
+	}
+	return rec.Code, body
+}
+
+// doJSONBody is doJSON but with a JSON body, for POSTs that read a payload.
+func doJSONBody(t *testing.T, h http.Handler, method, path string, payload any) (int, map[string]json.RawMessage) {
+	t.Helper()
+	var buf bytes.Buffer
+	if payload != nil {
+		if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+			t.Fatalf("encoding request payload: %v", err)
+		}
+	}
+	req := httptest.NewRequest(method, "http://127.0.0.1:5180"+path, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response body %q: %v", rec.Body.String(), err)
+	}
 	return rec.Code, body
 }
 
@@ -294,5 +327,138 @@ func TestMetricsAndAddonsDegrade(t *testing.T) {
 	code, _ = doJSON(t, mux, "GET", "/api/clusters/BAD_NAME/addons")
 	if code != 400 {
 		t.Errorf("addons with invalid name: got %d, want 400", code)
+	}
+}
+
+func TestKubectlConsole(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSONBody(t, mux, "POST", "/api/clusters/BAD_NAME/kubectl", map[string]any{"args": []string{"get", "nodes"}})
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", nil)
+	if code != 400 {
+		t.Errorf("no body: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", map[string]any{"args": []string{}})
+	if code != 400 {
+		t.Errorf("empty args: got %d, want 400", code)
+	}
+
+	// Fake the runner so this exercises the actual happy path (output
+	// and ok:true) instead of whatever kubectl happens to be on PATH.
+	s.kubectl = func(name string, args ...string) (string, error) {
+		if name != "dev" || len(args) != 2 || args[0] != "get" || args[1] != "nodes" {
+			t.Fatalf("kubectl called with name=%q args=%v", name, args)
+		}
+		return "NAME                     STATUS\nkiac-dev-control-plane   Ready\n", nil
+	}
+	code, body := doJSONBody(t, mux, "POST", "/api/clusters/dev/kubectl", map[string]any{"args": []string{"get", "nodes"}})
+	if code != 200 {
+		t.Fatalf("valid: got %d, want 200", code)
+	}
+	var output string
+	if err := json.Unmarshal(body["output"], &output); err != nil {
+		t.Fatalf("decoding output: %v", err)
+	}
+	if !strings.Contains(output, "kiac-dev-control-plane") {
+		t.Errorf("output = %q, want fake kubectl output", output)
+	}
+	var ok bool
+	if err := json.Unmarshal(body["ok"], &ok); err != nil {
+		t.Fatalf("decoding ok: %v", err)
+	}
+	if !ok {
+		t.Error("ok = false, want true on a successful kubectl call")
+	}
+}
+
+// same shape as createCluster/deleteCluster: validate, job id, busy lock
+func TestCreateClusterValidation(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "Bad_Name"})
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "dev", "distro": "openshift"})
+	if code != 400 {
+		t.Errorf("bad distro: got %d, want 400", code)
+	}
+
+	waitIdle(t, s, "create-ok")
+	code, body := doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "create-ok", "workers": 2})
+	if code != 202 || body["job"] == nil {
+		t.Errorf("valid: got %d %v, want 202 + job id", code, body)
+	}
+
+	setBusy(s, "create-busy")
+	code, _ = doJSONBody(t, mux, "POST", "/api/clusters", map[string]any{"name": "create-busy"})
+	if code != 409 {
+		t.Errorf("busy: got %d, want 409", code)
+	}
+}
+
+func TestDeleteCluster(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSON(t, mux, "DELETE", "/api/clusters/Bad_Name")
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	waitIdle(t, s, "delete-ok")
+	code, body := doJSON(t, mux, "DELETE", "/api/clusters/delete-ok")
+	if code != 202 || body["job"] == "" {
+		t.Errorf("valid: got %d %v, want 202 + job id", code, body)
+	}
+
+	setBusy(s, "delete-busy")
+	code, _ = doJSON(t, mux, "DELETE", "/api/clusters/delete-busy")
+	if code != 409 {
+		t.Errorf("busy: got %d, want 409", code)
+	}
+}
+
+func TestKubeconfigEndpoint(t *testing.T) {
+	s := testServer(t)
+	mux := s.routes()
+
+	code, _ := doJSON(t, mux, "GET", "/api/clusters/Bad_Name/kubeconfig")
+	if code != 400 {
+		t.Errorf("bad name: got %d, want 400", code)
+	}
+
+	// A missing cluster should be a 404 and a runtime/CLI failure a 500,
+	// but Manager.Kubeconfig doesn't distinguish the two, and pkg/runtime
+	// has no seam to fake a missing-vs-broken container CLI here. Not
+	// asserting today's error path as if it were the real contract.
+}
+
+func TestNodeRole(t *testing.T) {
+	if got := nodeRole("kiac-dev-control-plane"); got != "control-plane" {
+		t.Errorf("got %q, want control-plane", got)
+	}
+	if got := nodeRole("kiac-dev-worker-1"); got != "worker" {
+		t.Errorf("got %q, want worker", got)
+	}
+}
+
+func TestPruneCreated(t *testing.T) {
+	s := testServer(t)
+	s.created = map[string]string{"dev": "t1", "gone": "t2"}
+	s.pruneCreated([]string{"dev"})
+	if _, ok := s.created["gone"]; ok {
+		t.Error("gone should have been pruned")
+	}
+	if _, ok := s.created["dev"]; !ok {
+		t.Error("dev should have survived")
 	}
 }
