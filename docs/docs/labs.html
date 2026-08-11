@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integration labs - kiac docs</title>
+<meta name="description" content="Tested, repeatable labs for running Portainer CE, k8gb, Gateway API, observability, and OpenChoreo on kiac clusters.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Hands-on</div>
+    <a class="on" href="labs.html">Integration labs</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Hands-on</div>
+  <h1>Integration labs</h1>
+  <p class="lede">Repeatable workflows that exercise real traffic, storage, APIs, and failure paths on kiac clusters. Each lab includes verification and cleanup instead of stopping at installation.</p>
+
+  <h2 id="portainer">Portainer CE</h2>
+  <p>Run the license-free Portainer Community Edition on a small Kubernetes cluster. The lab pins the image and Helm chart, gives Portainer a persistent volume and LoadBalancer address, protects the generated admin password, and verifies authenticated API access.</p>
+  <pre><code>./examples/portainer.sh up
+./examples/portainer.sh verify
+./examples/portainer.sh cleanup</code></pre>
+  <p>Read the complete <a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer-lab.md">Portainer CE lab</a>. Portainer manages the Kubernetes cluster; it does not provide Docker Engine or Docker Compose compatibility for the macOS host.</p>
+
+  <h2 id="addons">Gateway API and observability</h2>
+  <p>These labs exercise kiac's built-in addons through their user-facing endpoints:</p>
+  <table>
+    <tr><th>Lab</th><th>What it proves</th></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/gateway-api-lab.md">Gateway API</a></td><td>GatewayClass and Gateway readiness, HTTPRoute attachment, hostname and path matching, and traffic through the assigned LoadBalancer IP.</td></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/observability-lab.md">Observability</a></td><td>Grafana access, Prometheus target discovery, application metrics, generated traffic, and metric queries.</td></tr>
+  </table>
+
+  <h2 id="multi-cluster">Multi-cluster and platform labs</h2>
+  <table>
+    <tr><th>Lab</th><th>What it proves</th></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/k8gb-lab.md">k8gb failover</a></td><td>DNS delegation, two independent clusters, application health, regional failover, and failback.</td></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/openchoreo-lab.md">OpenChoreo</a></td><td>A disposable platform cluster, component deployment, endpoint discovery, and cleanup.</td></tr>
+  </table>
+
+  <h2 id="operations">Failure and recovery labs</h2>
+  <table>
+    <tr><th>Lab</th><th>What it proves</th></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/chaos-drill.md">Node chaos</a></td><td>Pod spreading, node loss, eviction, rescheduling, and node rejoin across workers.</td></tr>
+    <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/resume-drill.md">Reboot and resume</a></td><td>Cluster discovery after a host restart, coordinated resume, node readiness, and restored application traffic.</td></tr>
+  </table>
+
+  <div class="note"><b>Labs are intentionally optional</b>
+  Integrations stay outside the kiac binary unless they are part of the local-cluster foundation. This keeps startup fast and lets each workload declare its own security and resource cost.</div>
+
+  <div class="pn">
+    <a href="gateway-api.html"><span>Previous</span>Gateway API</a>
+    <a class="next" href="node-chaos.html"><span>Next</span>Node chaos</a>
+  </div>
+</main>
+</div>
+</body>
+</html>
