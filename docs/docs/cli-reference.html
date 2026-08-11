@@ -73,6 +73,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
     <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code> (needs <code>--kernel full</code> and the <code>cilium</code> CLI), or <code>none</code> (bring your own). kubeadm distro only; the k3s path always gets kindnet</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
+    <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Given, it replaces the runtime's default resolv.conf entirely rather than adding to it (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
     <tr><td><code>--cpus</code></td><td><code>4</code></td><td>vCPUs per node VM</td></tr>
     <tr><td><code>--memory</code></td><td><code>2G</code></td><td>memory per worker VM (idle workers use a few hundred MB)</td></tr>
     <tr><td><code>--cp-memory</code></td><td><code>4G</code></td><td>memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)</td></tr>

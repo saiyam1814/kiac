@@ -64,6 +64,8 @@ workers: 2           <span class="c"># worker node count; 0 untaints the control
 k8sVersion: "1.36"   <span class="c"># Kubernetes minor ("1.36") or exact patch ("1.36.1")</span>
 <span class="c"># image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion</span>
 cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
+<span class="c"># dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the</span>
+<span class="c">#                    # runtime default resolv.conf entirely when set</span>
 cpus: "4"            <span class="c"># vCPUs per node VM (quote it: YAML reads bare 4 as a number)</span>
 memory: 4G           <span class="c"># memory per worker VM</span>
 wait: 5m             <span class="c"># timeout for nodes to become Ready</span>
@@ -85,6 +87,7 @@ addons:
     <tr><td><code>k8sVersion</code></td><td>string</td><td><code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
+    <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
     <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>
     <tr><td><code>cpMemory</code></td><td>string</td><td><code>4G</code></td><td><code>--cp-memory</code> (control-plane VM)</td></tr>

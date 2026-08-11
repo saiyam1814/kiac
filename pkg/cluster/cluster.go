@@ -102,6 +102,7 @@ type Config struct {
 	CNI           string
 	Kernel        string   // resolved kernel Image path; empty = runtime default
 	IPFamily      IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
+	DNS           []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
@@ -176,6 +177,9 @@ func (m *Manager) Create(cfg Config) error {
 	if err := validateIPFamily(cfg); err != nil {
 		return err
 	}
+	if err := validateDNS(cfg); err != nil {
+		return err
+	}
 
 	// Fail cilium prerequisites before any VM boots, not minutes later
 	// when the CNI step runs.
@@ -208,13 +212,15 @@ func (m *Manager) Create(cfg Config) error {
 		nodes = append(nodes, worker(cfg.Name, i))
 	}
 
+	dns := nodeDNS(cfg)
+
 	if err := ui.Step(fmt.Sprintf("Booting %d node VM(s)", len(nodes)), func() error {
 		for _, n := range nodes {
 			mem := cfg.Memory
 			if n == cp && cfg.CPMemory != "" {
 				mem = cfg.CPMemory
 			}
-			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem, Kernel: cfg.Kernel}); err != nil {
+			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem, Kernel: cfg.Kernel, DNS: dns}); err != nil {
 				return err
 			}
 		}

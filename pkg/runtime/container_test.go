@@ -92,6 +92,42 @@ func TestRunDetachedOmitsUnsupportedNodeSecurityFlags(t *testing.T) {
 	}
 }
 
+func TestRunDetachedPassesDNS(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n--masked-path\n--read-only-path\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:  "kiac-test-control-plane",
+		Image: "example.invalid/node:v1",
+		DNS:   []string{"192.168.64.1", "1.1.1.1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.Join(readArgs(t, argsFile), " ")
+	want := "--dns 192.168.64.1 --dns 1.1.1.1"
+	if !strings.Contains(got, want) {
+		t.Fatalf("run args = %q, want them to contain %q", got, want)
+	}
+}
+
+func TestRunDetachedOmitsDNSWhenUnset(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:  "kiac-test-control-plane",
+		Image: "example.invalid/node:v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(readArgs(t, argsFile), " "); strings.Contains(got, "--dns") {
+		t.Fatalf("run args = %q, want no --dns flags", got)
+	}
+}
+
 func TestValidateNodeRuntimeVersion(t *testing.T) {
 	for _, version := range []string{"0.8.0", "1.0.0", "1.1.0", "1.2.1", "1.2.2", "2.0.0"} {
 		if err := ValidateNodeRuntimeVersion(version); err != nil {

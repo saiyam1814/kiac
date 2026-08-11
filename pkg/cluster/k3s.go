@@ -150,7 +150,7 @@ func k3sAgentEnv(serverIP, token string) []string {
 // k3sServerRunOpts carries the common VM knobs into the server VM. Keep
 // this in one place so flags like --kernel cannot silently apply to the
 // kubeadm path only.
-func k3sServerRunOpts(cfg Config, nodeName, token string) runtime.RunOpts {
+func k3sServerRunOpts(cfg Config, nodeName, token string, dns []string) runtime.RunOpts {
 	entry, bootArgs := k3sBoot(cfg, k3sServerArgs(cfg, nodeName))
 	return runtime.RunOpts{
 		Name:       nodeName,
@@ -161,11 +161,12 @@ func k3sServerRunOpts(cfg Config, nodeName, token string) runtime.RunOpts {
 		Entrypoint: entry,
 		Kernel:     cfg.Kernel,
 		Args:       bootArgs,
+		DNS:        dns,
 	}
 }
 
 // k3sAgentRunOpts mirrors k3sServerRunOpts for workers.
-func k3sAgentRunOpts(cfg Config, nodeName string, env []string) runtime.RunOpts {
+func k3sAgentRunOpts(cfg Config, nodeName string, env []string, dns []string) runtime.RunOpts {
 	entry, bootArgs := k3sBoot(cfg, k3sAgentArgs(nodeName))
 	return runtime.RunOpts{
 		Name:       nodeName,
@@ -176,6 +177,7 @@ func k3sAgentRunOpts(cfg Config, nodeName string, env []string) runtime.RunOpts 
 		Entrypoint: entry,
 		Kernel:     cfg.Kernel,
 		Args:       bootArgs,
+		DNS:        dns,
 	}
 }
 
@@ -234,6 +236,9 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	if err := validateIPFamily(cfg); err != nil {
 		return err
 	}
+	if err := validateDNS(cfg); err != nil {
+		return err
+	}
 	if cfg.family() == IPv6 {
 		return fmt.Errorf("--ip-family ipv6 is not supported on --distro k3s yet (it needs pre-boot apiserver cert SANs the kubeadm path handles); use --distro kubeadm for IPv6-only, or --ip-family dual on k3s")
 	}
@@ -263,8 +268,10 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		return err
 	}
 
+	dns := nodeDNS(cfg)
+
 	if err := ui.Step("Booting k3s server VM", func() error {
-		if err := m.rt.RunDetached(k3sServerRunOpts(cfg, cp, token)); err != nil {
+		if err := m.rt.RunDetached(k3sServerRunOpts(cfg, cp, token, dns)); err != nil {
 			return err
 		}
 		// WaitReady polls systemd/containerd and cannot work here (k3s
@@ -299,7 +306,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			for i := 1; i <= cfg.Workers; i++ {
 				w := worker(cfg.Name, i)
 				workers = append(workers, w)
-				if err := m.rt.RunDetached(k3sAgentRunOpts(cfg, w, env)); err != nil {
+				if err := m.rt.RunDetached(k3sAgentRunOpts(cfg, w, env, dns)); err != nil {
 					return err
 				}
 			}

@@ -108,7 +108,8 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 		CPMemory: "4G",
 		Kernel:   "/tmp/kiac-kernel-full",
 	}
-	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123")
+	dns := []string{"192.168.64.1", "1.1.1.1"}
+	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123", dns)
 	if server.Kernel != cfg.Kernel {
 		t.Errorf("server Kernel = %q, want %q", server.Kernel, cfg.Kernel)
 	}
@@ -118,14 +119,20 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	if len(server.Env) != 1 || server.Env[0] != "K3S_TOKEN=tok123" {
 		t.Errorf("server Env = %q", server.Env)
 	}
+	if strings.Join(server.DNS, ",") != "192.168.64.1,1.1.1.1" {
+		t.Errorf("server DNS = %q", server.DNS)
+	}
 
 	env := k3sAgentEnv("192.168.64.5", "tok123")
-	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env)
+	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env, dns)
 	if agent.Kernel != cfg.Kernel {
 		t.Errorf("agent Kernel = %q, want %q", agent.Kernel, cfg.Kernel)
 	}
 	if agent.Memory != cfg.Memory || agent.Entrypoint == "" || len(agent.Args) == 0 {
 		t.Errorf("agent opts lost k3s boot settings: %+v", agent)
+	}
+	if strings.Join(agent.DNS, ",") != "192.168.64.1,1.1.1.1" {
+		t.Errorf("agent DNS = %q", agent.DNS)
 	}
 	if strings.Join(agent.Env, "\n") != strings.Join(env, "\n") {
 		t.Errorf("agent Env = %q, want %q", agent.Env, env)
