@@ -46,6 +46,13 @@ cni: kindnet
 # IPv6-enabled container network (macOS 26+).
 ipFamily: ipv4
 
+# Nameserver IPs for the node VMs, up to 3 (resolv.conf's own limit).
+# Given, this replaces the runtime's default resolv.conf entirely
+# rather than adding to it. Useful when VPN/Zero Trust software on the
+# Mac takes over the host's port 53, breaking the vmnet gateway
+# resolver nodes use by default (see docs/docs/troubleshooting.html).
+# dns: [1.1.1.1, 8.8.8.8]
+
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G

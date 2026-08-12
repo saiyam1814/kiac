@@ -115,6 +115,7 @@ func init() {
 	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
+	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")

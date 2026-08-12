@@ -12,6 +12,8 @@ k8sVersion: "1.36"   # Kubernetes minor ("1.36") or exact patch ("1.36.1")
 cni: kindnet         # pod network: kindnet, or none to bring your own
 ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary).
                      # dual/ipv6 auto-select the full kernel (IPv6 netfilter) and need macOS 26+.
+# dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the
+                     # runtime default resolv.conf entirely when set
 cpus: "4"            # vCPUs per node VM (quote it: YAML reads bare 4 as a number)
 memory: 4G           # memory per node VM
 wait: 5m             # timeout for nodes to become Ready

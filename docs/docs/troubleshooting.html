@@ -90,6 +90,14 @@ dev   0/3 stopped</span></code></pre>
     <li><b>Cluster name too long</b>: a node's container name is also its Linux hostname, capped at 63 characters. kiac rejects names that would overflow; use a shorter name.</li>
   </ul>
 
+  <h2 id="vpn-dns">Image pulls fail with VPN software on the Mac</h2>
+  <p>Symptom: the cluster creates, but pods stay in <code>ImagePullBackOff</code> and node logs show something like <code>lookup registry.k8s.io on 192.168.64.1:53: read: connection refused</code>.</p>
+  <p>Node VMs get their DNS from the vmnet gateway (<code>192.168.64.1</code>), which is your Mac's own mDNSResponder answering on the NAT network. Some VPN and Zero Trust clients assume control of the host's port 53 to run their own DNS proxy; mDNSResponder then stops serving the gateway address, and every lookup from the VMs is refused. The VPN's own proxy typically listens only on loopback, so the VMs cannot reach it either.</p>
+  <p>Point the nodes at resolvers that stay reachable through the VPN with <code>--dns</code> (repeatable, up to 3 entries — resolv.conf's own limit). Given, it replaces the node's resolv.conf entirely rather than adding to whatever the runtime would otherwise set:</p>
+  <pre><code>kiac create cluster --dns 1.1.1.1 --dns 8.8.8.8</code></pre>
+  <p>Or in a <a href="config-file.html">config file</a>: <code>dns: [1.1.1.1, 8.8.8.8]</code>. Choose resolvers your VPN's tunnel actually reaches — public resolvers are the common case, but a corporate resolver works too if it is reachable from inside the VM.</p>
+  <p><code>--dns</code> is creation-time configuration: an existing affected cluster must be deleted and recreated to adopt it.</p>
+
   <h2 id="pending-ip">LoadBalancer EXTERNAL-IP stays &lt;pending&gt;</h2>
   <ul>
     <li>Created with <code>--no-lb</code>? Nothing is installed to assign IPs.</li>

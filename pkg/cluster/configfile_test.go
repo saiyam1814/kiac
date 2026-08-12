@@ -3,6 +3,7 @@ package cluster
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ workers: 3
 k8sVersion: "1.34"
 image: docker.io/kindest/node:v1.34.8
 cni: none
+dns: [192.168.64.1, 9.9.9.9]
 cpus: "8"
 memory: 8G
 wait: 10m
@@ -51,6 +53,9 @@ addons:
 				}
 				if fc.CNI != "none" || fc.CPUs != "8" || fc.Memory != "8G" || fc.Wait != "10m" {
 					t.Errorf("cni/cpus/memory/wait = %q/%q/%q/%q", fc.CNI, fc.CPUs, fc.Memory, fc.Wait)
+				}
+				if len(fc.DNS) != 2 || fc.DNS[0] != "192.168.64.1" || fc.DNS[1] != "9.9.9.9" {
+					t.Errorf("dns = %q", fc.DNS)
 				}
 				a := fc.Addons
 				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer || a.EdgeProxy == nil || *a.EdgeProxy {
@@ -77,7 +82,7 @@ addons:
 			name: "empty file is all defaults",
 			yaml: "",
 			check: func(t *testing.T, fc *FileConfig) {
-				if *fc != (FileConfig{}) {
+				if !reflect.DeepEqual(*fc, FileConfig{}) {
 					t.Errorf("fc = %+v, want zero value", fc)
 				}
 			},
@@ -149,6 +154,7 @@ func TestMerge(t *testing.T) {
 		K8sVersion: "1.34",
 		Image:      "docker.io/kindest/node:v1.34.8",
 		CNI:        "none",
+		DNS:        []string{"192.168.64.1", "9.9.9.9"},
 		CPUs:       "8",
 		Memory:     "8G",
 		Wait:       "10m",
@@ -178,6 +184,7 @@ func TestMerge(t *testing.T) {
 				Name: "demo", Workers: 3,
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
+				DNS:       []string{"192.168.64.1", "9.9.9.9"},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
@@ -209,6 +216,7 @@ func TestMerge(t *testing.T) {
 				Name: "cli", Workers: 1,
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
+				DNS:       []string{"192.168.64.1", "9.9.9.9"},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
@@ -226,11 +234,33 @@ func TestMerge(t *testing.T) {
 				Name: "demo", Workers: 3,
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
+				DNS:       []string{"192.168.64.1", "9.9.9.9"},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
 				NoMetrics: true, NoStorage: true, NoLB: false, NoEdgeProxy: false,
 				Observability: false, Gateway: false,
+				WaitTimeout: 10 * time.Minute,
+			},
+			wantVersion: "1.34",
+		},
+		{
+			name:    "explicit DNS flag overrides file",
+			file:    full,
+			changed: map[string]bool{"dns": true},
+			mutate: func(cfg *Config, v *string) {
+				cfg.DNS = []string{"10.0.0.53"}
+			},
+			wantCfg: Config{
+				Name: "demo", Workers: 3,
+				Image:     "docker.io/kindest/node:v1.34.8",
+				CNI:       "none",
+				DNS:       []string{"10.0.0.53"},
+				CPUs:      "8",
+				Memory:    "8G",
+				CPMemory:  "4G",
+				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
 			wantVersion: "1.34",
@@ -267,7 +297,7 @@ func TestMerge(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg != c.wantCfg {
+			if !reflect.DeepEqual(cfg, c.wantCfg) {
 				t.Errorf("cfg = %+v, want %+v", cfg, c.wantCfg)
 			}
 			if version != c.wantVersion {
