@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Integration labs - kiac docs</title>
-<meta name="description" content="Tested, repeatable labs for running Portainer CE, k8gb, Gateway API, observability, and OpenChoreo on kiac clusters.">
+<meta name="description" content="Tested, repeatable labs for running Portainer CE, Rancher Manager, k8gb, Gateway API, observability, and OpenChoreo on kiac clusters.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -40,6 +40,7 @@
   <div class="group"><div class="glabel">Hands-on</div>
     <a class="on" href="labs.html">Integration labs</a>
     <a href="portainer.html">Portainer on kiac</a>
+    <a href="rancher.html">Rancher on kiac</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
@@ -71,6 +72,21 @@
   <div class="lab-actions"><a href="portainer.html">Run Portainer on kiac</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer.sh">Installation script</a></div>
   <p>Portainer manages the Kubernetes cluster; it does not provide Docker Engine or Docker Compose compatibility for the macOS host.</p>
 
+  <h2 id="rancher">Run Rancher on kiac</h2>
+  <div class="product-head">
+    <img class="wide-logo" src="../assets/rancher-logo.svg" alt="Rancher">
+    <div><strong>Rancher Manager</strong><span>Optional Kubernetes management platform; no key required</span></div>
+    <a class="product-link" href="rancher.html">Open the full guide</a>
+  </div>
+  <p>Rancher runs as an optional application on a dedicated kiac Kubernetes cluster; it is not built into kiac. The tested example pins Rancher and its stable chart to <code>2.14.3</code> on Kubernetes <code>1.34</code>, uses kiac's Gateway API for HTTPS, authenticates through Rancher's API, and confirms that the local cluster is active with its node visible.</p>
+  <div class="note"><b>No license key and no extra certificate controller</b>
+  This runs open-source Rancher Manager. A generated TLS secret lets the existing kiac Traefik Gateway terminate HTTPS without installing cert-manager.</div>
+  <pre><code>./examples/rancher.sh up
+./examples/rancher.sh verify
+./examples/rancher.sh cleanup</code></pre>
+  <div class="lab-actions"><a href="rancher.html">Run Rancher on kiac</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/rancher.sh">Installation script</a></div>
+  <p>The script uses a dedicated cluster because Rancher creates cluster-wide controllers, roles, webhooks, custom resources, and system namespaces. Cleanup deletes that owned cluster instead of attempting a partial uninstall from an unrelated environment.</p>
+
   <h2 id="addons">Gateway API and observability</h2>
   <p>These labs exercise kiac's built-in addons through their user-facing endpoints:</p>
   <table>
@@ -98,7 +114,7 @@
 
   <div class="pn">
     <a href="gateway-api.html"><span>Previous</span>Gateway API</a>
-    <a class="next" href="node-chaos.html"><span>Next</span>Node chaos</a>
+    <a class="next" href="portainer.html"><span>Next</span>Portainer on kiac</a>
   </div>
 </main>
 </div>

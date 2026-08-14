@@ -188,6 +188,18 @@ This example installs Portainer Community Edition as an optional application ins
 
 The script pins Portainer CE `2.39.5` and chart `239.5.0`, waits for its PVC and LoadBalancer address, authenticates with the generated admin credential, registers the kiac cluster in Portainer, and reads the cluster's nodes through Portainer's Kubernetes API proxy. The complete workflow was rerun against the released `kiac v0.5.0`; see [Run Portainer CE on kiac](https://saiyam1814.github.io/kiac/docs/portainer.html) or [`examples/portainer-lab.md`](examples/portainer-lab.md).
 
+### Run Rancher on kiac
+
+This example installs open-source Rancher Manager on a dedicated kiac cluster. Rancher is optional and requires no license key. The script uses kiac's Gateway API addon, generates local TLS and protected bootstrap credentials, and keeps Rancher's cluster-wide resources inside an isolated cluster with unambiguous cleanup.
+
+```bash
+./examples/rancher.sh up
+./examples/rancher.sh verify
+./examples/rancher.sh cleanup
+```
+
+Rancher Manager and its stable chart are pinned to `2.14.3` on Kubernetes `1.34`. The verifier reaches the dashboard through the HTTPS Gateway, authenticates to the live API, confirms the server version, waits for Rancher's local cluster to become active, and lists its node. See [Run Rancher on kiac](https://saiyam1814.github.io/kiac/docs/rancher.html) or [`examples/rancher-lab.md`](examples/rancher-lab.md).
+
 The [integration labs](https://saiyam1814.github.io/kiac/docs/labs.html) also cover Gateway API, observability, k8gb failover, OpenChoreo, node failure, and reboot recovery.
 
 ### See the isolation pay off
