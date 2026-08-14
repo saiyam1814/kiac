@@ -13,6 +13,11 @@
   <img src="https://img.shields.io/badge/platform-Apple%20silicon-555" alt="Apple silicon">
   <img src="https://img.shields.io/badge/Kubernetes-1.32–1.36-326CE5" alt="Kubernetes 1.32-1.36">
   <a href="https://saiyam1814.github.io/kiac/"><img src="https://img.shields.io/badge/website-kiac-326CE5" alt="website"></a>
+  <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac"><img src="https://img.shields.io/badge/CNCF%20Landscape-listed-0086FF" alt="Listed in the CNCF Landscape"></a>
+</p>
+
+<p align="center">
+  kiac is listed in the <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Cloud Native Landscape</a> under <b>Platform / Certified Kubernetes - Installer</b>.
 </p>
 
 <p align="center">
@@ -170,6 +175,20 @@ kiac create cluster --name dev --workers 2 --observability --gateway
 ```
 
 One command later you have Grafana at port 3000 on a real LoadBalancer IP (anonymous admin, local-only, two dashboards already provisioned) and a Gateway serving HTTP on port 80, also on a LoadBalancer IP. Point an HTTPRoute at `parentRefs: [{name: kiac, namespace: kiac-gateway}]` and it routes with zero extra setup; see [`examples/gateway-api-lab.md`](examples/gateway-api-lab.md), [`examples/observability-lab.md`](examples/observability-lab.md), and [`examples/httproute.yaml`](examples/httproute.yaml). The same two flags work on kubeadm, k3s, and Cilium clusters.
+
+### Run the Portainer CE lab
+
+Portainer is an optional workload, so it adds nothing to normal cluster startup or idle resource use. The lab installs Community Edition, which does not require a license key; Portainer Business Edition is the product that requires one.
+
+```bash
+./examples/portainer.sh up
+./examples/portainer.sh verify
+./examples/portainer.sh cleanup
+```
+
+This is more than an install manifest. The script pins Portainer CE `2.39.5` and chart `239.5.0`, waits for its PVC and LoadBalancer address, authenticates with the generated admin credential, registers the local Kubernetes environment, and reads the cluster's nodes through Portainer's Kubernetes API proxy. The complete workflow was rerun against the released `kiac v0.5.0`; see the [website guide](https://saiyam1814.github.io/kiac/docs/portainer.html) or [`examples/portainer-lab.md`](examples/portainer-lab.md).
+
+The [integration labs](https://saiyam1814.github.io/kiac/docs/labs.html) also cover Gateway API, observability, k8gb failover, OpenChoreo, node failure, and reboot recovery.
 
 ### See the isolation pay off
 
