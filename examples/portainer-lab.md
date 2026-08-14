@@ -30,7 +30,7 @@ brew install helm jq
 kiac doctor
 ```
 
-Portainer CE does not require a license. The official images and chart support arm64.
+Portainer CE does not require a license key. This lab never installs or enables Business Edition, which has a separate licensing flow. See Portainer's official [Community Edition install guide](https://docs.portainer.io/start/install-ce/server/kubernetes) and [Business Edition install guide](https://docs.portainer.io/start/install/server/kubernetes) for the distinction. The official images and chart support arm64.
 
 ## Start the lab
 
@@ -54,6 +54,10 @@ password file: /Users/you/.kiac/labs/portainer/portainer-lab/admin-password
 ```
 
 The certificate is generated locally by Portainer, so the browser will show a self-signed certificate warning.
+
+### Validation baseline
+
+The complete workflow was rerun on August 14, 2026 with the released `kiac v0.5.0`: `up` created Kubernetes `1.34.8`, installed Portainer CE `2.39.5`, authenticated to the live API, found one healthy managed environment, and read one node through Portainer's Kubernetes API proxy. A separate `verify` run passed the same checks, and `cleanup` removed the cluster, kubeconfig context, and credential state.
 
 ## Verify it again
 

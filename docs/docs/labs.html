@@ -39,6 +39,7 @@
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a class="on" href="labs.html">Integration labs</a>
+    <a href="portainer.html">Portainer CE</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
@@ -56,11 +57,19 @@
   <p class="lede">Repeatable workflows that exercise real traffic, storage, APIs, and failure paths on kiac clusters. Each lab includes verification and cleanup instead of stopping at installation.</p>
 
   <h2 id="portainer">Portainer CE</h2>
-  <p>Run the license-free Portainer Community Edition on a small Kubernetes cluster. The lab pins the image and Helm chart, gives Portainer a persistent volume and LoadBalancer address, protects the generated admin password, and verifies authenticated API access.</p>
+  <div class="product-head">
+    <img src="../assets/portainer-mark.svg" alt="">
+    <div><strong>Portainer Community Edition</strong><span>Optional Kubernetes management UI; no key required</span></div>
+    <a class="product-link" href="portainer.html">Open the full guide</a>
+  </div>
+  <p>This lab was freshly rerun end to end with the released <code>kiac v0.5.0</code>. It pins Portainer CE <code>2.39.5</code> and chart <code>239.5.0</code>, binds persistent storage, receives a real LoadBalancer IP, authenticates through the Portainer API, registers the local environment, and reads Kubernetes nodes through Portainer's API proxy.</p>
+  <div class="note"><b>No license key is needed</b>
+  This installs Portainer Community Edition. Portainer Business Edition is a separate product and does require a license key.</div>
   <pre><code>./examples/portainer.sh up
 ./examples/portainer.sh verify
 ./examples/portainer.sh cleanup</code></pre>
-  <p>Read the complete <a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer-lab.md">Portainer CE lab</a>. Portainer manages the Kubernetes cluster; it does not provide Docker Engine or Docker Compose compatibility for the macOS host.</p>
+  <div class="lab-actions"><a href="portainer.html">Step-by-step Portainer guide</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer.sh">Lab script</a></div>
+  <p>Portainer manages the Kubernetes cluster; it does not provide Docker Engine or Docker Compose compatibility for the macOS host.</p>
 
   <h2 id="addons">Gateway API and observability</h2>
   <p>These labs exercise kiac's built-in addons through their user-facing endpoints:</p>

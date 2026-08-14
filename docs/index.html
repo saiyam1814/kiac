@@ -56,6 +56,7 @@
   .pill {
     display: inline-block; font-size: 13px; font-weight: 600; color: var(--accent);
     background: var(--accent-tint); border-radius: 99px; padding: 6px 14px; margin-bottom: 24px;
+    text-decoration: none;
   }
   h1 {
     font-size: clamp(44px, 8vw, 76px); line-height: 1.04; letter-spacing: -0.02em; font-weight: 800;
@@ -154,6 +155,38 @@
   .why-points .pt b { display: block; font-size: 16px; margin-bottom: 4px; }
   .why-points .pt p { color: var(--mid); font-size: 15px; }
 
+  .ecosystem-band {
+    display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 42px; align-items: center;
+    border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider);
+    padding-top: 34px; padding-bottom: 34px;
+  }
+  .ecosystem-band img { width: 150px; max-height: 138px; object-fit: contain; justify-self: center; }
+  .ecosystem-copy h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: 0; }
+  .ecosystem-copy p { color: var(--mid); max-width: 670px; }
+  .text-link { display: inline-block; margin-top: 12px; color: var(--accent); font-weight: 700; text-decoration: none; }
+
+  .lab-showcase {
+    display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    gap: 48px; align-items: start; margin-top: 40px;
+  }
+  .portainer-lockup { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .portainer-lockup img { width: 42px; height: 52px; object-fit: contain; }
+  .portainer-lockup strong { display: block; font-size: 20px; letter-spacing: 0; }
+  .portainer-lockup span { display: block; color: var(--mid); font-size: 14px; }
+  .lab-copy p { color: var(--mid); font-size: 15px; }
+  .lab-copy .license { color: var(--ink); font-weight: 700; margin-bottom: 10px; }
+  .lab-command {
+    margin-top: 18px; padding: 16px 18px; overflow-x: auto;
+    background: #0d1226; color: #c9cede; border-radius: 14px;
+    font: 13px/1.7 "SF Mono", "Roboto Mono", ui-monospace, monospace;
+  }
+  .lab-proof { border-bottom: 1px solid var(--divider); }
+  .lab-proof div { border-top: 1px solid var(--divider); padding: 13px 0; }
+  .lab-proof b { display: block; font-size: 14px; }
+  .lab-proof span { color: var(--mid); font-size: 13.5px; }
+  .lab-links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px; }
+  .lab-links a { color: var(--accent); font-weight: 700; text-decoration: none; }
+
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
   .card {
     background: var(--bg-soft); border-radius: var(--radius); padding: 28px;
@@ -170,6 +203,10 @@
     text-align: center; color: var(--mid); font-size: 14px;
   }
   footer a { color: var(--ink); text-decoration: none; font-weight: 600; }
+  @media (max-width: 720px) {
+    .ecosystem-band, .lab-showcase { grid-template-columns: 1fr; gap: 24px; }
+    .ecosystem-band img { justify-self: start; width: 118px; max-height: 108px; }
+  }
   @media (max-width: 600px) { .nav-links a:not(.gh) { display: none; } }
 </style>
 </head>
@@ -182,7 +219,7 @@
       <a href="#why">Why</a>
       <a href="#features">Features</a>
       <a href="#install">Install</a>
-      <a href="docs/labs.html">Labs</a>
+      <a href="#labs">Labs</a>
       <a href="docs/index.html">Docs</a>
       <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
     </div>
@@ -190,7 +227,7 @@
 </nav>
 
 <div class="hero">
-  <div class="pill">Latest release · Built on apple/container</div>
+  <a class="pill" href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">Listed in the CNCF Landscape · Built on apple/container</a>
   <h1>Kubernetes.<br><span class="grad">Every node, its own VM.</span></h1>
   <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. Run Cilium and eBPF on a Mac. Get a k3s cluster in about 30 seconds. Keep your clusters across reboots. Storage, metrics, and LoadBalancer included.</p>
   <div class="cta-row">
@@ -215,6 +252,17 @@
     <div class="term-body" id="term"></div>
   </div>
 </div>
+
+<section class="ecosystem-band" id="landscape">
+  <img src="assets/logo-stacked.svg" alt="kiac full wordmark">
+  <div class="ecosystem-copy">
+    <div class="kicker">Cloud native ecosystem</div>
+    <h2>Now listed in the CNCF Landscape.</h2>
+    <p>Find kiac under Platform / Certified Kubernetes - Installer. The hosted Landscape logo includes the full <strong>kiac</strong> wordmark shown here; its text is simply easy to miss in the compact search thumbnail.</p>
+    <p>A Landscape listing records ecosystem inclusion. kiac is not currently a CNCF-hosted project and this listing does not imply CNCF endorsement.</p>
+    <a class="text-link" href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">View the live Landscape entry</a>
+  </div>
+</section>
 
 <section id="flavors">
   <div class="kicker">Pick your flavor</div>
@@ -295,6 +343,32 @@
   </div>
 </section>
 
+<section id="labs">
+  <div class="kicker">Verified labs</div>
+  <h2>Run the integration, then prove it works.</h2>
+  <p class="lede">Each lab owns its setup, checks the user-facing path, and cleans up after itself. Integrations stay outside the kiac binary, so normal clusters pay no startup or idle-resource cost.</p>
+  <div class="lab-showcase">
+    <div class="lab-copy">
+      <div class="portainer-lockup">
+        <img src="assets/portainer-mark.svg" alt="">
+        <div><strong>Portainer Community Edition</strong><span>Optional Kubernetes management UI</span></div>
+      </div>
+      <p class="license">No license key required.</p>
+      <p>The lab pins Portainer CE 2.39.5, creates persistent storage and a real LoadBalancer endpoint, protects the generated admin password, and registers the local Kubernetes environment.</p>
+      <pre class="lab-command">./examples/portainer.sh up
+./examples/portainer.sh verify
+./examples/portainer.sh cleanup</pre>
+      <div class="lab-links"><a href="docs/portainer.html">Portainer guide</a><a href="docs/labs.html">All integration labs</a></div>
+    </div>
+    <div class="lab-proof">
+      <div><b>Authenticated, not assumed</b><span>The verifier obtains a JWT from the live Portainer API.</span></div>
+      <div><b>Kubernetes environment healthy</b><span>Portainer reports the local Type 5 environment available.</span></div>
+      <div><b>Management path exercised</b><span>The Kubernetes API proxy returns the cluster's NodeList.</span></div>
+      <div><b>Fresh release baseline</b><span><code>up</code>, a separate <code>verify</code>, and <code>cleanup</code> passed on kiac v0.5.0.</span></div>
+    </div>
+  </div>
+</section>
+
 <section id="install">
   <div class="kicker">Install</div>
   <h2>Three commands to a cluster.</h2>
@@ -307,7 +381,7 @@
 </section>
 
 <footer>
-  <p><strong>kiac</strong> - Kubernetes in Apple Containers · <a href="docs/index.html">Docs</a> · MIT License</p>
+  <p><strong>kiac</strong> - Kubernetes in Apple Containers · <a href="docs/index.html">Docs</a> · <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a> · MIT License</p>
   <p style="margin-top:10px">Built by <a href="https://github.com/saiyam1814">Saiyam Pathak</a> on apple/container and the kindest/node image.</p>
 </footer>
 

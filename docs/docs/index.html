@@ -39,6 +39,7 @@
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a href="labs.html">Integration labs</a>
+    <a href="portainer.html">Portainer CE</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
@@ -54,6 +55,8 @@
   <div class="kicker">Docs</div>
   <h1>kiac: Kubernetes in Apple Containers</h1>
   <p class="lede">kiac creates local Kubernetes clusters on Apple silicon where every node boots as its own lightweight virtual machine, powered by Apple's open-source <a href="https://github.com/apple/container">container</a> runtime. No Docker Desktop, no Lima, no QEMU.</p>
+  <div class="note"><b>Part of the cloud native ecosystem</b>
+  kiac is <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">listed in the CNCF Landscape</a> under Platform / Certified Kubernetes - Installer. A Landscape listing is ecosystem inclusion, not CNCF-hosted project status.</div>
 
   <h2 id="what">What you get</h2>
   <p>One command boots a real multi-node cluster from the standard <code>kindest/node</code> image, with the first-five-minutes toolkit already installed:</p>
@@ -67,6 +70,7 @@
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>
     <li><b>Optional observability.</b> <code>--observability</code> installs Prometheus and Grafana with dashboards already provisioned. See <a href="observability.html">Observability</a>.</li>
     <li><b>Optional Gateway API.</b> <code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway. See <a href="gateway-api.html">Gateway API</a>.</li>
+    <li><b>Verified integration labs.</b> Run real workflows with cleanup for Portainer CE, Gateway API, observability, k8gb, OpenChoreo, node failure, and reboot recovery. Start with the <a href="portainer.html">Portainer CE guide</a> or browse <a href="labs.html">all labs</a>.</li>
     <li><b>Node chaos.</b> <code>kiac stop node</code> / <code>kiac start node</code> stop and restart a real node VM. See <a href="node-chaos.html">Node chaos</a>.</li>
     <li><b>A local dashboard.</b> <code>kiac ui</code> opens a web console with cluster cards, live resource bars, a kubectl console drawer, and a create form. See <a href="dashboard.html">Dashboard</a>.</li>
   </ul>

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portainer CE lab - kiac docs</title>
+<meta name="description" content="Install and verify Portainer Community Edition without a license key on a kiac Kubernetes cluster, including storage, LoadBalancer access, API authentication, and cleanup.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Hands-on</div>
+    <a href="labs.html">Integration labs</a>
+    <a class="on" href="portainer.html">Portainer CE</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Integration lab</div>
+  <h1>Portainer CE on kiac</h1>
+  <p class="lede">A repeatable, disposable Portainer environment that proves the whole path from Kubernetes storage and LoadBalancer networking to authenticated Portainer API access.</p>
+
+  <div class="product-head">
+    <img src="../assets/portainer-mark.svg" alt="">
+    <div><strong>Portainer Community Edition 2.39.5</strong><span>Helm chart 239.5.0 on Kubernetes 1.34</span></div>
+    <a class="product-link" href="https://docs.portainer.io/start/install-ce/server/kubernetes">Official CE docs</a>
+  </div>
+
+  <div class="note"><b>No Portainer license key is required</b>
+  The lab installs the open-source Community Edition image, <code>portainer/portainer-ce</code>. Portainer Business Edition is the edition that asks for a license key.</div>
+
+  <div class="verification-record"><b>Fresh validation:</b> both <code>up</code> and a separate <code>verify</code> run passed against the released <code>kiac v0.5.0</code>. Cleanup then removed the cluster, kubeconfig context, and generated credential state.</div>
+
+  <h2 id="proves">What the lab proves</h2>
+  <div class="proof-grid">
+    <div class="proof-item"><b>Reproducible versions</b><span>Portainer CE 2.39.5, chart 239.5.0, Kubernetes 1.34</span></div>
+    <div class="proof-item"><b>Persistent storage</b><span>The 5 GiB local-path PVC reaches Bound</span></div>
+    <div class="proof-item"><b>External access</b><span>kiac-lb assigns an address to HTTPS port 9443</span></div>
+    <div class="proof-item"><b>Protected credentials</b><span>A generated password is stored in a mode-0600 file</span></div>
+    <div class="proof-item"><b>Real authentication</b><span>The admin credential obtains a Portainer JWT</span></div>
+    <div class="proof-item"><b>Kubernetes management</b><span>A healthy Type 5 environment is registered</span></div>
+    <div class="proof-item"><b>API proxy path</b><span>Portainer returns a NodeList from Kubernetes</span></div>
+    <div class="proof-item"><b>Owned cleanup</b><span>Only lab-created resources and state are deleted</span></div>
+  </div>
+
+  <pre><code>macOS browser or API
+        |
+        | HTTPS :9443
+        v
+kiac-lb address  -&gt;  Portainer CE pod  -&gt;  Kubernetes API
+                              |
+                              v
+                    5 GiB local-path PVC</code></pre>
+
+  <h2 id="requirements">Requirements</h2>
+  <p>Run the commands from a kiac checkout. The script checks every required executable before changing anything.</p>
+  <pre><code>brew install --cask saiyam1814/tap/kiac
+brew install helm jq
+kiac doctor</code></pre>
+  <p>It also uses <code>container</code>, <code>kubectl</code>, <code>curl</code>, and <code>openssl</code>.</p>
+
+  <h2 id="start">Create and install</h2>
+  <pre><code>./examples/portainer.sh up</code></pre>
+  <p>The default run creates an isolated, single-node cluster named <code>portainer-lab</code>. It then creates the namespace and password, installs the pinned chart, waits for the Deployment and PVC, discovers the LoadBalancer IP, signs into the API, and idempotently registers the Kubernetes environment.</p>
+  <p>A successful run ends with output like this:</p>
+  <pre><code><span class="o">Portainer API version: 2.39.5</span>
+<span class="o">managed environments: 1</span>
+<span class="o">Kubernetes nodes through Portainer: 1</span>
+UI: https://192.168.64.x:9443
+username: admin
+password file: ~/.kiac/labs/portainer/portainer-lab/admin-password</code></pre>
+  <div class="warn"><b>Local certificate</b>
+  Portainer generates a self-signed certificate for this local lab, so the browser warns before opening the HTTPS UI. Keep the LoadBalancer address on a trusted local network.</div>
+
+  <h2 id="verify">Verify the real user path</h2>
+  <pre><code>./examples/portainer.sh verify</code></pre>
+  <p>This command does not reinstall Portainer. It independently checks rollout status, the Bound PVC, the assigned LoadBalancer address, the pinned version from <code>/api/system/status</code>, JWT authentication, the healthy local environment, and a NodeList through Portainer's Kubernetes API proxy.</p>
+  <p>Inspect the underlying resources whenever you need the Kubernetes view:</p>
+  <pre><code>kubectl --context kiac-portainer-lab \
+  -n portainer get deploy,pod,svc,pvc</code></pre>
+
+  <h2 id="existing">Use an existing kiac cluster</h2>
+  <pre><code>KIAC_PORTAINER_CLUSTER=dev \
+KIAC_PORTAINER_USE_EXISTING=true \
+./examples/portainer.sh up</code></pre>
+  <p>The script refuses to adopt a pre-existing <code>portainer</code> namespace or Helm release. Ownership markers ensure cleanup removes only what this lab created and never deletes an existing cluster.</p>
+  <p>To choose the password without placing it in shell history:</p>
+  <pre><code>PORTAINER_ADMIN_PASSWORD_FILE="$HOME/.config/portainer-lab-password" \
+./examples/portainer.sh up</code></pre>
+
+  <h2 id="cleanup">Clean up</h2>
+  <pre><code>./examples/portainer.sh cleanup</code></pre>
+  <p>For the default lab, this deletes the owned kiac cluster and its credential state. When using an existing cluster, it removes only the owned Helm release, namespace, and local password copy.</p>
+
+  <h2 id="boundaries">Scope and security</h2>
+  <ul>
+    <li>Portainer receives cluster-admin privileges because it manages this local Kubernetes environment.</li>
+    <li>The generated credential is local state; do not commit or share it.</li>
+    <li>Use a trusted certificate and external authentication for a shared deployment.</li>
+    <li>This lab manages Kubernetes. It does not turn apple/container into Docker Engine or add Docker Compose compatibility to macOS.</li>
+  </ul>
+
+  <div class="lab-actions"><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer.sh">Read the script</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer-lab.md">Markdown lab</a><a href="https://docs.portainer.io/start/install-ce/server/kubernetes">Portainer Kubernetes docs</a></div>
+
+  <div class="pn">
+    <a href="labs.html"><span>Previous</span>Integration labs</a>
+    <a class="next" href="node-chaos.html"><span>Next</span>Node chaos</a>
+  </div>
+</main>
+</div>
+</body>
+</html>
