@@ -25,7 +25,7 @@ Usage: $0 [up|verify|cleanup]
 
   up        Create a small Kubernetes 1.34 cluster and install Portainer CE
   verify    Check the Deployment, PVC, LoadBalancer, status API, and login API
-  cleanup   Delete only the Portainer resources and cluster owned by this lab
+  cleanup   Delete only Portainer resources and clusters created by this script
 
 Environment:
   KIAC_PORTAINER_CLUSTER=<name>         cluster name (default: portainer-lab)
@@ -78,14 +78,14 @@ ensure_cluster() {
       info "using ready cluster ${CLUSTER_NAME}"
       return
     fi
-    fail "context ${CONTEXT} is live but is not owned by this lab; set KIAC_PORTAINER_USE_EXISTING=true to use it"
+    fail "context ${CONTEXT} is live but was not created by this script; set KIAC_PORTAINER_USE_EXISTING=true to use it"
   fi
 
   use_existing && fail "KIAC_PORTAINER_USE_EXISTING=true, but context ${CONTEXT} is not ready"
 
   if container_exists "${node}"; then
-    [[ -f "${marker}" ]] || fail "cluster ${CLUSTER_NAME} exists and is not owned by this lab"
-    step "Resuming lab cluster ${CLUSTER_NAME}"
+    [[ -f "${marker}" ]] || fail "cluster ${CLUSTER_NAME} exists and was not created by this script"
+    step "Resuming Portainer cluster ${CLUSTER_NAME}"
     kiac resume cluster --name "${CLUSTER_NAME}"
     context_ready "${CONTEXT}" || fail "context ${CONTEXT} is not ready after resume"
     return
@@ -111,7 +111,7 @@ ensure_namespace() {
   local marker="${STATE_DIR}/namespace.created"
 
   if kubectl --context "${CONTEXT}" get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-    [[ -f "${marker}" ]] || fail "namespace ${NAMESPACE} already exists and is not owned by this lab"
+    [[ -f "${marker}" ]] || fail "namespace ${NAMESPACE} already exists and was not created by this script"
     return
   fi
 
@@ -178,7 +178,7 @@ ensure_release() {
     | kubectl --context "${CONTEXT}" apply -f - >/dev/null
 
   if helm status "${RELEASE}" --kube-context "${CONTEXT}" --namespace "${NAMESPACE}" >/dev/null 2>&1; then
-    [[ -f "${marker}" ]] || fail "Helm release ${NAMESPACE}/${RELEASE} exists and is not owned by this lab"
+    [[ -f "${marker}" ]] || fail "Helm release ${NAMESPACE}/${RELEASE} exists and was not created by this script"
   else
     touch "${marker}"
   fi
@@ -344,7 +344,7 @@ cleanup() {
   require_tools
 
   if [[ -f "${STATE_DIR}/cluster.created" ]]; then
-    step "Deleting lab cluster ${CLUSTER_NAME}"
+    step "Deleting Portainer cluster ${CLUSTER_NAME}"
     kiac delete cluster --name "${CLUSTER_NAME}"
     rm -rf "${STATE_DIR}"
     return

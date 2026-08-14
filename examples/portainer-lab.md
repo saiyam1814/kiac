@@ -1,10 +1,10 @@
-# Portainer CE lab
+# Run Portainer CE on kiac
 
-[Portainer](https://www.portainer.io/) is a web interface for managing containers and Kubernetes environments. This lab installs Portainer Community Edition inside a real kiac cluster and exposes it through kiac's built-in LoadBalancer.
+[Portainer](https://www.portainer.io/) is a web interface for managing containers and Kubernetes environments. This example installs Portainer Community Edition as an application inside a kiac cluster and exposes it through kiac's built-in LoadBalancer.
 
-Portainer is an optional workload, not a kiac addon. The lab keeps Portainer's cluster-admin access, persistent data, credentials, and lifecycle explicit instead of adding them to every cluster.
+Portainer is optional: it is not bundled with kiac and is not installed during normal cluster creation. The example keeps Portainer's cluster-admin access, persistent data, credentials, and lifecycle explicit.
 
-## What the lab builds
+## What the example installs
 
 ```mermaid
 flowchart LR
@@ -30,9 +30,9 @@ brew install helm jq
 kiac doctor
 ```
 
-Portainer CE does not require a license key. This lab never installs or enables Business Edition, which has a separate licensing flow. See Portainer's official [Community Edition install guide](https://docs.portainer.io/start/install-ce/server/kubernetes) and [Business Edition install guide](https://docs.portainer.io/start/install/server/kubernetes) for the distinction. The official images and chart support arm64.
+Portainer CE does not require a license key. This example never installs or enables Business Edition, which has a separate licensing flow. See Portainer's official [Community Edition install guide](https://docs.portainer.io/start/install-ce/server/kubernetes) and [Business Edition install guide](https://docs.portainer.io/start/install/server/kubernetes) for the distinction. The official images and chart support arm64.
 
-## Start the lab
+## Install Portainer on kiac
 
 From a kiac checkout:
 
@@ -40,7 +40,7 @@ From a kiac checkout:
 ./examples/portainer.sh up
 ```
 
-The first run creates `portainer-lab`, installs Portainer, waits for its Deployment and PVC, obtains the LoadBalancer IP, authenticates through the Portainer API, and registers the in-cluster Kubernetes environment. The current Portainer chart does not perform that final onboarding step automatically, so the lab makes it explicit and idempotent.
+The first run creates a kiac cluster named `portainer-lab`, installs Portainer, waits for its Deployment and PVC, obtains the LoadBalancer IP, authenticates through the Portainer API, and registers the kiac cluster in Portainer. The current Portainer chart does not perform that final onboarding step automatically, so the script makes it explicit and idempotent.
 
 At the end it prints output similar to:
 
@@ -91,7 +91,7 @@ KIAC_PORTAINER_USE_EXISTING=true \
 ./examples/portainer.sh up
 ```
 
-The script refuses to adopt an existing `portainer` namespace or Helm release. Its ownership markers let cleanup remove only resources created by this lab, never the existing cluster.
+The script refuses to adopt an existing `portainer` namespace or Helm release. Its ownership markers let cleanup remove only resources created by the script, never the existing cluster.
 
 To provide your own password without putting it in shell history:
 
@@ -108,12 +108,12 @@ The password must contain at least 12 characters.
 ./examples/portainer.sh cleanup
 ```
 
-For the default lab, this deletes the owned kiac cluster and its state directory. On an existing cluster, it removes only the owned Helm release and namespace, then deletes the local password copy.
+For the default installation, this deletes the kiac cluster created by the script and its state directory. On an existing cluster, it removes only the owned Helm release and namespace, then deletes the local password copy.
 
 ## Scope and security
 
-Portainer receives cluster-admin privileges because it manages the local Kubernetes environment. Use this lab only on a local development cluster, do not expose its LoadBalancer address beyond trusted networks, and use a trusted certificate plus external authentication for a shared deployment.
+Portainer receives cluster-admin privileges because it manages the local Kubernetes environment. Use this example only on a local development cluster, do not expose its LoadBalancer address beyond trusted networks, and use a trusted certificate plus external authentication for a shared deployment.
 
-This lab demonstrates Kubernetes management. It does not turn apple/container into Docker Engine, add Docker Compose compatibility, or make Portainer manage the macOS host runtime.
+This example demonstrates Portainer managing Kubernetes on kiac. It does not turn apple/container into Docker Engine, add Docker Compose compatibility, or make Portainer manage the macOS host runtime.
 
 See Portainer's [Kubernetes installation guide](https://docs.portainer.io/start/install-ce/server/kubernetes/baremetal) and [validated configurations](https://docs.portainer.io/start/requirements-and-prerequisites) for upstream details.
