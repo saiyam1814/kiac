@@ -344,9 +344,9 @@
 </section>
 
 <section id="labs">
-  <div class="kicker">Verified labs</div>
+  <div class="kicker">Optional applications</div>
   <h2>Run the integration, then prove it works.</h2>
-  <p class="lede">Each lab owns its setup, checks the user-facing path, and cleans up after itself. Integrations stay outside the kiac binary, so normal clusters pay no startup or idle-resource cost.</p>
+  <p class="lede">Run applications on kiac with repeatable setup, real user-facing checks, and cleanup. These examples stay outside the kiac binary, so normal clusters pay no startup or idle-resource cost.</p>
   <div class="lab-showcase">
     <div class="lab-copy">
       <div class="portainer-lockup">
@@ -354,11 +354,11 @@
         <div><strong>Portainer Community Edition</strong><span>Optional Kubernetes management UI</span></div>
       </div>
       <p class="license">No license key required.</p>
-      <p>The lab pins Portainer CE 2.39.5, creates persistent storage and a real LoadBalancer endpoint, protects the generated admin password, and registers the local Kubernetes environment.</p>
+      <p>This example installs Portainer CE 2.39.5 inside a kiac cluster, creates persistent storage and a real LoadBalancer endpoint, protects the generated admin password, and registers the kiac cluster in Portainer.</p>
       <pre class="lab-command">./examples/portainer.sh up
 ./examples/portainer.sh verify
 ./examples/portainer.sh cleanup</pre>
-      <div class="lab-links"><a href="docs/portainer.html">Portainer guide</a><a href="docs/labs.html">All integration labs</a></div>
+      <div class="lab-links"><a href="docs/portainer.html">Run Portainer on kiac</a><a href="docs/labs.html">All integration labs</a></div>
     </div>
     <div class="lab-proof">
       <div><b>Authenticated, not assumed</b><span>The verifier obtains a JWT from the live Portainer API.</span></div>

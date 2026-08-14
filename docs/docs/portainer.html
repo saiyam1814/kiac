@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Portainer CE lab - kiac docs</title>
+<title>Run Portainer CE on kiac - kiac docs</title>
 <meta name="description" content="Install and verify Portainer Community Edition without a license key on a kiac Kubernetes cluster, including storage, LoadBalancer access, API authentication, and cleanup.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
@@ -39,7 +39,7 @@
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a href="labs.html">Integration labs</a>
-    <a class="on" href="portainer.html">Portainer CE</a>
+    <a class="on" href="portainer.html">Portainer on kiac</a>
   </div>
   <div class="group"><div class="glabel">Day two</div>
     <a href="node-chaos.html">Node chaos</a>
@@ -52,9 +52,9 @@
   </div>
 </aside>
 <main>
-  <div class="kicker">Integration lab</div>
-  <h1>Portainer CE on kiac</h1>
-  <p class="lede">A repeatable, disposable Portainer environment that proves the whole path from Kubernetes storage and LoadBalancer networking to authenticated Portainer API access.</p>
+  <div class="kicker">Optional application</div>
+  <h1>Run Portainer CE on kiac</h1>
+  <p class="lede">Install Portainer Community Edition as an application inside a kiac Kubernetes cluster, expose its UI, and verify that it can manage the cluster.</p>
 
   <div class="product-head">
     <img src="../assets/portainer-mark.svg" alt="">
@@ -63,11 +63,11 @@
   </div>
 
   <div class="note"><b>No Portainer license key is required</b>
-  The lab installs the open-source Community Edition image, <code>portainer/portainer-ce</code>. Portainer Business Edition is the edition that asks for a license key.</div>
+  This example installs the open-source Community Edition image, <code>portainer/portainer-ce</code>. Portainer Business Edition is the edition that asks for a license key.</div>
 
   <div class="verification-record"><b>Fresh validation:</b> both <code>up</code> and a separate <code>verify</code> run passed against the released <code>kiac v0.5.0</code>. Cleanup then removed the cluster, kubeconfig context, and generated credential state.</div>
 
-  <h2 id="proves">What the lab proves</h2>
+  <h2 id="proves">What the example verifies</h2>
   <div class="proof-grid">
     <div class="proof-item"><b>Reproducible versions</b><span>Portainer CE 2.39.5, chart 239.5.0, Kubernetes 1.34</span></div>
     <div class="proof-item"><b>Persistent storage</b><span>The 5 GiB local-path PVC reaches Bound</span></div>
@@ -76,7 +76,7 @@
     <div class="proof-item"><b>Real authentication</b><span>The admin credential obtains a Portainer JWT</span></div>
     <div class="proof-item"><b>Kubernetes management</b><span>A healthy Type 5 environment is registered</span></div>
     <div class="proof-item"><b>API proxy path</b><span>Portainer returns a NodeList from Kubernetes</span></div>
-    <div class="proof-item"><b>Owned cleanup</b><span>Only lab-created resources and state are deleted</span></div>
+    <div class="proof-item"><b>Owned cleanup</b><span>Only resources and state created by the script are deleted</span></div>
   </div>
 
   <pre><code>macOS browser or API
@@ -97,7 +97,7 @@ kiac doctor</code></pre>
 
   <h2 id="start">Create and install</h2>
   <pre><code>./examples/portainer.sh up</code></pre>
-  <p>The default run creates an isolated, single-node cluster named <code>portainer-lab</code>. It then creates the namespace and password, installs the pinned chart, waits for the Deployment and PVC, discovers the LoadBalancer IP, signs into the API, and idempotently registers the Kubernetes environment.</p>
+  <p>By default, the script creates an isolated, single-node kiac cluster named <code>portainer-lab</code>. It then creates the namespace and password, installs the pinned chart, waits for the Deployment and PVC, discovers the LoadBalancer IP, signs into the API, and idempotently registers the cluster in Portainer.</p>
   <p>A successful run ends with output like this:</p>
   <pre><code><span class="o">Portainer API version: 2.39.5</span>
 <span class="o">managed environments: 1</span>
@@ -106,7 +106,7 @@ UI: https://192.168.64.x:9443
 username: admin
 password file: ~/.kiac/labs/portainer/portainer-lab/admin-password</code></pre>
   <div class="warn"><b>Local certificate</b>
-  Portainer generates a self-signed certificate for this local lab, so the browser warns before opening the HTTPS UI. Keep the LoadBalancer address on a trusted local network.</div>
+  Portainer generates a self-signed certificate for this local installation, so the browser warns before opening the HTTPS UI. Keep the LoadBalancer address on a trusted local network.</div>
 
   <h2 id="verify">Verify the real user path</h2>
   <pre><code>./examples/portainer.sh verify</code></pre>
@@ -119,24 +119,24 @@ password file: ~/.kiac/labs/portainer/portainer-lab/admin-password</code></pre>
   <pre><code>KIAC_PORTAINER_CLUSTER=dev \
 KIAC_PORTAINER_USE_EXISTING=true \
 ./examples/portainer.sh up</code></pre>
-  <p>The script refuses to adopt a pre-existing <code>portainer</code> namespace or Helm release. Ownership markers ensure cleanup removes only what this lab created and never deletes an existing cluster.</p>
+  <p>The script refuses to adopt a pre-existing <code>portainer</code> namespace or Helm release. Ownership markers ensure cleanup removes only what the script created and never deletes an existing cluster.</p>
   <p>To choose the password without placing it in shell history:</p>
   <pre><code>PORTAINER_ADMIN_PASSWORD_FILE="$HOME/.config/portainer-lab-password" \
 ./examples/portainer.sh up</code></pre>
 
   <h2 id="cleanup">Clean up</h2>
   <pre><code>./examples/portainer.sh cleanup</code></pre>
-  <p>For the default lab, this deletes the owned kiac cluster and its credential state. When using an existing cluster, it removes only the owned Helm release, namespace, and local password copy.</p>
+  <p>For the default installation, this deletes the kiac cluster created by the script and its credential state. When using an existing cluster, it removes only the owned Helm release, namespace, and local password copy.</p>
 
   <h2 id="boundaries">Scope and security</h2>
   <ul>
     <li>Portainer receives cluster-admin privileges because it manages this local Kubernetes environment.</li>
     <li>The generated credential is local state; do not commit or share it.</li>
     <li>Use a trusted certificate and external authentication for a shared deployment.</li>
-    <li>This lab manages Kubernetes. It does not turn apple/container into Docker Engine or add Docker Compose compatibility to macOS.</li>
+    <li>This Portainer installation manages Kubernetes. It does not turn apple/container into Docker Engine or add Docker Compose compatibility to macOS.</li>
   </ul>
 
-  <div class="lab-actions"><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer.sh">Read the script</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer-lab.md">Markdown lab</a><a href="https://docs.portainer.io/start/install-ce/server/kubernetes">Portainer Kubernetes docs</a></div>
+  <div class="lab-actions"><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer.sh">Read the script</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/portainer-lab.md">Markdown guide</a><a href="https://docs.portainer.io/start/install-ce/server/kubernetes">Portainer Kubernetes docs</a></div>
 
   <div class="pn">
     <a href="labs.html"><span>Previous</span>Integration labs</a>
