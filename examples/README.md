@@ -38,6 +38,7 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [resume-drill.md](resume-drill.md) | Reboot-survival drill: stop the container system, see `0/3 stopped` in `kiac get clusters`, bring it all back with `kiac resume`, curl the app again. |
 | [k8gb-lab.md](k8gb-lab.md) | Real DNS-based failover across two kiac clusters: lightweight edge DNS, delegated regional CoreDNS, HTTP traffic validation, failover, and failback. |
 | [portainer-lab.md](portainer-lab.md) | Portainer CE on a pinned Kubernetes 1.34 cluster: persistent data, a real LoadBalancer address, protected admin credentials, and authenticated API verification. |
+| [rancher-lab.md](rancher-lab.md) | Rancher Manager on a dedicated Kubernetes 1.34 cluster: Gateway API, local TLS, protected credentials, authenticated API verification, and owned cleanup. |
 | [cluster.yaml](cluster.yaml) | Minimal `--config` file for `kiac create cluster`. |
 | [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, all addons on including observability and gateway. |
 

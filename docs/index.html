@@ -169,10 +169,12 @@
     display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
     gap: 48px; align-items: start; margin-top: 40px;
   }
-  .portainer-lockup { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-  .portainer-lockup img { width: 42px; height: 52px; object-fit: contain; }
-  .portainer-lockup strong { display: block; font-size: 20px; letter-spacing: 0; }
-  .portainer-lockup span { display: block; color: var(--mid); font-size: 14px; }
+  .lab-showcase + .lab-showcase { border-top: 1px solid var(--divider); padding-top: 42px; margin-top: 54px; }
+  .product-lockup { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .product-lockup img { width: 42px; height: 52px; object-fit: contain; }
+  .product-lockup img.wide-logo { width: 128px; height: 48px; }
+  .product-lockup strong { display: block; font-size: 20px; letter-spacing: 0; }
+  .product-lockup span { display: block; color: var(--mid); font-size: 14px; }
   .lab-copy p { color: var(--mid); font-size: 15px; }
   .lab-copy .license { color: var(--ink); font-weight: 700; margin-bottom: 10px; }
   .lab-command {
@@ -349,7 +351,7 @@
   <p class="lede">Run applications on kiac with repeatable setup, real user-facing checks, and cleanup. These examples stay outside the kiac binary, so normal clusters pay no startup or idle-resource cost.</p>
   <div class="lab-showcase">
     <div class="lab-copy">
-      <div class="portainer-lockup">
+      <div class="product-lockup">
         <img src="assets/portainer-mark.svg" alt="">
         <div><strong>Portainer Community Edition</strong><span>Optional Kubernetes management UI</span></div>
       </div>
@@ -365,6 +367,26 @@
       <div><b>Kubernetes environment healthy</b><span>Portainer reports the local Type 5 environment available.</span></div>
       <div><b>Management path exercised</b><span>The Kubernetes API proxy returns the cluster's NodeList.</span></div>
       <div><b>Fresh release baseline</b><span><code>up</code>, a separate <code>verify</code>, and <code>cleanup</code> passed on kiac v0.5.0.</span></div>
+    </div>
+  </div>
+  <div class="lab-showcase">
+    <div class="lab-copy">
+      <div class="product-lockup">
+        <img class="wide-logo" src="assets/rancher-logo.svg" alt="Rancher">
+        <div><strong>Rancher Manager</strong><span>Optional Kubernetes management platform</span></div>
+      </div>
+      <p class="license">Open source. No license key required.</p>
+      <p>This example installs Rancher 2.14.3 on a dedicated Kubernetes 1.34 cluster, terminates local TLS through kiac's Gateway API, and keeps its bootstrap credential and lifecycle explicit.</p>
+      <pre class="lab-command">./examples/rancher.sh up
+./examples/rancher.sh verify
+./examples/rancher.sh cleanup</pre>
+      <div class="lab-links"><a href="docs/rancher.html">Run Rancher on kiac</a><a href="docs/labs.html">All integration labs</a></div>
+    </div>
+    <div class="lab-proof">
+      <div><b>Gateway path exercised</b><span>HTTPS reaches Rancher's dashboard through accepted Gateway API routes.</span></div>
+      <div><b>Authenticated, not assumed</b><span>The verifier signs in and confirms the pinned server version.</span></div>
+      <div><b>Local cluster active</b><span>Rancher's API reports the management cluster active and returns its node.</span></div>
+      <div><b>Dedicated ownership</b><span>Cleanup removes the entire isolated cluster and protected local state.</span></div>
     </div>
   </div>
 </section>
