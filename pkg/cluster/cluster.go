@@ -78,6 +78,17 @@ const ipv6BootPrep = `KIAC_IF="$(ip -4 route show default 2>/dev/null | awk '{pr
 	`[ -n "$KIAC_IF" ] && sysctl -w "net.ipv6.conf.$KIAC_IF.accept_ra=2" >/dev/null 2>&1; ` +
 	`sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1 || true; `
 
+// vmnet mishandles TSO/GSO-deferred TCP streams between sibling VMs once
+// the receiving node forwards them across a veth into a pod - the same
+// pathology as issue #8, but VM-to-VM, where the edge proxy cannot sit.
+// A pod pulling a large body from the API server (kubectl's ~6.5MB
+// OpenAPI download inside a job, for example) crawls at KB/s and times
+// out. Disabling segmentation offload on the sending side keeps those
+// transfers at line rate. Offloads are runtime state, so this runs on
+// every boot and resume. Best-effort: a node without ethtool still
+// works, just slower.
+const senderOffloadFix = "command -v ethtool >/dev/null 2>&1 && ethtool -K eth0 tso off gso off || true"
+
 // WantsIPv6 reports whether the family carries IPv6 traffic at all.
 func (f IPFamily) WantsIPv6() bool { return f == DualStack || f == IPv6 }
 
@@ -232,6 +243,9 @@ func (m *Manager) Create(cfg Config) error {
 				return err
 			}
 			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+				return err
+			}
+			if _, err := m.rt.Exec(n, "sh", "-c", senderOffloadFix); err != nil {
 				return err
 			}
 			if cfg.family().WantsIPv6() {

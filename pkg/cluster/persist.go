@@ -74,8 +74,12 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 			if err := m.bootAndWait(n, waitTimeout); err != nil {
 				return err
 			}
-			// ip_forward is runtime state; the reboot reset it.
+			// ip_forward and NIC offloads are runtime state; the reboot
+			// reset both.
 			if _, err := m.rt.Exec(n, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+				return err
+			}
+			if _, err := m.rt.Exec(n, "sh", "-c", senderOffloadFix); err != nil {
 				return err
 			}
 			// A dual-stack node's kubelet --node-ip pins the OLD v4 and v6

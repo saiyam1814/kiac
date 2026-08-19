@@ -85,7 +85,8 @@ func k3sAgentArgs(nodeName string) []string {
 // backend (CONFIG_IP_NF_IPTABLES_LEGACY=y) is fully supported. Both
 // variants ship in the image under /bin/aux.
 func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
-	cmd := "for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
+	cmd := senderOffloadFix + "; " +
+		"for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
 		"if [ -x " + kiacLBScriptPath + " ]; then " +
 		"mkdir -p /var/log /var/run; " +
 		"if ! kill -0 \"$(cat " + kiacLBK3sSupervisorPID + " 2>/dev/null)\" 2>/dev/null; then " +
