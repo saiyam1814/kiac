@@ -611,10 +611,13 @@ func (m *Manager) preflight() error {
 	if err := runtime.ValidateNodeRuntimeVersion(version); err != nil {
 		return err
 	}
-	if !m.rt.SystemRunning() {
-		if err := m.rt.SystemStart(); err != nil {
-			return fmt.Errorf("container system service is not running and could not be started: %w", err)
-		}
+	// SystemStart is idempotent: it starts the apiserver if needed and
+	// installs the default kernel if one isn't configured. Call it every
+	// time, not just when the service is stopped, so a service left
+	// running with no kernel doesn't slip past preflight and fail later
+	// during node VM boot instead (#35).
+	if err := m.rt.SystemStart(); err != nil {
+		return fmt.Errorf("container system service could not be started, or its default kernel could not be installed: %w", err)
 	}
 	return nil
 }

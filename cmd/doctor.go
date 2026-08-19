@@ -68,6 +68,22 @@ var doctorCmd = &cobra.Command{
 			default:
 				ui.Check(false, "container system service", "stopped - kiac will start it automatically on create, or run: kiac doctor --fix")
 			}
+
+			// A running service doesn't mean a kernel is configured.
+			// If an earlier interactive prompt never got answered, the
+			// service comes up with no kernel and everything here still
+			// passes (#35). container system start always rechecks the
+			// kernel and installs one if missing, so run it again.
+			if doctorFix {
+				if err := rt.SystemStart(); err != nil {
+					failures++
+					ui.Check(false, "default kernel", "install failed: "+err.Error())
+				} else {
+					ui.Check(true, "default kernel", "configured (verified/installed by --fix)")
+				}
+			} else if running {
+				ui.Hintf("default kernel is not verified without --fix; run: kiac doctor --fix")
+			}
 		}
 
 		_, kubectlErr := exec.LookPath("kubectl")

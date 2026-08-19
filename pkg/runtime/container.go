@@ -102,9 +102,16 @@ func (c *Client) SystemStatus(timeout time.Duration) (string, error) {
 	return c.runContext(ctx, "system", "status")
 }
 
-// SystemStart starts the container API server.
+// SystemStart starts the container API server and installs a default
+// kernel if none is configured. Plain `container system start` prompts
+// for that ("Install the recommended default kernel? [Y/n]"), which
+// just hangs with no terminal attached (issue #35). --enable-kernel-install
+// makes it non-interactive.
+//
+// Safe to call even when the service is already running: it checks for
+// a kernel every time and returns fast if one's already installed.
 func (c *Client) SystemStart() error {
-	_, err := c.run("system", "start")
+	_, err := c.run("system", "start", "--enable-kernel-install")
 	return err
 }
 
