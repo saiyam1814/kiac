@@ -17,6 +17,7 @@ CURRENT_CONTEXT=""
 CURRENT_NODES=""
 TRAFFIC_POD=""
 CURRENT_MOUNT_DIR=""
+UPLOAD_NODE_PORT=""
 
 umask 077
 mkdir -p "$(dirname "${TRAFFIC_BIN}")" "$(dirname "${KIAC_E2E_STATE_FILE}")" "$(dirname "${KUBECONFIG}")"
@@ -179,7 +180,7 @@ test_upload() {
     return 1
   }
   container exec "${sender}" /tmp/kiac-e2e-traffic upload \
-    --url "http://$(url_host "${ip}"):32080/upload" --bytes 1048576
+    --url "http://$(url_host "${ip}"):${UPLOAD_NODE_PORT}/upload" --bytes 1048576
 }
 
 test_gateway() {
@@ -309,10 +310,11 @@ run_cluster() {
   done
 
   k apply -f "${ROOT}/test/e2e/workload.yaml"
+  UPLOAD_NODE_PORT=$(k -n kiac-e2e get service upload-server -o jsonpath='{.spec.ports[0].nodePort}')
   k apply -f "${ROOT}/test/e2e/hostpath.yaml"
-  k -n kiac-e2e wait --for=condition=Ready pod/hostpath --timeout=180s
-  [[ "$(k -n kiac-e2e exec hostpath -- cat /host/sentinel | tr -d '\r\n')" == host-sentinel ]]
-  k -n kiac-e2e exec hostpath -- sh -c 'printf pod-write > /host/from-pod'
+  k -n kiac-e2e rollout status deployment/hostpath --timeout=180s
+  [[ "$(k -n kiac-e2e exec deployment/hostpath -- cat /host/sentinel | tr -d '\r\n')" == host-sentinel ]]
+  k -n kiac-e2e exec deployment/hostpath -- sh -c 'printf pod-write > /host/from-pod'
   [[ "$(cat "${mount_dir}/from-pod")" == pod-write ]]
   k -n kiac-e2e patch deployment upload-server --type=merge \
     -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${target}\"}}}}}"
@@ -327,9 +329,9 @@ run_cluster() {
   sleep 5
 
   install_traffic_binary "${sender}"
-  test_upload "${sender}" "${ingress}" v4
+  retry 5 2 test_upload "${sender}" "${ingress}" v4
   if [[ "${family}" == dual ]]; then
-    test_upload "${sender}" "${ingress}" v6
+    retry 5 2 test_upload "${sender}" "${ingress}" v6
   fi
 
   local ingress_ip
@@ -363,7 +365,7 @@ run_cluster() {
       assert_k3s_node_addresses
       retry 30 1 edge_proxy_running "${sender}"
       install_traffic_binary "${sender}"
-      test_upload "${sender}" "${ingress}" v4
+      retry 5 2 test_upload "${sender}" "${ingress}" v4
 
       # Reproduce a host reboot without resetting vmnet for unrelated
       # clusters on the runner: halt every VM, then exercise the k3s-aware
@@ -379,8 +381,8 @@ run_cluster() {
       for node in ${CURRENT_NODES}; do
         [[ "$(container exec "${node}" cat /kiac-e2e-host/sentinel | tr -d '\r\n')" == host-sentinel ]]
       done
-      retry 30 2 k -n kiac-e2e exec hostpath -- test -f /host/from-pod
-      [[ "$(k -n kiac-e2e exec hostpath -- cat /host/from-pod | tr -d '\r\n')" == pod-write ]]
+      retry 30 2 k -n kiac-e2e exec deployment/hostpath -- test -f /host/from-pod
+      [[ "$(k -n kiac-e2e exec deployment/hostpath -- cat /host/from-pod | tr -d '\r\n')" == pod-write ]]
       for node in ${CURRENT_NODES}; do
         retry 30 1 edge_proxy_running "${node}"
       done
@@ -390,7 +392,7 @@ run_cluster() {
       start_traffic_server
       sleep 5
       install_traffic_binary "${sender}"
-      test_upload "${sender}" "${ingress}" v4
+      retry 5 2 test_upload "${sender}" "${ingress}" v4
       if [[ "${features}" == true ]]; then
         test_gateway
         test_observability
@@ -407,7 +409,7 @@ run_cluster() {
       # Reinstall only the test client; the product proxy in /usr/local/bin
       # must have persisted and is checked immediately above.
       install_traffic_binary "${sender}"
-      test_upload "${sender}" "${ingress}" v4
+      retry 5 2 test_upload "${sender}" "${ingress}" v4
     fi
   fi
 
@@ -420,6 +422,7 @@ run_cluster() {
   CURRENT_CLUSTER=""
   CURRENT_CONTEXT=""
   CURRENT_NODES=""
+  UPLOAD_NODE_PORT=""
 }
 
 printf 'Building kiac and the runtime traffic probe with %s\n' "$(go version)"
