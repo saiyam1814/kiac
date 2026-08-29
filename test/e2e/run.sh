@@ -16,6 +16,7 @@ CURRENT_CLUSTER=""
 CURRENT_CONTEXT=""
 CURRENT_NODES=""
 TRAFFIC_POD=""
+CURRENT_MOUNT_DIR=""
 
 umask 077
 mkdir -p "$(dirname "${TRAFFIC_BIN}")" "$(dirname "${KIAC_E2E_STATE_FILE}")" "$(dirname "${KUBECONFIG}")"
@@ -91,6 +92,9 @@ finish() {
       "${CURRENT_CLUSTER}" "${KIAC_BIN}" "${CURRENT_CLUSTER}" >&2
   else
     "${ROOT}/test/e2e/cleanup.sh"
+    if [[ -n "${CURRENT_MOUNT_DIR}" ]]; then
+      rm -rf -- "${CURRENT_MOUNT_DIR}"
+    fi
   fi
   exit "${status}"
 }
@@ -251,6 +255,10 @@ run_cluster() {
   local target="kiac-${name}-worker-2"
   local ingress="kiac-${name}-worker-3"
   local expected=$((workers + 1))
+  local mount_dir="${TMPDIR:-/tmp}/kiac-e2e-${RUN_ID}/${name} host data"
+  mkdir -p "${mount_dir}"
+  printf 'host-sentinel\n' > "${mount_dir}/sentinel"
+  CURRENT_MOUNT_DIR=${mount_dir}
 
   CURRENT_CLUSTER=${name}
   CURRENT_CONTEXT="kiac-${name}"
@@ -261,7 +269,8 @@ run_cluster() {
   done
   printf '%s\n' "${name}" >> "${KIAC_E2E_STATE_FILE}"
 
-  local create=(create cluster --name "${name}" --distro "${distro}" --workers "${workers}" --ip-family "${family}" --wait 8m)
+  local create=(create cluster --name "${name}" --distro "${distro}" --workers "${workers}" --ip-family "${family}" --wait 8m
+    --mount "type=bind,source=${mount_dir},target=/kiac-e2e-host")
   if [[ "${features}" == true ]]; then
     create+=(--gateway --observability)
   fi
@@ -285,6 +294,10 @@ run_cluster() {
   }
   retry 18 10 wait_for_metrics
 
+  for node in ${CURRENT_NODES}; do
+    [[ "$(container exec "${node}" cat /kiac-e2e-host/sentinel | tr -d '\r\n')" == host-sentinel ]]
+  done
+
   local i node
   for ((i = 0; i <= workers; i++)); do
     if [[ ${i} -eq 0 ]]; then
@@ -296,6 +309,11 @@ run_cluster() {
   done
 
   k apply -f "${ROOT}/test/e2e/workload.yaml"
+  k apply -f "${ROOT}/test/e2e/hostpath.yaml"
+  k -n kiac-e2e wait --for=condition=Ready pod/hostpath --timeout=180s
+  [[ "$(k -n kiac-e2e exec hostpath -- cat /host/sentinel | tr -d '\r\n')" == host-sentinel ]]
+  k -n kiac-e2e exec hostpath -- sh -c 'printf pod-write > /host/from-pod'
+  [[ "$(cat "${mount_dir}/from-pod")" == pod-write ]]
   k -n kiac-e2e patch deployment upload-server --type=merge \
     -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"${target}\"}}}}}"
   k -n kiac-e2e rollout status deployment/upload-server --timeout=180s
@@ -341,6 +359,7 @@ run_cluster() {
       # node address cannot leave stale hostNetwork metadata behind.
       "${KIAC_BIN}" stop node worker-1 --name "${name}"
       "${KIAC_BIN}" start node worker-1 --name "${name}"
+      [[ "$(container exec "${sender}" cat /kiac-e2e-host/sentinel | tr -d '\r\n')" == host-sentinel ]]
       assert_k3s_node_addresses
       retry 30 1 edge_proxy_running "${sender}"
       install_traffic_binary "${sender}"
@@ -357,6 +376,11 @@ run_cluster() {
       "${KIAC_BIN}" resume cluster --name "${name}" --wait 8m
       k wait --for=condition=Ready nodes --all --timeout=300s
       assert_k3s_node_addresses
+      for node in ${CURRENT_NODES}; do
+        [[ "$(container exec "${node}" cat /kiac-e2e-host/sentinel | tr -d '\r\n')" == host-sentinel ]]
+      done
+      retry 30 2 k -n kiac-e2e exec hostpath -- test -f /host/from-pod
+      [[ "$(k -n kiac-e2e exec hostpath -- cat /host/from-pod | tr -d '\r\n')" == pod-write ]]
       for node in ${CURRENT_NODES}; do
         retry 30 1 edge_proxy_running "${node}"
       done
@@ -378,6 +402,7 @@ run_cluster() {
       "${KIAC_BIN}" start node worker-1 --name "${name}"
       k wait --for=condition=Ready "node/${sender}" --timeout=300s
       retry 30 1 edge_proxy_running "${sender}"
+      [[ "$(container exec "${sender}" cat /kiac-e2e-host/sentinel | tr -d '\r\n')" == host-sentinel ]]
       # The node VM keeps its root disk but receives a fresh /tmp on boot.
       # Reinstall only the test client; the product proxy in /usr/local/bin
       # must have persisted and is checked immediately above.
@@ -387,6 +412,10 @@ run_cluster() {
   fi
 
   "${KIAC_BIN}" delete cluster --name "${name}"
+  [[ "$(cat "${mount_dir}/sentinel")" == host-sentinel ]]
+  [[ "$(cat "${mount_dir}/from-pod")" == pod-write ]]
+  rm -rf -- "${mount_dir}"
+  CURRENT_MOUNT_DIR=""
   forget_cluster "${name}"
   CURRENT_CLUSTER=""
   CURRENT_CONTEXT=""

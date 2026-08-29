@@ -68,6 +68,11 @@ k8sVersion: "1.36"   <span class="c"># Kubernetes minor ("1.36") or exact patch 
 cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
 <span class="c"># dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the</span>
 <span class="c">#                    # runtime default resolv.conf entirely when set</span>
+<span class="c"># Host directories mounted into every node VM:</span>
+mounts:
+  - source: /Users/me/project
+    target: /workspace
+    readOnly: true
 cpus: "4"            <span class="c"># vCPUs per node VM (quote it: YAML reads bare 4 as a number)</span>
 memory: 4G           <span class="c"># memory per worker VM</span>
 wait: 5m             <span class="c"># timeout for nodes to become Ready</span>
@@ -90,6 +95,7 @@ addons:
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
+    <tr><td><code>mounts</code></td><td>list of <code>source</code>, <code>target</code>, <code>readOnly</code></td><td>none</td><td><code>--mount</code></td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
     <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>
     <tr><td><code>cpMemory</code></td><td>string</td><td><code>4G</code></td><td><code>--cp-memory</code> (control-plane VM)</td></tr>
@@ -107,6 +113,7 @@ addons:
     <li>Addon keys are positive (<code>storage: true</code>) even though the flags are negative (<code>--no-storage</code>); kiac maps between them.</li>
     <li>Quote <code>cpus</code>: YAML parses a bare <code>4</code> as a number, and the field is a string.</li>
     <li>An empty file is valid and means "all defaults".</li>
+    <li>Each mount source must be an existing absolute macOS directory and each target an absolute Linux path. Targets must be unique. Commas are unsupported because they delimit Apple Container's mount fields.</li>
     <li><code>--distro</code> and <code>--kernel</code> are <b>not config file keys yet</b>; pass them on the command line (they compose with <code>--config</code> for everything else).</li>
   </ul>
 
@@ -121,6 +128,7 @@ addons:
 kiac create cluster --config cluster.yaml --workers 3
 <span class="c"># result: name dev (from file), workers 3 (flag overrides file)</span></code></pre>
   <p>The distinction is "explicitly set", not "different from the default": passing <code>--workers 0</code> on the command line beats <code>workers: 2</code> in the file.</p>
+  <p>For repeatable mounts, one or more explicit <code>--mount</code> flags replace the complete <code>mounts</code> list from the file; KIAC never silently combines two lists with potentially conflicting targets.</p>
 
   <div class="pn">
     <a href="storage-and-metrics.html"><span>Previous</span>Storage &amp; metrics</a>

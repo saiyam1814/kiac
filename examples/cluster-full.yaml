@@ -53,6 +53,13 @@ ipFamily: ipv4
 # resolver nodes use by default (see docs/docs/troubleshooting.html).
 # dns: [1.1.1.1, 8.8.8.8]
 
+# Host directories bind-mounted into every node VM. Kubernetes hostPath
+# volumes use the target path. Prefer readOnly for source trees.
+# mounts:
+#   - source: /Users/me/project
+#     target: /workspace
+#     readOnly: true
+
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G

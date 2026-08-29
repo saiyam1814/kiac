@@ -163,6 +163,7 @@ func k3sServerRunOpts(cfg Config, nodeName, token string, dns []string) runtime.
 		Kernel:     cfg.Kernel,
 		Args:       bootArgs,
 		DNS:        dns,
+		Mounts:     cfg.Mounts,
 	}
 }
 
@@ -179,6 +180,7 @@ func k3sAgentRunOpts(cfg Config, nodeName string, env []string, dns []string) ru
 		Kernel:     cfg.Kernel,
 		Args:       bootArgs,
 		DNS:        dns,
+		Mounts:     cfg.Mounts,
 	}
 }
 
@@ -238,6 +240,9 @@ func (m *Manager) CreateK3s(cfg Config) error {
 		return err
 	}
 	if err := validateDNS(cfg); err != nil {
+		return err
+	}
+	if err := runtime.ValidateMounts(cfg.Mounts); err != nil {
 		return err
 	}
 	if cfg.family() == IPv6 {

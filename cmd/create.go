@@ -23,7 +23,8 @@ var createClusterCmd = &cobra.Command{
 	Example: `  kiac create cluster
   kiac create cluster --name dev --workers 2
   kiac create cluster --memory 8G --cpus 4
-  kiac create cluster --distro k3s --workers 1`,
+  kiac create cluster --distro k3s --workers 1
+  kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
 		// Seed the typed family from the string flag (default ipv4) before
@@ -116,6 +117,7 @@ func init() {
 	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
+	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")

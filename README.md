@@ -76,6 +76,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🔒 **Hardware-grade isolation** — each node is one lightweight VM with its own kernel and cgroups, not namespaces sharing a daemon.
 - 📊 **Metrics out of the box** — `kubectl top nodes` works the moment the cluster is up. metrics-server ships preconfigured.
 - 💾 **PVCs that just bind** — a default StorageClass (local-path-provisioner) is installed on create, so StatefulSets and `volumeClaimTemplates` work immediately.
+- **Host bind mounts** — repeatable `--mount` options expose macOS directories at matching paths in every kubeadm or k3s node, ready for Kubernetes `hostPath` volumes.
 - ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default: a tiny systemd loop inside the control-plane VM assigns node IPs to Services in about two seconds, shares one IP across Services when ports don't collide, and heals itself after node restarts. No pods, no webhooks, no `<pending>`, no tunnels.
 - 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags; a tiny embedded node-local edge proxy terminates external TCP first so large uploads from sibling VMs do not hit vmnet's TSO forwarding bug.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
@@ -235,6 +236,7 @@ kiac create cluster --k8s-version 1.34       # pick your Kubernetes (1.32-1.36 p
 kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datastore, up in under a minute
 kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
+kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly # host directory in every node
 kiac ui                                      # local web console: manage clusters, kubectl Console per cluster
 kiac get clusters                            # -o wide for versions/age, -o json for scripts
 kiac get nodes --name dev
@@ -266,6 +268,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), or `none` to bring your own |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
+| `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |
 | `--cpus` | `4` | vCPUs per node VM |
 | `--memory` | `2G` | memory per worker VM (idle workers use a few hundred MB) |
 | `--cp-memory` | `4G` | memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon) |
@@ -286,6 +289,8 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 </p>
 
 kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins the workers over the `vmnet` network, applies the kindnet CNI, and installs metrics-server, local-path storage, the built-in kiac-lb LoadBalancer, and the embedded node-local edge proxy by default. With `--distro k3s` the same VMs run `rancher/k3s` as PID 1 instead, and `--kernel full` boots every node on a published kernel build with the features overlay and eBPF CNIs need. It talks only to the `apple/container` runtime and never touches the Docker socket, so it coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
+
+Host bind mounts use ordinary `container run`, not `container machine`; `/Users` is therefore not shared automatically. A configured mount is attached independently to every node and remains attached when that container is stopped and started or resumed. See [Storage & metrics](https://saiyam1814.github.io/kiac/docs/storage-and-metrics.html#host-bind-mounts) for the required Kubernetes `hostPath` layer and security implications.
 
 ## Roadmap
 
