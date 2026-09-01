@@ -204,7 +204,7 @@ func (m *Manager) Create(cfg Config) error {
 	}
 
 	if err := ui.Step("Preflight checks", func() error {
-		if err := m.preflight(); err != nil {
+		if err := m.preflight(cfg.Kernel == ""); err != nil {
 			return err
 		}
 		return m.preflightIPv6Network(cfg)
@@ -600,7 +600,7 @@ func (m *Manager) installCilium(cp string, cfg Config) error {
 }
 
 // preflight validates the host before any VM is booted.
-func (m *Manager) preflight() error {
+func (m *Manager) preflight(installDefaultKernel bool) error {
 	if !m.rt.Available() {
 		return fmt.Errorf("apple/container CLI not found on PATH; install it from https://github.com/apple/container/releases")
 	}
@@ -611,13 +611,14 @@ func (m *Manager) preflight() error {
 	if err := runtime.ValidateNodeRuntimeVersion(version); err != nil {
 		return err
 	}
-	// SystemStart is idempotent: it starts the apiserver if needed and
-	// installs the default kernel if one isn't configured. Call it every
-	// time, not just when the service is stopped, so a service left
-	// running with no kernel doesn't slip past preflight and fail later
-	// during node VM boot instead (#35).
-	if err := m.rt.SystemStart(); err != nil {
-		return fmt.Errorf("container system service could not be started, or its default kernel could not be installed: %w", err)
+	// Always choose a non-interactive kernel mode. Default-kernel clusters
+	// install the recommendation if needed; custom-kernel clusters avoid
+	// an unrelated download and only start the service.
+	if err := m.rt.SystemStart(installDefaultKernel); err != nil {
+		if installDefaultKernel {
+			return fmt.Errorf("container system service could not be started, or its default kernel could not be installed: %w", err)
+		}
+		return fmt.Errorf("container system service could not be started: %w", err)
 	}
 	return nil
 }

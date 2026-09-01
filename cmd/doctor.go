@@ -50,39 +50,35 @@ var doctorCmd = &cobra.Command{
 
 		if cliOK {
 			running := rt.SystemRunning()
-			switch {
-			case !running && doctorFix:
-				// Before/after both go through ui.Check so a fix is never silent.
-				ui.Check(false, "container system service", "stopped - fixing: container system start")
-				if err := rt.SystemStart(); err != nil {
-					failures++
-					ui.Check(false, "container system service", "start failed: "+err.Error())
-				} else if rt.SystemRunning() {
-					ui.Check(true, "container system service", "running (started by --fix)")
+			if doctorFix {
+				if !running {
+					ui.Check(false, "container system service", "stopped - fixing: container system start")
+				}
+				startErr := rt.SystemStart(true)
+				nowRunning := rt.SystemRunning()
+				if nowRunning {
+					detail := "running"
+					if !running {
+						detail = "running (started by --fix)"
+					}
+					ui.Check(true, "container system service", detail)
 				} else {
 					failures++
 					ui.Check(false, "container system service", "still not running after start; inspect with: container system status")
 				}
-			case running:
-				ui.Check(true, "container system service", "running")
-			default:
-				ui.Check(false, "container system service", "stopped - kiac will start it automatically on create, or run: kiac doctor --fix")
-			}
-
-			// A running service doesn't mean a kernel is configured.
-			// If an earlier interactive prompt never got answered, the
-			// service comes up with no kernel and everything here still
-			// passes (#35). container system start always rechecks the
-			// kernel and installs one if missing, so run it again.
-			if doctorFix {
-				if err := rt.SystemStart(); err != nil {
+				if startErr != nil {
 					failures++
-					ui.Check(false, "default kernel", "install failed: "+err.Error())
+					ui.Check(false, "default kernel", "install failed: "+startErr.Error())
 				} else {
 					ui.Check(true, "default kernel", "configured (verified/installed by --fix)")
 				}
-			} else if running {
-				ui.Hintf("default kernel is not verified without --fix; run: kiac doctor --fix")
+			} else {
+				if running {
+					ui.Check(true, "container system service", "running")
+					ui.Hintf("default kernel is not verified without --fix; run: kiac doctor --fix")
+				} else {
+					ui.Check(false, "container system service", "stopped - kiac will start it automatically on create, or run: kiac doctor --fix")
+				}
 			}
 		}
 

@@ -60,7 +60,7 @@ func (m *Manager) resumeK3s(name string, infos []runtime.Info, waitTimeout time.
 	if err != nil {
 		return err
 	}
-	if err := ui.Step("Preflight checks", func() error { return m.preflight() }); err != nil {
+	if err := ui.Step("Preflight checks", func() error { return m.preflight(false) }); err != nil {
 		return err
 	}
 

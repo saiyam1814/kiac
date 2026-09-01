@@ -128,20 +128,29 @@ func TestRunDetachedOmitsDNSWhenUnset(t *testing.T) {
 	}
 }
 
-// container system start hangs on a Y/n prompt if no kernel is
-// configured (#35), so SystemStart must pass --enable-kernel-install.
-func TestSystemStartEnablesKernelInstall(t *testing.T) {
-	argsFile := filepath.Join(t.TempDir(), "args")
-	client := fakeContainerClient(t, "", argsFile)
+func TestSystemStartSelectsKernelInstallMode(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		installKernel bool
+		wantFlag      string
+	}{
+		{name: "default kernel required", installKernel: true, wantFlag: "--enable-kernel-install"},
+		{name: "custom kernel supplied", installKernel: false, wantFlag: "--disable-kernel-install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argsFile := filepath.Join(t.TempDir(), "args")
+			client := fakeContainerClient(t, "", argsFile)
 
-	if err := client.SystemStart(); err != nil {
-		t.Fatal(err)
-	}
+			if err := client.SystemStart(tc.installKernel); err != nil {
+				t.Fatal(err)
+			}
 
-	got := readArgs(t, argsFile)
-	want := []string{"system", "start", "--enable-kernel-install"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("system start args = %q, want %q", got, want)
+			got := readArgs(t, argsFile)
+			want := []string{"system", "start", tc.wantFlag}
+			if !slices.Equal(got, want) {
+				t.Fatalf("system start args = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
