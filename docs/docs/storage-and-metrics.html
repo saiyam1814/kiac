@@ -85,6 +85,35 @@ kubectl get pvc data    <span class="c"># Pending until a pod uses it (WaitForFi
     <li>Skip installation with <code>--no-storage</code> (or <code>addons.storage: false</code> in a <a href="config-file.html">config file</a>).</li>
   </ul>
 
+  <h2 id="host-bind-mounts">Host bind mounts and hostPath</h2>
+  <p>Use a repeatable <code>--mount</code> to make an existing macOS directory visible inside every node VM:</p>
+  <pre><code>kiac create cluster --name dev \
+  --mount type=bind,source=/Users/me/project,target=/workspace,readonly \
+  --mount type=bind,source=/Users/me/data,target=/data</code></pre>
+  <p>The data path has two required layers:</p>
+  <pre><code>macOS path
+  -&gt; Apple Container bind mount into each node VM
+    -&gt; Kubernetes hostPath
+      -&gt; pod volumeMount</code></pre>
+  <pre><code>volumes:
+  - name: source
+    hostPath:
+      path: /workspace
+      type: Directory
+containers:
+  - name: app
+    volumeMounts:
+      - name: source
+        mountPath: /workspace</code></pre>
+  <ul>
+    <li>KIAC uses ordinary <code>container run</code>, not <code>container machine</code>, so the host's <code>/Users</code> directory is not shared automatically.</li>
+    <li>Every configured directory is mounted independently into the control plane/server and every worker/agent. A pod's <code>hostPath</code> is the target path inside whichever node schedules it.</li>
+    <li>Bind mounts expose host data to node VMs. Any workload allowed to use a writable <code>hostPath</code>, subject to filesystem permissions and admission policy, may modify host files; prefer <code>readonly</code> for source trees.</li>
+    <li>Concurrent writes from multiple nodes can be unsafe, especially for databases. Use node-local PVC storage or a suitable shared storage system instead.</li>
+    <li>Apple Container keeps mounts on the existing node container across stop/start and <code>kiac resume cluster</code>. The host source must still exist when the node starts.</li>
+    <li>Deleting a cluster removes its node VMs, not bind-mounted host data. Local-path PVC data is separate: it remains node-local and is deleted with its node VM.</li>
+  </ul>
+
   <h2 id="metrics">metrics-server</h2>
   <p>kiac installs metrics-server v0.8.1 by default, patched with <code>--kubelet-insecure-tls</code> because kubeadm-issued kubelet serving certificates are self-signed in local clusters. That is the standard tweak every local distribution needs, done for you.</p>
   <pre><code>kubectl top nodes

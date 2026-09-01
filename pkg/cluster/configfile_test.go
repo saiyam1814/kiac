@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
 func writeConfig(t *testing.T, yaml string) string {
@@ -33,6 +35,10 @@ k8sVersion: "1.34"
 image: docker.io/kindest/node:v1.34.8
 cni: none
 dns: [192.168.64.1, 9.9.9.9]
+mounts:
+  - source: /Users/me/project files
+    target: /workspace
+    readOnly: true
 cpus: "8"
 memory: 8G
 wait: 10m
@@ -56,6 +62,9 @@ addons:
 				}
 				if len(fc.DNS) != 2 || fc.DNS[0] != "192.168.64.1" || fc.DNS[1] != "9.9.9.9" {
 					t.Errorf("dns = %q", fc.DNS)
+				}
+				if len(fc.Mounts) != 1 || fc.Mounts[0].Source != "/Users/me/project files" || fc.Mounts[0].Target != "/workspace" || !fc.Mounts[0].ReadOnly {
+					t.Errorf("mounts = %+v", fc.Mounts)
 				}
 				a := fc.Addons
 				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer || a.EdgeProxy == nil || *a.EdgeProxy {
@@ -96,6 +105,16 @@ addons:
 			name:    "unknown addon key",
 			yaml:    "addons:\n  metrics: true\n  dashboard: true\n",
 			wantErr: "dashboard",
+		},
+		{
+			name:    "unknown mount key",
+			yaml:    "mounts:\n  - source: /tmp/data\n    target: /data\n    mode: ro\n",
+			wantErr: "mode",
+		},
+		{
+			name:    "additional YAML document",
+			yaml:    "name: demo\n---\nmounts: []\n",
+			wantErr: "multiple YAML documents",
 		},
 		{
 			name:    "old flag names are unknown keys",
@@ -155,6 +174,7 @@ func TestMerge(t *testing.T) {
 		Image:      "docker.io/kindest/node:v1.34.8",
 		CNI:        "none",
 		DNS:        []string{"192.168.64.1", "9.9.9.9"},
+		Mounts:     runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
 		CPUs:       "8",
 		Memory:     "8G",
 		Wait:       "10m",
@@ -185,6 +205,7 @@ func TestMerge(t *testing.T) {
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
 				DNS:       []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:    runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
@@ -217,6 +238,7 @@ func TestMerge(t *testing.T) {
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
 				DNS:       []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:    runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
@@ -235,6 +257,7 @@ func TestMerge(t *testing.T) {
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
 				DNS:       []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:    runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",
@@ -256,6 +279,29 @@ func TestMerge(t *testing.T) {
 				Image:     "docker.io/kindest/node:v1.34.8",
 				CNI:       "none",
 				DNS:       []string{"10.0.0.53"},
+				Mounts:    runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				CPUs:      "8",
+				Memory:    "8G",
+				CPMemory:  "4G",
+				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Observability: true, Gateway: true,
+				WaitTimeout: 10 * time.Minute,
+			},
+			wantVersion: "1.34",
+		},
+		{
+			name:    "explicit mount flags override file",
+			file:    full,
+			changed: map[string]bool{"mount": true},
+			mutate: func(cfg *Config, v *string) {
+				cfg.Mounts = runtime.Mounts{{Source: "/cli", Target: "/data"}}
+			},
+			wantCfg: Config{
+				Name: "demo", Workers: 3,
+				Image:     "docker.io/kindest/node:v1.34.8",
+				CNI:       "none",
+				DNS:       []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:    runtime.Mounts{{Source: "/cli", Target: "/data"}},
 				CPUs:      "8",
 				Memory:    "8G",
 				CPMemory:  "4G",

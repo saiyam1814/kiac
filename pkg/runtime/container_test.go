@@ -128,6 +128,35 @@ func TestRunDetachedOmitsDNSWhenUnset(t *testing.T) {
 	}
 }
 
+func TestRunDetachedPassesMountsBeforeImage(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:  "kiac-test-control-plane",
+		Image: "example.invalid/node:v1",
+		Mounts: []Mount{
+			{Source: "/Users/me/project files", Target: "/workspace"},
+			{Source: "/Users/me/data", Target: "/data", ReadOnly: true},
+		},
+		Args: []string{"server"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := readArgLines(t, argsFile)
+	want := []string{
+		"run", "-d", "--name", "kiac-test-control-plane", "--cap-add", "ALL",
+		"--mount", "type=bind,source=/Users/me/project files,target=/workspace",
+		"--mount", "type=bind,source=/Users/me/data,target=/data,readonly",
+		"example.invalid/node:v1", "server",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("run args = %q, want %q", got, want)
+	}
+}
+
 func TestSystemStartSelectsKernelInstallMode(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -190,4 +219,13 @@ func readArgs(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Fields(string(raw))
+}
+
+func readArgLines(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 }

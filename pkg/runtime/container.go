@@ -125,6 +125,7 @@ type RunOpts struct {
 	Kernel     string   // custom kernel Image path (--kernel), empty = bundled default
 	Args       []string // command arguments appended after the image
 	DNS        []string // nameserver IPs (--dns); empty keeps the runtime default resolv.conf
+	Mounts     []Mount  // host directory bind mounts (--mount)
 }
 
 // RunDetached boots a node VM. The kindest/node entrypoint brings up
@@ -155,6 +156,9 @@ func (c *Client) RunDetached(o RunOpts) error {
 	}
 	for _, d := range o.DNS {
 		args = append(args, "--dns", d)
+	}
+	for _, mount := range o.Mounts {
+		args = append(args, "--mount", mount.String())
 	}
 	if o.Entrypoint != "" {
 		args = append(args, "--entrypoint", o.Entrypoint)

@@ -14,6 +14,10 @@ ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6
                      # dual/ipv6 auto-select the full kernel (IPv6 netfilter) and need macOS 26+.
 # dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the
                      # runtime default resolv.conf entirely when set
+# mounts:             # host directories mounted into every node VM
+#   - source: /Users/me/project
+#     target: /workspace
+#     readOnly: true
 cpus: "4"            # vCPUs per node VM (quote it: YAML reads bare 4 as a number)
 memory: 4G           # memory per node VM
 wait: 5m             # timeout for nodes to become Ready

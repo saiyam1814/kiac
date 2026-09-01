@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hostpath
+  namespace: kiac-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hostpath
+  template:
+    metadata:
+      labels:
+        app: hostpath
+    spec:
+      containers:
+        - name: hostpath
+          image: docker.io/library/busybox:1.37.0
+          command: [sh, -c, "sleep 86400"]
+          volumeMounts:
+            - name: host
+              mountPath: /host
+      volumes:
+        - name: host
+          hostPath:
+            path: /kiac-e2e-host
+            type: Directory

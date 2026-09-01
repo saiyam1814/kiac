@@ -1,8 +1,11 @@
 package cluster
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
 func TestResolveK3sImage(t *testing.T) {
@@ -107,6 +110,7 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 		Memory:   "2G",
 		CPMemory: "4G",
 		Kernel:   "/tmp/kiac-kernel-full",
+		Mounts:   runtime.Mounts{{Source: "/host", Target: "/workspace", ReadOnly: true}},
 	}
 	dns := []string{"192.168.64.1", "1.1.1.1"}
 	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123", dns)
@@ -122,6 +126,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	if strings.Join(server.DNS, ",") != "192.168.64.1,1.1.1.1" {
 		t.Errorf("server DNS = %q", server.DNS)
 	}
+	if !slices.Equal(server.Mounts, cfg.Mounts) {
+		t.Errorf("server Mounts = %+v, want %+v", server.Mounts, cfg.Mounts)
+	}
 
 	env := k3sAgentEnv("192.168.64.5", "tok123")
 	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env, dns)
@@ -136,6 +143,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	}
 	if strings.Join(agent.Env, "\n") != strings.Join(env, "\n") {
 		t.Errorf("agent Env = %q, want %q", agent.Env, env)
+	}
+	if !slices.Equal(agent.Mounts, cfg.Mounts) {
+		t.Errorf("agent Mounts = %+v, want %+v", agent.Mounts, cfg.Mounts)
 	}
 }
 

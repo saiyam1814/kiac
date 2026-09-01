@@ -114,6 +114,7 @@ type Config struct {
 	Kernel        string   // resolved kernel Image path; empty = runtime default
 	IPFamily      IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
 	DNS           []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
+	Mounts        runtime.Mounts
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
@@ -191,6 +192,9 @@ func (m *Manager) Create(cfg Config) error {
 	if err := validateDNS(cfg); err != nil {
 		return err
 	}
+	if err := runtime.ValidateMounts(cfg.Mounts); err != nil {
+		return err
+	}
 
 	// Fail cilium prerequisites before any VM boots, not minutes later
 	// when the CNI step runs.
@@ -231,7 +235,7 @@ func (m *Manager) Create(cfg Config) error {
 			if n == cp && cfg.CPMemory != "" {
 				mem = cfg.CPMemory
 			}
-			if err := m.rt.RunDetached(runtime.RunOpts{Name: n, Image: cfg.Image, CPUs: cfg.CPUs, Memory: mem, Kernel: cfg.Kernel, DNS: dns}); err != nil {
+			if err := m.rt.RunDetached(kubeadmNodeRunOpts(cfg, n, mem, dns)); err != nil {
 				return err
 			}
 		}
@@ -465,6 +469,18 @@ func (m *Manager) Create(cfg Config) error {
 		warnAPIUnreachable(cp, cfg.Name, serverIP)
 	}
 	return nil
+}
+
+func kubeadmNodeRunOpts(cfg Config, nodeName, memory string, dns []string) runtime.RunOpts {
+	return runtime.RunOpts{
+		Name:   nodeName,
+		Image:  cfg.Image,
+		CPUs:   cfg.CPUs,
+		Memory: memory,
+		Kernel: cfg.Kernel,
+		DNS:    dns,
+		Mounts: cfg.Mounts,
+	}
 }
 
 // serverIP returns the control-plane address the host kubeconfig should

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/saiyam1814/kiac/pkg/runtime"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,18 +16,19 @@ import (
 // fields distinguish "omitted" from an explicit zero value, and addon
 // toggles are positive booleans that Merge maps onto the No* fields.
 type FileConfig struct {
-	Name       string     `yaml:"name"`
-	Workers    *int       `yaml:"workers"`
-	K8sVersion string     `yaml:"k8sVersion"`
-	Image      string     `yaml:"image"`
-	CNI        string     `yaml:"cni"`
-	IPFamily   string     `yaml:"ipFamily"`
-	DNS        []string   `yaml:"dns"`
-	CPUs       string     `yaml:"cpus"`
-	Memory     string     `yaml:"memory"`
-	CPMemory   string     `yaml:"cpMemory"`
-	Wait       string     `yaml:"wait"`
-	Addons     FileAddons `yaml:"addons"`
+	Name       string         `yaml:"name"`
+	Workers    *int           `yaml:"workers"`
+	K8sVersion string         `yaml:"k8sVersion"`
+	Image      string         `yaml:"image"`
+	CNI        string         `yaml:"cni"`
+	IPFamily   string         `yaml:"ipFamily"`
+	DNS        []string       `yaml:"dns"`
+	Mounts     runtime.Mounts `yaml:"mounts"`
+	CPUs       string         `yaml:"cpus"`
+	Memory     string         `yaml:"memory"`
+	CPMemory   string         `yaml:"cpMemory"`
+	Wait       string         `yaml:"wait"`
+	Addons     FileAddons     `yaml:"addons"`
 }
 
 // FileAddons toggles the optional cluster addons. Omitted keys keep the
@@ -59,6 +61,13 @@ func LoadConfigFile(path string) (*FileConfig, error) {
 		}
 		return nil, fmt.Errorf("parsing config file %s: %w", path, err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("parsing config file %s: %w", path, err)
+		}
+		return nil, fmt.Errorf("parsing config file %s: multiple YAML documents are not supported", path)
+	}
 	return &fc, nil
 }
 
@@ -87,6 +96,9 @@ func (fc *FileConfig) Merge(cfg *Config, k8sVersion *string, changed func(string
 	}
 	if len(fc.DNS) > 0 && !changed("dns") {
 		cfg.DNS = fc.DNS
+	}
+	if len(fc.Mounts) > 0 && !changed("mount") {
+		cfg.Mounts = fc.Mounts
 	}
 	if fc.CPUs != "" && !changed("cpus") {
 		cfg.CPUs = fc.CPUs
