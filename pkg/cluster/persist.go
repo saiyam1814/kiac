@@ -47,7 +47,7 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 		return err
 	}
 
-	if err := ui.Step("Preflight checks", func() error { return m.preflight() }); err != nil {
+	if err := ui.Step("Preflight checks", func() error { return m.preflight(false) }); err != nil {
 		return err
 	}
 

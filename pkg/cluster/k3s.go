@@ -255,7 +255,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	}
 
 	if err := ui.Step("Preflight checks", func() error {
-		if err := m.preflight(); err != nil {
+		if err := m.preflight(cfg.Kernel == ""); err != nil {
 			return err
 		}
 		return m.preflightIPv6Network(cfg)
