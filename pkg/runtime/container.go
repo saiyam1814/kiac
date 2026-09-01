@@ -102,9 +102,15 @@ func (c *Client) SystemStatus(timeout time.Duration) (string, error) {
 	return c.runContext(ctx, "system", "status")
 }
 
-// SystemStart starts the container API server.
-func (c *Client) SystemStart() error {
-	_, err := c.run("system", "start")
+// SystemStart starts the container API server without prompting. When
+// installDefaultKernel is true it also installs the recommended kernel
+// if none is configured; false preserves custom-kernel-only setups.
+func (c *Client) SystemStart(installDefaultKernel bool) error {
+	kernelFlag := "--disable-kernel-install"
+	if installDefaultKernel {
+		kernelFlag = "--enable-kernel-install"
+	}
+	_, err := c.run("system", "start", kernelFlag)
 	return err
 }
 
