@@ -3,6 +3,7 @@ package cluster
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
@@ -69,6 +70,18 @@ func TestFlannelDelegatePluginsAreDeclaredInConflist(t *testing.T) {
 	}
 	if !strings.Contains(flannelManifest, `"type": "portmap"`) {
 		t.Fatal("flannel conflist no longer chains portmap; update ensureFlannelDelegatePlugins")
+	}
+}
+
+func TestWaitFlannelReadyReturnsWithoutWaitBudget(t *testing.T) {
+	// --wait 0 must not block: kubectl rollout status --timeout=0s waits
+	// forever, so a non-positive budget returns before touching the
+	// runtime (the final nodes-Ready step still runs).
+	m := NewManager()
+	for _, timeout := range []time.Duration{0, -1 * time.Second} {
+		if err := m.waitFlannelReady("kiac-x-control-plane", timeout); err != nil {
+			t.Fatalf("waitFlannelReady(%s) = %v, want nil without hitting the runtime", timeout, err)
+		}
 	}
 }
 

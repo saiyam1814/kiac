@@ -3,7 +3,6 @@ package cluster
 import (
 	_ "embed"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -15,10 +14,10 @@ import (
 // both together and re-verify the delegate plugin set below.
 const FlannelVersion = "v0.28.9"
 
-// flannelManifest is upstream kube-flannel.yml at FlannelVersion,
-// unmodified. Its pod network is patched at apply time (see
-// flannelManifestWithCIDR) so the manifest stays byte-identical to the
-// published release and auditable against it.
+// flannelManifest is upstream kube-flannel.yml at FlannelVersion. Its
+// pod network is patched at apply time (see flannelManifestWithCIDR),
+// not here, so the embedded bytes stay diffable against the upstream
+// release.
 //
 //go:embed assets/flannel.yaml
 var flannelManifest string
@@ -40,29 +39,15 @@ func flannelManifestWithCIDR(cidr string) (string, error) {
 	return patched, nil
 }
 
-// ensureFlannelDelegatePlugins streams the delegate CNI binaries
-// flannel's conflist needs but the kindest/node image does not ship.
-// The conflist delegates to bridge (isDefaultGateway) with host-local
-// IPAM and chains portmap; the node image already carries host-local,
-// portmap, and loopback for kindnet, leaving only bridge. It comes from
-// kiac's existing sha-verified plugins archive - no second download
-// path. Bridge is safe here because flannel is gated on the full
-// kernel, which enables br_netfilter; without it bridged same-node
-// Service traffic would bypass iptables un-DNAT (the reason the k3s
-// path avoids bridge on the stock kernel).
-func (m *Manager) ensureFlannelDelegatePlugins(node string) error {
-	archive, err := ensureCNIPluginsArchive()
-	if err != nil {
-		return err
-	}
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
-		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin ./bridge")
-}
+// flannelDelegatePlugins are the CNI binaries flannel's conflist needs
+// but the kindest/node image does not ship. The conflist delegates to
+// bridge (isDefaultGateway) with host-local IPAM and chains portmap; the
+// node image already carries host-local, portmap, and loopback for
+// kindnet, leaving only bridge. Bridge is safe here because flannel is
+// gated on the full kernel, which enables br_netfilter; without it
+// bridged same-node Service traffic would bypass iptables un-DNAT (the
+// reason the k3s path avoids bridge on the stock kernel).
+var flannelDelegatePlugins = []string{"./bridge"}
 
 // installFlannel applies the embedded, version-pinned upstream flannel
 // manifest. Flannel's VXLAN backend needs the full custom kernel (the
@@ -80,8 +65,14 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 		nodes = append(nodes, worker(cfg.Name, i))
 	}
 	return ui.Step(fmt.Sprintf("Installing CNI (flannel %s)", FlannelVersion), func() error {
+		// Resolve the shared archive once before fanning out, so a cold
+		// cache downloads it a single time instead of once per node.
+		archive, err := ensureCNIPluginsArchive()
+		if err != nil {
+			return err
+		}
 		if err := inParallel(len(nodes), func(i int) error {
-			if err := m.ensureFlannelDelegatePlugins(nodes[i]); err != nil {
+			if err := m.extractCNIPlugins(nodes[i], archive, flannelDelegatePlugins...); err != nil {
 				return fmt.Errorf("installing bridge CNI plugin on %s: %w", nodes[i], err)
 			}
 			return nil
@@ -105,9 +96,21 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 // the error carries the pod list and recent logs, so a failure names
 // the crashing pod instead of just "timed out".
 func (m *Manager) waitFlannelReady(cp string, timeout time.Duration) error {
+	// `kubectl rollout status --timeout=0s` waits forever, the opposite
+	// of what --wait 0 means everywhere else in kiac (return without
+	// blocking). Skip the bounded wait when no positive budget is given;
+	// the final nodes-Ready step still runs. A sub-second budget would
+	// truncate to 0s, so floor it at 1s to keep the fail-fast intent.
+	if timeout <= 0 {
+		return nil
+	}
+	seconds := int(timeout.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
 	_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
 		"-n", "kube-flannel", "rollout", "status", "daemonset/kube-flannel-ds",
-		fmt.Sprintf("--timeout=%ds", int(timeout.Seconds())))
+		fmt.Sprintf("--timeout=%ds", seconds))
 	if err == nil {
 		return nil
 	}
