@@ -86,6 +86,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
 - 🌍 **IPv6 and dual-stack** — `--ip-family dual` (or `ipv6`) gives pods, Services, and nodes real IPv6, with kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer rules on the full kernel. kiac-lb hands out both families, the edge proxy fixes v6 large uploads too, and `kiac resume` heals both. See [docs/design/ipv6-dual-stack.md](docs/design/ipv6-dual-stack.md).
 - 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
+- **GPU scheduling alpha** — `--gpu-mock` installs a tiny, opt-in device plugin and the `kiac-gpu` RuntimeClass so GPU-shaped charts can be tested today. It is explicitly a scheduling mock and provides no Apple GPU acceleration yet.
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
 - **Diagnostics with an exit code** — `kiac verify cluster` checks the VM, Kubernetes, DNS, storage, metrics, edge proxy, LoadBalancer, Gateway, observability, and host API paths without changing the cluster. JSON output is stable for automation; `kiac support bundle` writes a bounded, redacted archive for issue reports.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
@@ -177,6 +178,15 @@ kiac create cluster --name dev --workers 2 --observability --gateway
 
 One command later you have Grafana at port 3000 on a real LoadBalancer IP (anonymous admin, local-only, two dashboards already provisioned) and a Gateway serving HTTP on port 80, also on a LoadBalancer IP. Point an HTTPRoute at `parentRefs: [{name: kiac, namespace: kiac-gateway}]` and it routes with zero extra setup; see [`examples/gateway-api-lab.md`](examples/gateway-api-lab.md), [`examples/observability-lab.md`](examples/observability-lab.md), and [`examples/httproute.yaml`](examples/httproute.yaml). The same two flags work on kubeadm, k3s, and Cilium clusters.
 
+### Test GPU-shaped workloads (alpha)
+
+```bash
+kiac create cluster --name gpu-lab --workers 2 --gpu-mock
+kubectl apply -f examples/gpu-mock.yaml
+```
+
+This opt-in mode advertises one synthetic `kiac.dev/gpu` per node and installs a pass-through `kiac-gpu` RuntimeClass. The kiac-specific name avoids colliding with distro- or vendor-owned runtime handlers such as k3s's immutable `nvidia` RuntimeClass. It validates Kubernetes scheduling and chart assumptions only: it does **not** expose the Apple GPU, CUDA, Metal, or Vulkan acceleration. See [`examples/gpu-mock-lab.md`](examples/gpu-mock-lab.md) and the [GPU build plan](docs/design/gpu-build-plan.md).
+
 ### Run Portainer CE on kiac
 
 This example installs Portainer Community Edition as an optional application inside a kiac Kubernetes cluster. Portainer is not bundled with kiac and adds nothing to normal cluster startup or idle resource use. Community Edition does not require a license key; Portainer Business Edition does.
@@ -237,6 +247,7 @@ kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datasto
 kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly # host directory in every node
+kiac create cluster --gpu-mock              # alpha scheduling contract only; no GPU acceleration
 kiac ui                                      # local web console: manage clusters, kubectl Console per cluster
 kiac get clusters                            # -o wide for versions/age, -o json for scripts
 kiac get nodes --name dev
@@ -279,6 +290,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--no-edge-proxy` | `false` | skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers |
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
+| `--gpu-mock` | `false` | advertise one synthetic `kiac.dev/gpu` per node and install RuntimeClass `kiac-gpu` for scheduling tests; no hardware acceleration |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--distro` and `--kernel` are flags only for now) |
 | `--wait` | `5m` | timeout for each readiness step, including CNI installation |
 
@@ -298,6 +310,7 @@ Host bind mounts use ordinary `container run`, not `container machine`; `/Users`
 - **HA control planes**
 - **One-flag Calico and Flannel** on the full kernel
 - **Hubble UI** for Cilium clusters
+- **Apple GPU worker nodes** through krunkit/Venus, gated by the published validation spike in [`docs/design/gpu-build-plan.md`](docs/design/gpu-build-plan.md)
 
 ## Contributing
 

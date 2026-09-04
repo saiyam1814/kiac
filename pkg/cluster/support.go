@@ -157,6 +157,22 @@ func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, repo
 			args []string
 		}{"gateway.txt", []string{"get", "gatewayclasses,gateways,httproutes", "-A", "-o", "wide"}})
 	}
+	if verificationStatus(report, "gpu.device-plugin") != VerificationSkip {
+		commands = append(commands,
+			struct {
+				file string
+				args []string
+			}{"gpu-runtimeclass.txt", []string{"get", "runtimeclass", gpuRuntimeClass, "-o", "wide"}},
+			struct {
+				file string
+				args []string
+			}{"gpu-device-plugin.txt", []string{"get", "daemonset", gpuDevicePlugin, "-n", gpuNamespace, "-o", "wide"}},
+			struct {
+				file string
+				args []string
+			}{"gpu-nodes.txt", []string{"get", "nodes", "-l", gpuLabelPresent + "=true", "-o", "wide"}},
+		)
+	}
 	for _, command := range commands {
 		out, err := m.diagnosticKubectl(cp, distro, timeout, command.args...)
 		full := "container exec " + cp + " kubectl " + strings.Join(command.args, " ")

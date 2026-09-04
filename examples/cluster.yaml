@@ -30,3 +30,4 @@ addons:
   edgeProxy: true        # node-local TCP proxy for large external uploads
   observability: false   # Prometheus + Grafana + node-exporter
   gateway: false         # Gateway API CRDs + Traefik
+  gpuMock: false         # mock kiac.dev/gpu scheduling; no acceleration

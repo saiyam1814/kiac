@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiac-gpu-system
+  labels:
+    app.kubernetes.io/name: kiac-gpu
+    app.kubernetes.io/part-of: kiac
+    kiac.dev/gpu.api: mock

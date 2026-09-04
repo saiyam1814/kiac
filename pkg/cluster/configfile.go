@@ -32,8 +32,8 @@ type FileConfig struct {
 }
 
 // FileAddons toggles the optional cluster addons. Omitted keys keep the
-// CLI defaults: metrics, storage, and loadBalancer on; observability
-// and gateway off.
+// CLI defaults: metrics, storage, and loadBalancer on; observability,
+// gateway, and mock GPU scheduling off.
 type FileAddons struct {
 	Metrics       *bool `yaml:"metrics"`
 	Storage       *bool `yaml:"storage"`
@@ -41,6 +41,7 @@ type FileAddons struct {
 	EdgeProxy     *bool `yaml:"edgeProxy"`
 	Observability *bool `yaml:"observability"`
 	Gateway       *bool `yaml:"gateway"`
+	GPUMock       *bool `yaml:"gpuMock"`
 }
 
 // LoadConfigFile parses a cluster config file. Unknown keys are an
@@ -133,6 +134,9 @@ func (fc *FileConfig) Merge(cfg *Config, k8sVersion *string, changed func(string
 	}
 	if fc.Addons.Gateway != nil && !changed("gateway") {
 		cfg.Gateway = *fc.Addons.Gateway
+	}
+	if fc.Addons.GPUMock != nil && !changed("gpu-mock") {
+		cfg.GPUMock = *fc.Addons.GPUMock
 	}
 	return nil
 }

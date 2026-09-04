@@ -231,6 +231,9 @@ func (r *VerificationReport) skipKubernetesDataChecks(reason string) {
 		{"metrics.api", "metrics API"},
 		{"gateway.api", "Gateway API"},
 		{"observability.stack", "observability"},
+		{"gpu.runtime-class", "GPU RuntimeClass"},
+		{"gpu.device-plugin", "mock GPU device plugin"},
+		{"gpu.nodes", "GPU node resources"},
 	} {
 		r.add(VerificationSkip, check.id, check.name, reason, "")
 	}
@@ -403,6 +406,127 @@ func (m *Manager) verifyOptionalKubernetesAddons(report *VerificationReport, cp 
 			report.add(VerificationPass, "observability.stack", "observability", "Grafana: http://"+strings.TrimSpace(address)+":3000", "")
 		}
 	}
+
+	m.verifyGPUAddon(report, cp, timeout)
+}
+
+func (m *Manager) verifyGPUAddon(report *VerificationReport, cp string, timeout time.Duration) {
+	out, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "daemonset", gpuDevicePlugin,
+		"-n", gpuNamespace, "--ignore-not-found", "-o", "json")
+	if err != nil {
+		report.add(VerificationWarn, "gpu.device-plugin", "mock GPU device plugin", compactError(err),
+			"kubectl get daemonset -n "+gpuNamespace)
+		report.add(VerificationSkip, "gpu.runtime-class", "GPU RuntimeClass", "device-plugin state is unavailable", "")
+		report.add(VerificationSkip, "gpu.nodes", "GPU node resources", "device-plugin state is unavailable", "")
+		return
+	}
+	if strings.TrimSpace(out) == "" {
+		report.add(VerificationSkip, "gpu.device-plugin", "mock GPU device plugin", "not installed (--gpu-mock was not used)", "")
+		report.add(VerificationSkip, "gpu.runtime-class", "GPU RuntimeClass", "mock GPU scheduling is not installed", "")
+		report.add(VerificationSkip, "gpu.nodes", "GPU node resources", "mock GPU scheduling is not installed", "")
+		return
+	}
+
+	runtimeClassOut, runtimeClassErr := m.diagnosticKubectl(cp, report.Distro, timeout,
+		"get", "runtimeclass", gpuRuntimeClass, "--ignore-not-found", "-o", "json")
+	if runtimeClassErr != nil {
+		report.add(VerificationFail, "gpu.runtime-class", "GPU RuntimeClass", compactError(runtimeClassErr),
+			"kubectl get runtimeclass "+gpuRuntimeClass+" -o yaml")
+	} else if strings.TrimSpace(runtimeClassOut) == "" {
+		report.add(VerificationFail, "gpu.runtime-class", "GPU RuntimeClass", gpuRuntimeClass+" is missing",
+			"recreate the cluster with --gpu-mock")
+	} else {
+		var runtimeClass kubeRuntimeClass
+		if err := json.Unmarshal([]byte(runtimeClassOut), &runtimeClass); err != nil {
+			report.add(VerificationFail, "gpu.runtime-class", "GPU RuntimeClass", "cannot parse kubectl output: "+err.Error(), "")
+		} else if runtimeClass.Handler != "runc" {
+			report.add(VerificationFail, "gpu.runtime-class", "GPU RuntimeClass",
+				fmt.Sprintf("%s handler is %q, want runc", gpuRuntimeClass, runtimeClass.Handler),
+				"kubectl get runtimeclass "+gpuRuntimeClass+" -o yaml")
+		} else {
+			report.add(VerificationPass, "gpu.runtime-class", "GPU RuntimeClass", gpuRuntimeClass+" uses handler runc", "")
+		}
+	}
+
+	var daemonset kubeDaemonSet
+	if err := json.Unmarshal([]byte(out), &daemonset); err != nil {
+		report.add(VerificationFail, "gpu.device-plugin", "mock GPU device plugin", "cannot parse kubectl output: "+err.Error(), "")
+	} else if daemonset.Status.DesiredNumberScheduled == 0 ||
+		daemonset.Status.NumberReady != daemonset.Status.DesiredNumberScheduled ||
+		daemonset.Status.NumberAvailable != daemonset.Status.DesiredNumberScheduled {
+		report.add(VerificationFail, "gpu.device-plugin", "mock GPU device plugin",
+			fmt.Sprintf("%d/%d pod(s) Ready, %d available", daemonset.Status.NumberReady,
+				daemonset.Status.DesiredNumberScheduled, daemonset.Status.NumberAvailable),
+			"kubectl get pods -n "+gpuNamespace+" -o wide")
+	} else {
+		report.add(VerificationPass, "gpu.device-plugin", "mock GPU device plugin",
+			fmt.Sprintf("%d/%d pod(s) Ready and available", daemonset.Status.NumberReady, daemonset.Status.DesiredNumberScheduled), "")
+	}
+
+	out, err = m.diagnosticKubectl(cp, report.Distro, timeout, "get", "nodes", "-o", "json")
+	if err != nil {
+		report.add(VerificationFail, "gpu.nodes", "GPU node resources", compactError(err),
+			"kubectl get nodes -o json")
+		return
+	}
+	var nodes kubeNodeList
+	if err := json.Unmarshal([]byte(out), &nodes); err != nil {
+		report.add(VerificationFail, "gpu.nodes", "GPU node resources", "cannot parse kubectl output: "+err.Error(), "")
+		return
+	}
+	if len(nodes.Items) == 0 {
+		report.add(VerificationFail, "gpu.nodes", "GPU node resources", "device plugin is installed, but no Kubernetes nodes were found",
+			"kubectl get nodes -o wide")
+		return
+	}
+
+	bad := make([]string, 0)
+	type nodeResult struct {
+		name   string
+		status VerificationStatus
+		detail string
+	}
+	results := make([]nodeResult, 0, len(nodes.Items))
+	for _, node := range nodes.Items {
+		labels := node.Metadata.Labels
+		capacity := node.Status.Capacity[GPUResourceName]
+		var problems []string
+		if labels[gpuLabelPresent] != "true" {
+			problems = append(problems, gpuLabelPresent+" is not true")
+		}
+		for _, key := range []string{gpuLabelProduct, gpuLabelMemory, gpuLabelCount, gpuLabelAPI} {
+			if strings.TrimSpace(labels[key]) == "" {
+				problems = append(problems, key+" is missing")
+			}
+		}
+		if !positiveResourceQuantity(capacity) {
+			problems = append(problems, GPUResourceName+" capacity is "+orUnknown(capacity))
+		}
+		if count := labels[gpuLabelCount]; count != "" && capacity != "" && count != capacity {
+			problems = append(problems, gpuLabelCount+"="+count+" differs from capacity "+capacity)
+		}
+		if len(problems) > 0 {
+			bad = append(bad, node.Metadata.Name)
+			results = append(results, nodeResult{node.Metadata.Name, VerificationFail, strings.Join(problems, "; ")})
+		} else {
+			results = append(results, nodeResult{node.Metadata.Name, VerificationPass,
+				fmt.Sprintf("%s=%s, product=%s, api=%s", GPUResourceName, capacity, labels[gpuLabelProduct], labels[gpuLabelAPI])})
+		}
+	}
+	if len(bad) > 0 {
+		report.add(VerificationFail, "gpu.nodes", "GPU node resources", "invalid GPU contract on: "+limitedList(bad, 6),
+			"kubectl get nodes -o json")
+	} else {
+		report.add(VerificationPass, "gpu.nodes", "GPU node resources",
+			fmt.Sprintf("%d node(s) advertise %s", len(nodes.Items), GPUResourceName), "")
+	}
+	for _, result := range results {
+		hint := ""
+		if result.status == VerificationFail {
+			hint = "kubectl describe node " + result.name
+		}
+		report.add(result.status, "gpu.node."+result.name, "GPU node: "+result.name, result.detail, hint)
+	}
 }
 
 func (m *Manager) verifyNodeAddons(report *VerificationReport, infos []runtime.Info, cp string, timeout time.Duration) {
@@ -571,6 +695,7 @@ type kubeMetadata struct {
 	Namespace         string            `json:"namespace"`
 	DeletionTimestamp string            `json:"deletionTimestamp"`
 	Annotations       map[string]string `json:"annotations"`
+	Labels            map[string]string `json:"labels"`
 }
 
 type kubeCondition struct {
@@ -584,7 +709,8 @@ type kubeNodeList struct {
 	Items []struct {
 		Metadata kubeMetadata `json:"metadata"`
 		Status   struct {
-			Conditions []kubeCondition `json:"conditions"`
+			Conditions []kubeCondition   `json:"conditions"`
+			Capacity   map[string]string `json:"capacity"`
 		} `json:"status"`
 	} `json:"items"`
 }
@@ -621,6 +747,18 @@ type kubeAPIService struct {
 	Status struct {
 		Conditions []kubeCondition `json:"conditions"`
 	} `json:"status"`
+}
+
+type kubeDaemonSet struct {
+	Status struct {
+		DesiredNumberScheduled int `json:"desiredNumberScheduled"`
+		NumberReady            int `json:"numberReady"`
+		NumberAvailable        int `json:"numberAvailable"`
+	} `json:"status"`
+}
+
+type kubeRuntimeClass struct {
+	Handler string `json:"handler"`
 }
 
 type kubeGateway struct {
