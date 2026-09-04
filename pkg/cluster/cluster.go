@@ -606,13 +606,21 @@ func (m *Manager) installCilium(cp string, cfg Config) error {
 			return err
 		}
 		defer os.Remove(kubeconfig)
-		cmd := exec.Command("cilium", "install", "--wait")
+		cmd := exec.Command("cilium", ciliumInstallArgs(cfg.WaitTimeout)...)
 		cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("cilium install: %w\n%s", err, strings.TrimSpace(string(out)))
 		}
 		return nil
 	})
+}
+
+func ciliumInstallArgs(waitTimeout time.Duration) []string {
+	args := []string{"install", "--wait"}
+	if waitTimeout > 0 {
+		args = append(args, "--wait-duration", waitTimeout.String())
+	}
+	return args
 }
 
 // preflight validates the host before any VM is booted.

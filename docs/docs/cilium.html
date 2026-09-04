@@ -95,7 +95,7 @@ kiac create cluster --kernel full --cni none      <span class="c"># full kernel,
   <p><b>1. Install the prerequisite and create the cluster.</b> The addon flags compose: this exact command (Cilium + observability + Gateway API) builds the whole stack in about 1m37s on an M-series machine, kernel download included on the first run.</p>
   <pre><code>brew install cilium-cli
 kiac create cluster --name dev --workers 2 --cni cilium --kernel full --observability --gateway</code></pre>
-  <p>The kernel is fetched and verified before anything boots (cached after the first run), the VMs boot on it, and the <code>Installing CNI (Cilium)</code> step runs <code>cilium install --wait</code> against the new cluster.</p>
+  <p>The kernel is fetched and verified before anything boots (cached after the first run), the VMs boot on it, and the <code>Installing CNI (Cilium)</code> step runs <code>cilium install --wait</code> against the new cluster. Kiac passes its <code>--wait</code> value to Cilium as <code>--wait-duration</code>; raise it on slow links so large image pulls can finish.</p>
   <p><b>2. Check Cilium.</b> The same CLI kiac used is yours to drive:</p>
   <pre><code>cilium status --wait
 kubectl get nodes -o wide           <span class="c"># all Ready on the Cilium datapath</span>
