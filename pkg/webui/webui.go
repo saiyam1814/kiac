@@ -141,7 +141,7 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		"defaultVersion":    cluster.DefaultK8sVersion,
 		"k3sVersions":       cluster.SupportedK3sVersions(),
 		"defaultK3sVersion": cluster.DefaultK3sVersion,
-		"cnis":              []string{"kindnet", "cilium", "none"},
+		"cnis":              []string{"kindnet", "cilium", "flannel", "none"},
 		"distros":           []string{"kubeadm", "k3s"},
 	})
 }
@@ -420,9 +420,9 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--distro", "k3s")
 	} else if req.CNI != "" {
 		args = append(args, "--cni", req.CNI)
-		if req.CNI == "cilium" {
-			// Cilium needs the full kernel; 'full' downloads the
-			// published sha-pinned build once and caches it.
+		if req.CNI == "cilium" || req.CNI == "flannel" {
+			// Both need the full kernel; 'full' downloads the published
+			// sha-pinned build once and caches it.
 			args = append(args, "--kernel", "full")
 		}
 	}
