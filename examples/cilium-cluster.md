@@ -38,7 +38,8 @@ What happens, in order:
   WireGuard, and kprobes. See `kernel/README.md` for how it is built.
 - Every node VM boots on that kernel.
 - kiac runs `cilium install --wait` against the new cluster using your
-  host's cilium CLI, then installs the addons you asked for.
+  host's cilium CLI and passes the cluster's `--wait` budget through as
+  Cilium's `--wait-duration`, then installs the addons you asked for.
 
 With `--observability` and `--gateway` both added, the whole stack
 (Cilium, Prometheus, Grafana, Gateway API, Traefik) came up in 1m37s

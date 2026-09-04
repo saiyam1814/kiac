@@ -280,7 +280,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--distro` and `--kernel` are flags only for now) |
-| `--wait` | `5m` | node readiness timeout |
+| `--wait` | `5m` | timeout for each readiness step, including CNI installation |
 
 ## How it works
 
