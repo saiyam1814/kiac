@@ -25,6 +25,7 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [statefulset.yaml](statefulset.yaml) | StatefulSet with `volumeClaimTemplates` on the bundled local-path default StorageClass; PVCs bind, data survives pod restarts. |
 | [httproute.yaml](httproute.yaml) | Hostname routing with Gateway API: an echo app plus an HTTPRoute attached to the default Gateway from `--gateway`; needs a cluster created with `--gateway`. |
 | [observability-scrape.yaml](observability-scrape.yaml) | Two pod annotations get your app's metrics into the bundled Prometheus and Grafana; needs a cluster created with `--observability`. |
+| [gpu-mock.yaml](gpu-mock.yaml) | A Pod requesting `kiac.dev/gpu` through RuntimeClass `kiac-gpu`; needs `--gpu-mock` and validates scheduling only, with no acceleration. |
 
 ## Guides and config files
 
@@ -34,13 +35,14 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [k3s-cluster.md](k3s-cluster.md) | k3s as the node distro: what k3s bundles, what kiac changes, the PVC and LoadBalancer examples running on it unchanged, and the footprint. |
 | [observability-lab.md](observability-lab.md) | Step-by-step Grafana/Prometheus lab: create `--observability`, scrape an annotated app, query Prometheus, and optionally pair it with Gateway API. |
 | [gateway-api-lab.md](gateway-api-lab.md) | Step-by-step Gateway API lab: inspect GatewayClass and Gateway, attach HTTPRoutes, test hostname/path matching, and troubleshoot route status. |
+| [gpu-mock-lab.md](gpu-mock-lab.md) | Alpha GPU scheduling lab: inspect labels and capacity, run a GPU-shaped Pod, verify the marker device, and understand what is deliberately not accelerated yet. |
 | [chaos-drill.md](chaos-drill.md) | Step-by-step node-failure drill: spread an app across workers, `kiac stop node`, watch eviction and reschedule, `kiac start node`, watch the rejoin. |
 | [resume-drill.md](resume-drill.md) | Reboot-survival drill: stop the container system, see `0/3 stopped` in `kiac get clusters`, bring it all back with `kiac resume`, curl the app again. |
 | [k8gb-lab.md](k8gb-lab.md) | Real DNS-based failover across two kiac clusters: lightweight edge DNS, delegated regional CoreDNS, HTTP traffic validation, failover, and failback. |
 | [portainer-lab.md](portainer-lab.md) | Portainer CE on a pinned Kubernetes 1.34 cluster: persistent data, a real LoadBalancer address, protected admin credentials, and authenticated API verification. |
 | [rancher-lab.md](rancher-lab.md) | Rancher Manager on a dedicated Kubernetes 1.34 cluster: Gateway API, local TLS, protected credentials, authenticated API verification, and owned cleanup. |
 | [cluster.yaml](cluster.yaml) | Minimal `--config` file for `kiac create cluster`. |
-| [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, all addons on including observability and gateway. |
+| [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, including the optional stacks and mock GPU scheduling. |
 
 ## Notes
 

@@ -36,6 +36,7 @@
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
+    <a href="gpu.html">GPU scheduling alpha</a>
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a href="labs.html">Integration labs</a>
@@ -89,7 +90,7 @@ kubectl <span class="k">describe node kiac-dev-worker-1</span></code></pre>
   <h3>Kubeconfig download</h3>
   <p>Every card offers a standalone <code>kiac-&lt;name&gt;.kubeconfig</code> download, self-contained and pointed at the control plane's IP, handy for tools that want their own file instead of your merged <code>~/.kube/config</code>.</p>
   <h3>Create form</h3>
-  <p>The sidebar form covers the common knobs of <code>kiac create cluster</code>: name, workers, distro-specific pinned Kubernetes versions, CPUs and memory per node, CNI, and checkboxes for the kiac-lb LoadBalancer, metrics-server, local-path storage, observability, and Gateway API. Switching distro updates both the available versions and the default. Progress streams into an activity panel showing exactly the log the terminal would print. (<code>--kernel</code> is a CLI-only knob for now.)</p>
+  <p>The sidebar form covers the common knobs of <code>kiac create cluster</code>: name, workers, distro-specific pinned Kubernetes versions, CPUs and memory per node, CNI, and checkboxes for the kiac-lb LoadBalancer, metrics-server, local-path storage, observability, Gateway API, and the explicitly non-accelerated GPU scheduling mock. Switching distro updates both the available versions and the default. Progress streams into an activity panel showing exactly the log the terminal would print. (<code>--kernel</code> is a CLI-only knob for now.)</p>
   <h3>Delete</h3>
   <p>Card-level delete, with a confirmation prompt, equivalent to <code>kiac delete cluster --name &lt;name&gt;</code>.</p>
 

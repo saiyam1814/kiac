@@ -36,6 +36,7 @@
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
+    <a href="gpu.html">GPU scheduling alpha</a>
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a href="labs.html">Integration labs</a>
@@ -71,7 +72,8 @@
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>
     <li><b>Optional observability.</b> <code>--observability</code> installs Prometheus and Grafana with dashboards already provisioned. See <a href="observability.html">Observability</a>.</li>
     <li><b>Optional Gateway API.</b> <code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway. See <a href="gateway-api.html">Gateway API</a>.</li>
-    <li><b>Optional applications and verified examples.</b> Run <a href="portainer.html">Portainer CE</a> or <a href="rancher.html">Rancher Manager</a> on kiac, or follow repeatable workflows for Gateway API, observability, k8gb, OpenChoreo, node failure, and reboot recovery. Browse <a href="labs.html">all integration labs</a>.</li>
+    <li><b>GPU scheduling alpha.</b> <code>--gpu-mock</code> lets GPU-shaped charts request <code>kiac.dev/gpu</code> through RuntimeClass <code>kiac-gpu</code>. It validates scheduling only and provides no acceleration. See <a href="gpu.html">GPU scheduling alpha</a>.</li>
+    <li><b>Optional applications and verified examples.</b> Run <a href="portainer.html">Portainer CE</a> or <a href="rancher.html">Rancher Manager</a> on kiac, or follow repeatable workflows for Gateway API, observability, mock GPU scheduling, k8gb, OpenChoreo, node failure, and reboot recovery. Browse <a href="labs.html">all integration labs</a>.</li>
     <li><b>Node chaos.</b> <code>kiac stop node</code> / <code>kiac start node</code> stop and restart a real node VM. See <a href="node-chaos.html">Node chaos</a>.</li>
     <li><b>A local dashboard.</b> <code>kiac ui</code> opens a web console with cluster cards, live resource bars, a kubectl console drawer, and a create form. See <a href="dashboard.html">Dashboard</a>.</li>
   </ul>

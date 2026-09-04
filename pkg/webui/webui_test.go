@@ -96,6 +96,7 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 		DefaultVersion    string   `json:"defaultVersion"`
 		K3sVersions       []string `json:"k3sVersions"`
 		DefaultK3sVersion string   `json:"defaultK3sVersion"`
+		GPUResourceName   string   `json:"gpuResourceName"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
@@ -108,6 +109,25 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 	}
 	if got.DefaultVersion == got.DefaultK3sVersion {
 		t.Fatalf("expected distro defaults to differ while k3s 1.37 is unavailable; both are %q", got.DefaultVersion)
+	}
+	if got.GPUResourceName != cluster.GPUResourceName {
+		t.Fatalf("gpuResourceName = %q, want %q", got.GPUResourceName, cluster.GPUResourceName)
+	}
+}
+
+func TestCreateClusterArgsGPUAndDistro(t *testing.T) {
+	args := createClusterArgs(createReq{
+		Name: "gpu", Workers: 2, K8sVersion: "1.36", Distro: "k3s", CNI: "cilium",
+		CPUs: "6", Memory: "8G", GPUMock: true,
+	})
+	joined := " " + strings.Join(args, " ") + " "
+	for _, want := range []string{" --distro k3s ", " --gpu-mock ", " --cpus 6 ", " --memory 8G "} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args %q do not contain %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, " --cni ") {
+		t.Errorf("k3s args unexpectedly contain --cni: %q", joined)
 	}
 }
 

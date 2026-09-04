@@ -143,6 +143,7 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		"defaultK3sVersion": cluster.DefaultK3sVersion,
 		"cnis":              []string{"kindnet", "cilium", "none"},
 		"distros":           []string{"kubeadm", "k3s"},
+		"gpuResourceName":   cluster.GPUResourceName,
 	})
 }
 
@@ -390,6 +391,7 @@ type createReq struct {
 	NoStorage     bool   `json:"noStorage"`
 	Observability bool   `json:"observability"`
 	Gateway       bool   `json:"gateway"`
+	GPUMock       bool   `json:"gpuMock"`
 }
 
 func sanitizeName(s string) bool { return cluster.ValidName(s) }
@@ -410,6 +412,16 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "distro must be kubeadm or k3s"})
 		return
 	}
+	args := createClusterArgs(req)
+	id, err := s.startJob(req.Name, args)
+	if err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]string{"job": id})
+}
+
+func createClusterArgs(req createReq) []string {
 	args := []string{"create", "cluster", "--name", req.Name,
 		"--workers", strconv.Itoa(req.Workers)}
 	if req.K8sVersion != "" {
@@ -447,12 +459,10 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	if req.Gateway {
 		args = append(args, "--gateway")
 	}
-	id, err := s.startJob(req.Name, args)
-	if err != nil {
-		writeJSON(w, 409, map[string]string{"error": err.Error()})
-		return
+	if req.GPUMock {
+		args = append(args, "--gpu-mock")
 	}
-	writeJSON(w, 202, map[string]string{"job": id})
+	return args
 }
 
 func (s *server) deleteCluster(w http.ResponseWriter, r *http.Request) {

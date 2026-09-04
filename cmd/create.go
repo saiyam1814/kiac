@@ -140,6 +140,7 @@ func init() {
 	f.BoolVar(&createCfg.NoEdgeProxy, "no-edge-proxy", false, "skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers")
 	f.BoolVar(&createCfg.Observability, "observability", false, "install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP")
 	f.BoolVar(&createCfg.Gateway, "gateway", false, "install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway")
+	f.BoolVar(&createCfg.GPUMock, "gpu-mock", false, "advertise one mock kiac.dev/gpu resource per node for scheduling tests (no GPU acceleration)")
 	f.DurationVar(&createCfg.WaitTimeout, "wait", 5*time.Minute, "timeout for each cluster readiness step, including CNI installation")
 	createCmd.AddCommand(createClusterCmd)
 }
