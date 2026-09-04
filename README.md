@@ -11,7 +11,7 @@
   <a href="https://github.com/saiyam1814/kiac/releases"><img src="https://img.shields.io/github/v/release/saiyam1814/kiac?color=326CE5&label=release" alt="release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-326CE5" alt="MIT"></a>
   <img src="https://img.shields.io/badge/platform-Apple%20silicon-555" alt="Apple silicon">
-  <img src="https://img.shields.io/badge/Kubernetes-1.32–1.36-326CE5" alt="Kubernetes 1.32-1.36">
+  <img src="https://img.shields.io/badge/Kubernetes-1.32–1.37-326CE5" alt="Kubernetes 1.32-1.37">
   <a href="https://saiyam1814.github.io/kiac/"><img src="https://img.shields.io/badge/website-kiac-326CE5" alt="website"></a>
   <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac"><img src="https://img.shields.io/badge/CNCF%20Landscape-listed-0086FF" alt="Listed in the CNCF Landscape"></a>
 </p>
@@ -140,7 +140,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 ```text
 ⬢ kiac · Kubernetes in Apple Containers
  ✓ Preflight checks (0.3s)
- ✓ Pulling node image kindest/node:v1.36.1 (8.4s)
+ ✓ Pulling node image kindest/node:v1.37.0 (8.4s)
  ✓ Booting 3 node VM(s) (9.8s)
  ✓ Initializing Kubernetes control plane (49.6s)
  ✓ Joining 2 worker(s) (13.5s)
@@ -208,9 +208,9 @@ The [integration labs](https://saiyam1814.github.io/kiac/docs/labs.html) also co
 ```bash
 $ kubectl get nodes -o wide
 NAME                     STATUS   ROLES           VERSION   INTERNAL-IP    KERNEL-VERSION    CONTAINER-RUNTIME
-kiac-dev-control-plane   Ready    control-plane   v1.36.1   192.168.64.2   6.12.28 (arm64)   containerd://2.3.1
-kiac-dev-worker-1        Ready    <none>          v1.36.1   192.168.64.3   6.12.28 (arm64)   containerd://2.3.1
-kiac-dev-worker-2        Ready    <none>          v1.36.1   192.168.64.4   6.12.28 (arm64)   containerd://2.3.1
+kiac-dev-control-plane   Ready    control-plane   v1.37.0   192.168.64.2   6.12.28 (arm64)   containerd://2.3.1
+kiac-dev-worker-1        Ready    <none>          v1.37.0   192.168.64.3   6.12.28 (arm64)   containerd://2.3.1
+kiac-dev-worker-2        Ready    <none>          v1.37.0   192.168.64.4   6.12.28 (arm64)   containerd://2.3.1
 
 $ kubectl top nodes
 NAME                     CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)
@@ -232,7 +232,7 @@ kiac doctor                                  # check your setup
 kiac doctor --fix                            # ...and auto-start the container service
 kiac create cluster                          # single node, everything included
 kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
-kiac create cluster --k8s-version 1.34       # pick your Kubernetes (1.32-1.36 pinned)
+kiac create cluster --k8s-version 1.34       # pick your Kubernetes (kubeadm 1.32-1.37 pinned)
 kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datastore, up in under a minute
 kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
@@ -262,7 +262,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 |---|---|---|
 | `--name` | `dev` | cluster name |
 | `--workers` | `0` | worker count; control plane is untainted when 0 |
-| `--k8s-version` | `1.36` | Kubernetes minor, pinned digests for 1.32-1.36 (both distros) |
+| `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.36 (pins 1.32-1.36) |
 | `--distro` | `kubeadm` | `kubeadm` (kindest/node) or `k3s` (rancher/k3s: sqlite datastore, bundled local-path and metrics-server; kiac-lb handles LoadBalancers; `--cni` does not apply, kiac applies kindnet) |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
 | `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), or `none` to bring your own |

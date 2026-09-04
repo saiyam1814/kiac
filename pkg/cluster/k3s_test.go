@@ -14,10 +14,10 @@ func TestResolveK3sImage(t *testing.T) {
 		want    string // substring of resolved image
 		wantErr bool
 	}{
-		{in: "1.36", want: "rancher/k3s:v1.36.2-k3s1@sha256:"},
-		{in: "v1.36", want: "rancher/k3s:v1.36.2-k3s1@sha256:"},
+		{in: "1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
+		{in: "v1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
 		{in: "1.32", want: "rancher/k3s:v1.32.13-k3s1@sha256:"},
-		{in: "1.34.9", want: "rancher/k3s:v1.34.9-k3s1@sha256:"},
+		{in: "1.34.11", want: "rancher/k3s:v1.34.11-k3s1@sha256:"},
 		{in: "1.34.2", want: "rancher/k3s:v1.34.2-k3s1"}, // unpinned patch fallback
 		{in: "1.19", wantErr: true},
 		{in: "latest", wantErr: true},
@@ -38,8 +38,8 @@ func TestResolveK3sImage(t *testing.T) {
 			t.Errorf("ResolveK3sImage(%q) = %q, want substring %q", c.in, got, c.want)
 		}
 	}
-	if def := SupportedK3sVersions()[0]; def != DefaultK8sVersion {
-		t.Errorf("newest k3s-supported version %q should equal default %q", def, DefaultK8sVersion)
+	if def := SupportedK3sVersions()[0]; def != DefaultK3sVersion {
+		t.Errorf("newest k3s-supported version %q should equal default %q", def, DefaultK3sVersion)
 	}
 }
 

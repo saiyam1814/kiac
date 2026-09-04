@@ -397,7 +397,7 @@
   <div class="grid">
     <div class="card"><h3>1 · Install the runtime</h3><p>Grab <a href="https://github.com/apple/container/releases" style="color:var(--accent);font-weight:600;text-decoration:none">apple/container 1.0</a> (signed pkg from Apple). Requires an Apple silicon Mac; macOS 26+ for multi-node.</p></div>
     <div class="card"><h3>2 · Install kiac</h3><p><code>brew install --cask saiyam1814/tap/kiac</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
-    <div class="card"><h3>3 · Create</h3><p><code>kiac create cluster --workers 2</code><br><br>Kubernetes 1.32-1.36, then <code>kubectl get nodes</code> and you are flying.</p></div>
+    <div class="card"><h3>3 · Create</h3><p><code>kiac create cluster --workers 2</code><br><br>Kubernetes 1.32-1.37, then <code>kubectl get nodes</code> and you are flying.</p></div>
   </div>
   <p style="margin-top:26px;color:var(--mid)">From there the <a href="docs/index.html" style="color:var(--accent);font-weight:600;text-decoration:none">documentation</a> covers networking, the k3s distro, Cilium and custom kernels, reboots and resume, observability, Gateway API, node chaos, the dashboard, and every CLI flag.</p>
 </section>
@@ -412,7 +412,7 @@ const lines = [
   ['', '<span class="d">$</span> <span class="b">kiac create cluster --name dev --workers 2</span>'],
   [400, '<span class="o">⬢ kiac</span> <span class="d">· Kubernetes in Apple Containers</span>'],
   [600, ' <span class="ok">✓</span> Preflight checks <span class="d">(0.3s)</span>'],
-  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.36.1 <span class="d">(4.6s)</span>'],
+  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.37.0 <span class="d">(4.6s)</span>'],
   [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(6.8s)</span>'],
   [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(24.3s)</span>'],
   [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(9.1s)</span>'],

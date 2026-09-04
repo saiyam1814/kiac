@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/cluster"
@@ -27,6 +26,7 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
+		selectedK8sVersion := k8sVersion
 		// Seed the typed family from the string flag (default ipv4) before
 		// Merge, so a config-file value can still override it when the flag
 		// was not set on the command line.
@@ -36,7 +36,7 @@ var createClusterCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			if err := fc.Merge(&createCfg, &k8sVersion, cmd.Flags().Changed); err != nil {
+			if err := fc.Merge(&createCfg, &selectedK8sVersion, cmd.Flags().Changed); err != nil {
 				return err
 			}
 		}
@@ -67,7 +67,10 @@ var createClusterCmd = &cobra.Command{
 		switch createDistro {
 		case "kubeadm":
 			if createCfg.Image == "" {
-				img, err := cluster.ResolveImage(k8sVersion)
+				if selectedK8sVersion == "" {
+					selectedK8sVersion = defaultK8sVersion(createDistro)
+				}
+				img, err := cluster.ResolveImage(selectedK8sVersion)
 				if err != nil {
 					return err
 				}
@@ -82,7 +85,10 @@ var createClusterCmd = &cobra.Command{
 				return fmt.Errorf("--cni applies to --distro kubeadm only; kiac installs kindnet on k3s")
 			}
 			if createCfg.Image == "" {
-				img, err := cluster.ResolveK3sImage(k8sVersion)
+				if selectedK8sVersion == "" {
+					selectedK8sVersion = defaultK8sVersion(createDistro)
+				}
+				img, err := cluster.ResolveK3sImage(selectedK8sVersion)
 				if err != nil {
 					return err
 				}
@@ -93,6 +99,13 @@ var createClusterCmd = &cobra.Command{
 			return fmt.Errorf("unknown --distro %q (supported: kubeadm, k3s)", createDistro)
 		}
 	},
+}
+
+func defaultK8sVersion(distro string) string {
+	if distro == "k3s" {
+		return cluster.DefaultK3sVersion
+	}
+	return cluster.DefaultK8sVersion
 }
 
 var (
@@ -108,8 +121,8 @@ func init() {
 	f.StringVar(&createConfigFile, "config", "", "cluster config YAML (see examples/cluster.yaml); flags set explicitly on the command line override file values")
 	f.StringVar(&createCfg.Name, "name", "dev", "cluster name")
 	f.IntVar(&createCfg.Workers, "workers", 0, "number of worker nodes (control plane is untainted when 0)")
-	f.StringVar(&k8sVersion, "k8s-version", cluster.DefaultK8sVersion,
-		"Kubernetes version ("+strings.Join(cluster.SupportedVersions(), ", ")+")")
+	f.StringVar(&k8sVersion, "k8s-version", "",
+		"Kubernetes version (default: latest pinned for the selected distro; kubeadm "+cluster.DefaultK8sVersion+", k3s "+cluster.DefaultK3sVersion+")")
 	f.StringVar(&createDistro, "distro", "kubeadm",
 		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")

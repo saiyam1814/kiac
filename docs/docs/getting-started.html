@@ -67,7 +67,7 @@
   <pre><code>kiac create cluster --name dev --workers 2</code></pre>
   <p>What happens, step by step:</p>
   <ol>
-    <li><b>Preflight checks</b>, then the pinned <code>kindest/node:v1.36.1</code> image is pulled.</li>
+    <li><b>Preflight checks</b>, then the pinned <code>kindest/node:v1.37.0</code> image is pulled.</li>
     <li><b>Three node VMs boot</b> in parallel (1 control plane + 2 workers), each with 4 vCPUs; the control plane gets 4G of memory and workers 2G by default (<code>--cpus</code>, <code>--cp-memory</code>, <code>--memory</code>).</li>
     <li><b>kubeadm</b> initializes the control plane and joins the workers concurrently.</li>
     <li><b>kindnet</b> (the CNI) is applied, then the default addons install: local-path storage and metrics-server in parallel, followed by the <b>kiac-lb</b> LoadBalancer (a tiny systemd service inside the control-plane VM).</li>
@@ -75,7 +75,7 @@
   </ol>
   <p>Useful variations:</p>
   <pre><code>kiac create cluster                          <span class="c"># single node named "dev", control plane untainted</span>
-kiac create cluster --k8s-version 1.34       <span class="c"># pick a Kubernetes minor (1.32-1.36 pinned)</span>
+kiac create cluster --k8s-version 1.34       <span class="c"># pick a Kubernetes minor (kubeadm 1.32-1.37 pinned)</span>
 kiac create cluster --distro k3s --workers 1 <span class="c"># k3s nodes, ready in under a minute; see k3s distro</span>
 kiac create cluster --cni cilium --kernel full <span class="c"># Cilium on the full kernel; see the Cilium page</span>
 kiac create cluster --observability --gateway <span class="c"># everything on; see the addon pages</span>

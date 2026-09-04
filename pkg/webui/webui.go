@@ -137,10 +137,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
-		"versions":       cluster.SupportedVersions(),
-		"defaultVersion": cluster.DefaultK8sVersion,
-		"cnis":           []string{"kindnet", "cilium", "none"},
-		"distros":        []string{"kubeadm", "k3s"},
+		"versions":          cluster.SupportedVersions(),
+		"defaultVersion":    cluster.DefaultK8sVersion,
+		"k3sVersions":       cluster.SupportedK3sVersions(),
+		"defaultK3sVersion": cluster.DefaultK3sVersion,
+		"cnis":              []string{"kindnet", "cilium", "none"},
+		"distros":           []string{"kubeadm", "k3s"},
 	})
 }
 
