@@ -11,10 +11,10 @@ func TestResolveImage(t *testing.T) {
 		want    string // substring of resolved image
 		wantErr bool
 	}{
-		{in: "1.36", want: "kindest/node:v1.36.1@sha256:"},
-		{in: "v1.36", want: "kindest/node:v1.36.1@sha256:"},
+		{in: "1.37", want: "kindest/node:v1.37.0@sha256:"},
+		{in: "v1.36", want: "kindest/node:v1.36.4@sha256:"},
 		{in: "1.32", want: "kindest/node:v1.32.11@sha256:"},
-		{in: "1.34.8", want: "kindest/node:v1.34.8@sha256:"},
+		{in: "1.34.11", want: "kindest/node:v1.34.11@sha256:"},
 		{in: "1.34.2", want: "kindest/node:v1.34.2"}, // unpinned patch fallback
 		{in: "1.19", wantErr: true},
 		{in: "latest", wantErr: true},

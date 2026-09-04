@@ -7,8 +7,8 @@
 
 name: dev            # cluster name: lowercase letters, digits, dashes
 workers: 2           # worker node count; 0 untaints the control plane
-k8sVersion: "1.36"   # Kubernetes minor ("1.36") or exact patch ("1.36.1")
-# image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion
+k8sVersion: "1.36"   # works with both distros; kubeadm also supports "1.37"
+# image: docker.io/kindest/node:v1.36.4   # node image, overrides k8sVersion
 cni: kindnet         # pod network: kindnet, or none to bring your own
 ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary).
                      # dual/ipv6 auto-select the full kernel (IPv6 netfilter) and need macOS 26+.

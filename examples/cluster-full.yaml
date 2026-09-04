@@ -19,14 +19,15 @@ name: full
 # workers the control plane is untainted and runs your pods. Default: 0.
 workers: 3
 
-# Kubernetes version: a supported minor ("1.32" through "1.36") or an
-# exact patch ("1.36.1"). Each minor is pinned to a tested
-# kindest/node image digest. Default: "1.36".
+# Kubernetes version: a supported minor ("1.32" through "1.37") or an
+# exact patch. Each minor is pinned to a tested image digest. This
+# cross-distro example uses "1.36"; kubeadm defaults to "1.37" while
+# k3s currently defaults to "1.36".
 k8sVersion: "1.36"
 
 # Node image, overrides k8sVersion entirely. Leave unset unless you
 # need a specific kindest/node build.
-# image: docker.io/kindest/node:v1.36.1
+# image: docker.io/kindest/node:v1.36.4
 
 # Pod network: kindnet (the default), or none to bring your own CNI.
 # The stock node kernel has no VXLAN/br_netfilter/BPF-JIT modules, so

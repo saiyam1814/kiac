@@ -61,7 +61,7 @@
 
   <h2 id="how">How it differs from the kubeadm path</h2>
   <p>The default distro boots <code>kindest/node</code> images (systemd, containerd, kubeadm) and initializes the cluster with <code>kubeadm init</code>/<code>join</code>. With <code>--distro k3s</code>, each VM boots a pinned <code>rancher/k3s</code> image and runs the k3s binary directly as PID 1: no systemd in the VM, no separate etcd, no kubeadm. The server keeps its state in sqlite, workers join as k3s agents over the standard <code>K3S_URL</code>/<code>K3S_TOKEN</code> mechanism, and the kubeconfig merges into <code>~/.kube/config</code> as <code>kiac-&lt;name&gt;</code>, exactly like the kubeadm path.</p>
-  <p>Kubernetes versions work the same way: minors 1.32 through 1.36 map to digest-pinned <code>rancher/k3s</code> images (1.36 default), selected with the same <code>--k8s-version</code> flag:</p>
+  <p>Kubernetes versions use the same flag but follow k3s's release stream: minors 1.32 through 1.36 map to digest-pinned <code>rancher/k3s</code> images (1.36 default). Kubeadm can move to a newer minor before k3s publishes its matching image:</p>
   <pre><code>kiac create cluster --distro k3s --k8s-version 1.34</code></pre>
 
   <h2 id="bundled">What k3s bundles, and what kiac does with it</h2>

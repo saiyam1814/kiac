@@ -86,6 +86,31 @@ func TestServeGuardsAllRoutes(t *testing.T) {
 	}
 }
 
+func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
+	req := httptest.NewRequest("GET", "http://localhost/api/meta", nil)
+	rec := httptest.NewRecorder()
+	(&server{}).meta(rec, req)
+
+	var got struct {
+		Versions          []string `json:"versions"`
+		DefaultVersion    string   `json:"defaultVersion"`
+		K3sVersions       []string `json:"k3sVersions"`
+		DefaultK3sVersion string   `json:"defaultK3sVersion"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Versions) == 0 || got.Versions[0] != got.DefaultVersion {
+		t.Fatalf("kubeadm versions/default = %v/%q", got.Versions, got.DefaultVersion)
+	}
+	if len(got.K3sVersions) == 0 || got.K3sVersions[0] != got.DefaultK3sVersion {
+		t.Fatalf("k3s versions/default = %v/%q", got.K3sVersions, got.DefaultK3sVersion)
+	}
+	if got.DefaultVersion == got.DefaultK3sVersion {
+		t.Fatalf("expected distro defaults to differ while k3s 1.37 is unavailable; both are %q", got.DefaultVersion)
+	}
+}
+
 func TestParseTopNodes(t *testing.T) {
 	cases := []struct {
 		name string

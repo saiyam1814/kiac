@@ -71,7 +71,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--config</code></td><td></td><td>cluster config YAML (see <a href="config-file.html">Config file</a>); flags set explicitly on the command line override file values</td></tr>
     <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name (lowercase letters, digits, dashes)</td></tr>
     <tr><td><code>--workers</code></td><td><code>0</code></td><td>number of worker nodes (control plane is untainted when 0)</td></tr>
-    <tr><td><code>--k8s-version</code></td><td><code>1.36</code></td><td>Kubernetes version (1.36, 1.35, 1.34, 1.33, 1.32), for either distro</td></tr>
+    <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.36 (1.32-1.36 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
     <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
     <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code> (needs <code>--kernel full</code> and the <code>cilium</code> CLI), or <code>none</code> (bring your own). kubeadm distro only; the k3s path always gets kindnet</td></tr>

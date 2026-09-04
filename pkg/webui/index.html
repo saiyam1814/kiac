@@ -183,9 +183,16 @@ const state = { clusters: [], metrics: {}, addons: {} };
 
 async function loadMeta() {
   const m = await j('/api/meta');
-  $('version').innerHTML = m.versions.map(v => `<option ${v===m.defaultVersion?'selected':''}>${esc(v)}</option>`).join('');
   $('cni').innerHTML = m.cnis.map(c => `<option>${esc(c)}</option>`).join('');
   $('distro').innerHTML = (m.distros || ['kubeadm']).map(d => `<option>${esc(d)}</option>`).join('');
+  const syncVersions = (useDefault = false) => {
+    const k3s = $('distro').value === 'k3s';
+    const versions = k3s ? (m.k3sVersions || m.versions) : m.versions;
+    const fallback = k3s ? (m.defaultK3sVersion || m.defaultVersion) : m.defaultVersion;
+    const current = $('version').value;
+    $('version').innerHTML = versions.map(v => `<option>${esc(v)}</option>`).join('');
+    $('version').value = !useDefault && versions.includes(current) ? current : fallback;
+  };
   const syncForm = () => {
     const k3s = $('distro').value === 'k3s';
     const cil = !k3s && $('cni').value === 'cilium';
@@ -195,8 +202,9 @@ async function loadMeta() {
     else if (cil) { note.textContent = 'Cilium downloads the full node kernel once (~40MB) and needs the cilium CLI: brew install cilium-cli.'; note.style.display = 'block'; }
     else { note.style.display = 'none'; }
   };
-  $('distro').addEventListener('change', syncForm);
+  $('distro').addEventListener('change', () => { syncVersions(true); syncForm(); });
   $('cni').addEventListener('change', syncForm);
+  syncVersions();
   syncForm();
 }
 

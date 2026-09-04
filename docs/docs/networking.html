@@ -61,9 +61,9 @@
   <p>apple/container attaches each lightweight VM to macOS's <code>vmnet</code> network. Each node VM therefore gets its own IP address (typically in the <code>192.168.64.0/24</code> range) that is directly routable from your Mac:</p>
   <pre><code>kubectl get nodes -o wide
 <span class="o">NAME                     STATUS   ROLES           VERSION   INTERNAL-IP
-kiac-dev-control-plane   Ready    control-plane   v1.36.1   192.168.64.2
-kiac-dev-worker-1        Ready    &lt;none&gt;          v1.36.1   192.168.64.3
-kiac-dev-worker-2        Ready    &lt;none&gt;          v1.36.1   192.168.64.4</span></code></pre>
+kiac-dev-control-plane   Ready    control-plane   v1.37.0   192.168.64.2
+kiac-dev-worker-1        Ready    &lt;none&gt;          v1.37.0   192.168.64.3
+kiac-dev-worker-2        Ready    &lt;none&gt;          v1.37.0   192.168.64.4</span></code></pre>
   <p>Consequences:</p>
   <ul>
     <li>The API server is reached at <code>https://&lt;control-plane-ip&gt;:6443</code>; the kubeconfig points there directly.</li>

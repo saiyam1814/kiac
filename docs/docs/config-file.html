@@ -63,8 +63,8 @@
   <p>This is <a href="https://github.com/saiyam1814/kiac/blob/main/examples/cluster.yaml">examples/cluster.yaml</a> from the repo; every key is optional:</p>
   <pre><code>name: dev            <span class="c"># cluster name: lowercase letters, digits, dashes</span>
 workers: 2           <span class="c"># worker node count; 0 untaints the control plane</span>
-k8sVersion: "1.36"   <span class="c"># Kubernetes minor ("1.36") or exact patch ("1.36.1")</span>
-<span class="c"># image: docker.io/kindest/node:v1.36.1   # node image, overrides k8sVersion</span>
+k8sVersion: "1.36"   <span class="c"># works with both distros; kubeadm also supports "1.37"</span>
+<span class="c"># image: docker.io/kindest/node:v1.36.4   # node image, overrides k8sVersion</span>
 cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
 <span class="c"># dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the</span>
 <span class="c">#                    # runtime default resolv.conf entirely when set</span>
@@ -91,7 +91,7 @@ addons:
     <tr><th>Key</th><th>Type</th><th>Default</th><th>Maps to flag</th></tr>
     <tr><td><code>name</code></td><td>string</td><td><code>dev</code></td><td><code>--name</code></td></tr>
     <tr><td><code>workers</code></td><td>int</td><td><code>0</code></td><td><code>--workers</code></td></tr>
-    <tr><td><code>k8sVersion</code></td><td>string</td><td><code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
+    <tr><td><code>k8sVersion</code></td><td>string</td><td>distro latest: kubeadm <code>"1.37"</code>, k3s <code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
