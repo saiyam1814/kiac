@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // The upstream CNI plugin binaries the k3s distro needs. kindnet's
@@ -19,6 +20,22 @@ const (
 	cniPluginsURL     = "https://github.com/containernetworking/plugins/releases/download/" +
 		cniPluginsVersion + "/cni-plugins-linux-arm64-" + cniPluginsVersion + ".tgz"
 )
+
+// extractCNIPlugins streams the named members of the verified plugins
+// archive into /opt/cni/bin of a node VM. Callers resolve the archive
+// once via ensureCNIPluginsArchive and pass its path, so a fan-out over
+// many nodes reads the already-cached file instead of racing N
+// downloads. tar exits non-zero on a missing member, which ExecStdin
+// surfaces as an error.
+func (m *Manager) extractCNIPlugins(node, archive string, members ...string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
+		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin "+strings.Join(members, " "))
+}
 
 // ensureCNIPluginsArchive returns the local path of the verified CNI
 // plugins archive, downloading it on first use.

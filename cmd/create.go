@@ -126,7 +126,7 @@ func init() {
 	f.StringVar(&createDistro, "distro", "kubeadm",
 		"Kubernetes distribution per node VM: kubeadm (kindest/node), or k3s (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
-	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), or none (bring your own)")
+	f.StringVar(&createCfg.CNI, "cni", "kindnet", "pod network: kindnet, cilium (needs --kernel full), flannel (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")

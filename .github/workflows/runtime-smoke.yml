@@ -25,6 +25,7 @@ on:
           - kubeadm
           - k3s
           - dual
+          - flannel
           - full
 
 permissions:

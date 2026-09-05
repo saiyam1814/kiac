@@ -235,6 +235,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 kiac create cluster --k8s-version 1.34       # pick your Kubernetes (kubeadm 1.32-1.37 pinned)
 kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datastore, up in under a minute
 kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
+kiac create cluster --cni flannel --kernel full --workers 2  # flannel VXLAN on the full node kernel, no host CLI needed
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly # host directory in every node
 kiac ui                                      # local web console: manage clusters, kubectl Console per cluster
@@ -265,7 +266,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.36 (pins 1.32-1.36) |
 | `--distro` | `kubeadm` | `kubeadm` (kindest/node) or `k3s` (rancher/k3s: sqlite datastore, bundled local-path and metrics-server; kiac-lb handles LoadBalancers; `--cni` does not apply, kiac applies kindnet) |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
-| `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), or `none` to bring your own |
+| `--cni` | `kindnet` | pod network: `kindnet`, `cilium` (requires `--kernel full` and the `cilium` CLI on your PATH), `flannel` (v0.28.9 embedded, VXLAN; requires `--kernel full`, no host CLI), or `none` to bring your own |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
 | `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |
@@ -296,7 +297,7 @@ Host bind mounts use ordinary `container run`, not `container machine`; `/Users`
 
 - **Persistence backed by `container machine`** (WWDC26 persistent Linux environments): `kiac resume` already brings a cluster back after a reboot, and machine-backed VMs would make that instant
 - **HA control planes**
-- **One-flag Calico and Flannel** on the full kernel
+- **One-flag Calico** on the full kernel (Flannel shipped: `--cni flannel --kernel full`)
 - **Hubble UI** for Cilium clusters
 
 ## Contributing

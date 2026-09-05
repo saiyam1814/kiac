@@ -250,6 +250,9 @@ run_cluster() {
   local workers=$4
   local features=$5
   local restart=$6
+  # Optional 7th arg selects a non-default CNI; cilium and flannel need
+  # the full kernel, which create resolves (and caches) via --kernel full.
+  local cni=${7:-}
   local name="${KIAC_E2E_PREFIX}-${label}"
   local cp="kiac-${name}-control-plane"
   local sender="kiac-${name}-worker-1"
@@ -272,11 +275,14 @@ run_cluster() {
 
   local create=(create cluster --name "${name}" --distro "${distro}" --workers "${workers}" --ip-family "${family}" --wait 8m
     --mount "type=bind,source=${mount_dir},target=/kiac-e2e-host")
+  if [[ -n "${cni}" ]]; then
+    create+=(--cni "${cni}" --kernel full)
+  fi
   if [[ "${features}" == true ]]; then
     create+=(--gateway --observability)
   fi
 
-  printf '\n=== %s: %s %s, %s workers ===\n' "${label}" "${distro}" "${family}" "${workers}"
+  printf '\n=== %s: %s %s, %s workers%s ===\n' "${label}" "${distro}" "${family}" "${workers}" "${cni:+", ${cni}"}"
   "${KIAC_BIN}" "${create[@]}"
 
   k wait --for=condition=Ready nodes --all --timeout=300s
@@ -446,14 +452,18 @@ case "${PROFILE}" in
     run_cluster kad kubeadm dual 3 true false
     run_cluster k3d k3s dual 3 true false
     ;;
+  flannel)
+    run_cluster fl kubeadm ipv4 3 true true flannel
+    ;;
   full)
     run_cluster ka kubeadm ipv4 3 true true
     run_cluster k3 k3s ipv4 3 true true
     run_cluster kad kubeadm dual 3 true false
     run_cluster k3d k3s dual 3 true false
+    run_cluster fl kubeadm ipv4 3 true true flannel
     ;;
   *)
-    printf 'unknown runtime profile %q (quick, kubeadm, k3s, dual, full)\n' "${PROFILE}" >&2
+    printf 'unknown runtime profile %q (quick, kubeadm, k3s, dual, flannel, full)\n' "${PROFILE}" >&2
     exit 2
     ;;
 esac

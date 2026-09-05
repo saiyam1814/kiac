@@ -143,7 +143,7 @@ kubectl delete networkpolicy deny-web</code></pre>
   <ul>
     <li>Both prerequisites are checked before any VM boots, so a missing <code>cilium</code> binary or kernel costs seconds, not minutes.</li>
     <li>The kernel cache lives at <code>~/.kiac/kernels/</code>; deleting it just triggers a fresh verified download next time.</li>
-    <li><code>--cni flannel</code> and <code>--cni calico</code> are not wired up: they fail fast with a pointer to <code>--cni cilium</code> or <code>--cni none</code> (bring your own on the full kernel).</li>
+    <li><code>--cni flannel</code> works on the same kernel: kiac embeds the upstream v0.28.9 manifest (VXLAN backend, no host CLI needed) and streams the <code>bridge</code> delegate plugin from its sha-verified archive into every node. <code>--cni calico</code> is not wired up yet and fails fast.</li>
     <li><code>--kernel</code> and <code>--distro</code> are CLI flags only for now; they are not <a href="config-file.html">config file</a> keys yet.</li>
   </ul>
 

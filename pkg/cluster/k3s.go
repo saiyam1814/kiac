@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -195,13 +194,7 @@ func (m *Manager) ensureK3sCNIPlugins(node string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
-		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin ./loopback ./ptp ./host-local ./portmap ./bandwidth")
+	return m.extractCNIPlugins(node, archive, "./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth")
 }
 
 // k3sToken generates the shared cluster secret agents present to join.
