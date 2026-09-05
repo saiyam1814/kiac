@@ -27,7 +27,7 @@ make ci
 gh workflow run Release --ref main -f tag=vX.Y.Z
 ```
 
-The workflow creates a draft release and its tag through GitHub's release API, uploads and verifies every artifact, and publishes only after all gates pass. This draft-first flow is required while immutable releases are enabled; direct creation of a release tag is intentionally blocked.
+The workflow reserves the tag in a draft release through GitHub's release API, uploads and verifies every artifact, and publishes only after all gates pass. GitHub materializes and locks the tag when the draft is published. This draft-first flow is required while immutable releases are enabled; direct creation of a release tag is intentionally blocked.
 
 After the workflow succeeds, verify both the artifact provenance and GitHub's immutable release attestation:
 
