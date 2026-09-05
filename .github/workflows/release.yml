@@ -1,9 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: SemVer release tag (for example, v0.7.0)
+        required: true
+        type: string
+
+run-name: Release ${{ inputs.tag }}
 
 permissions:
   contents: write
@@ -12,15 +17,17 @@ permissions:
   artifact-metadata: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
-      - name: Check out tagged source
+      - name: Check out release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -35,16 +42,20 @@ jobs:
             go.sum
             internal/gpudriver/go.sum
 
-      - name: Validate release tag and source
+      - name: Validate release version and source
         shell: bash
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "release tag must be valid SemVer prefixed with v: ${GITHUB_REF_NAME}" >&2
+          if [[ ! "${RELEASE_TAG}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must be valid SemVer prefixed with v: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "release workflow must be dispatched from main, got ${GITHUB_REF}" >&2
             exit 1
           fi
           git fetch --no-tags origin main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
-            echo "release commit ${GITHUB_SHA} is not on main" >&2
+          if [[ "$(git rev-parse origin/main)" != "${GITHUB_SHA}" ]]; then
+            echo "release commit ${GITHUB_SHA} is not the current main tip" >&2
             exit 1
           fi
 
@@ -66,6 +77,32 @@ jobs:
       - name: Test release source
         run: make ci
 
+      - name: Create immutable release draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            if [[ "$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)" != "true" ]]; then
+              echo "release ${RELEASE_TAG} already exists and is not a draft" >&2
+              exit 1
+            fi
+          else
+            gh release create "${RELEASE_TAG}" \
+              --draft \
+              --generate-notes \
+              --target "${GITHUB_SHA}" \
+              --title "${RELEASE_TAG}"
+          fi
+
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
+          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "release tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          git checkout --detach "${RELEASE_TAG}"
+
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
@@ -79,6 +116,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GORELEASER_CURRENT_TAG: ${{ env.RELEASE_TAG }}
           HOMEBREW_TAP_DEPLOY_KEY_PATH: ${{ env.HOMEBREW_TAP_DEPLOY_KEY_PATH }}
 
       - name: Verify release artifacts
@@ -129,7 +167,7 @@ jobs:
       - name: Publish immutable release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --verify-tag
+        run: gh release edit "${RELEASE_TAG}" --draft=false --verify-tag
 
       - name: Remove deploy key
         if: always()

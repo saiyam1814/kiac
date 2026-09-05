@@ -1,6 +1,6 @@
 # Releasing kiac
 
-Application releases are built only from SemVer tags on `main`. The release workflow:
+Application releases are built only from the current `main` commit. The release workflow:
 
 1. Runs the full source CI suite.
 2. Builds the darwin/arm64 archive with GoReleaser.
@@ -18,15 +18,16 @@ The `HOMEBREW_TAP_DEPLOY_KEY` Actions secret contains an unencrypted SSH private
 
 ## Create a release
 
-Start from a clean, current `main`, choose the next SemVer version, and push an annotated tag:
+Start from a clean, current `main`, choose the next SemVer version, and dispatch the release workflow:
 
 ```bash
 git switch main
 git pull --ff-only
 make ci
-git tag -a vX.Y.Z -m "kiac vX.Y.Z"
-git push origin vX.Y.Z
+gh workflow run Release --ref main -f tag=vX.Y.Z
 ```
+
+The workflow creates a draft release and its tag through GitHub's release API, uploads and verifies every artifact, and publishes only after all gates pass. This draft-first flow is required while immutable releases are enabled; direct creation of a release tag is intentionally blocked.
 
 After the workflow succeeds, verify both the artifact provenance and GitHub's immutable release attestation:
 
