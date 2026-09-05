@@ -60,6 +60,8 @@ release:
     owner: saiyam1814
     name: kiac
   draft: true
+  use_existing_draft: true
+  mode: keep-existing
 
 changelog:
   use: github-native
