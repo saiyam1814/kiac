@@ -36,7 +36,6 @@
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
-    <a href="gpu.html">GPU scheduling alpha</a>
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a href="labs.html">Integration labs</a>
@@ -85,8 +84,7 @@ addons:
   loadBalancer: true     <span class="c"># kiac-lb, Services of type LoadBalancer</span>
   edgeProxy: true        <span class="c"># node-local TCP proxy for large external uploads</span>
   observability: false   <span class="c"># Prometheus + Grafana + node-exporter</span>
-  gateway: false         <span class="c"># Gateway API CRDs + Traefik</span>
-  gpuMock: false         <span class="c"># scheduling mock only; no GPU acceleration</span></code></pre>
+  gateway: false         <span class="c"># Gateway API CRDs + Traefik</span></code></pre>
 
   <h2 id="schema">Schema</h2>
   <table>
@@ -108,7 +106,6 @@ addons:
     <tr><td><code>addons.edgeProxy</code></td><td>bool</td><td><code>true</code></td><td><code>--no-edge-proxy</code> (inverted)</td></tr>
     <tr><td><code>addons.observability</code></td><td>bool</td><td><code>false</code></td><td><code>--observability</code></td></tr>
     <tr><td><code>addons.gateway</code></td><td>bool</td><td><code>false</code></td><td><code>--gateway</code></td></tr>
-    <tr><td><code>addons.gpuMock</code></td><td>bool</td><td><code>false</code></td><td><code>--gpu-mock</code> (synthetic scheduling resource; no acceleration)</td></tr>
   </table>
   <p>Notes on the schema:</p>
   <ul>

@@ -121,7 +121,6 @@ type Config struct {
 	NoEdgeProxy   bool
 	Observability bool
 	Gateway       bool
-	GPUMock       bool
 	WaitTimeout   time.Duration
 }
 
@@ -195,9 +194,6 @@ func (m *Manager) Create(cfg Config) error {
 	}
 	if err := runtime.ValidateMounts(cfg.Mounts); err != nil {
 		return err
-	}
-	if cfg.GPUMock && cfg.CNI == "none" {
-		return fmt.Errorf("--gpu-mock needs a working CNI; remove --cni none")
 	}
 
 	// Fail cilium prerequisites before any VM boots, not minutes later
@@ -419,8 +415,8 @@ func (m *Manager) Create(cfg Config) error {
 		}
 	}
 
-	// Optional addons ride after nodes are Ready. Observability and Gateway
-	// also use the primary label for immediately assignable LoadBalancer IPs.
+	// Optional addons ride after the primary label: both expose Services
+	// of type LoadBalancer and want an EXTERNAL-IP assignable immediately.
 	// Failures degrade the cluster rather than tearing it down.
 	if cfg.Observability && cfg.CNI != "none" {
 		if err := m.installObservability(cp, cfg); err != nil {
@@ -430,11 +426,6 @@ func (m *Manager) Create(cfg Config) error {
 	if cfg.Gateway && cfg.CNI != "none" {
 		if err := m.installGateway(cp, cfg); err != nil {
 			ui.Infof("gateway stack not installed: %v", err)
-		}
-	}
-	if cfg.GPUMock && cfg.CNI != "none" {
-		if err := m.installGPU(cp, cfg); err != nil {
-			ui.Infof("mock GPU scheduling not installed: %v", err)
 		}
 	}
 

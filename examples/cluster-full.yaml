@@ -68,8 +68,8 @@ memory: 4G
 # Timeout for nodes to become Ready. Default: 5m.
 wait: 5m
 
-# Addons are positive toggles (true installs). The foundational addons
-# default to true; optional stacks and mock GPU scheduling default false.
+# Addons are positive toggles (true installs). The first three default
+# to true, the last two to false; everything is on here.
 addons:
   # metrics-server: kubectl top nodes / kubectl top pods.
   metrics: true
@@ -102,8 +102,3 @@ addons:
   # examples/httproute.yaml). Grafana and Traefik share one
   # LoadBalancer IP (ports 3000 vs 80/443).
   gateway: true
-
-  # Alpha scheduling harness: exposes one synthetic kiac.dev/gpu per node,
-  # the RuntimeClass "kiac-gpu", and /dev/kiac-mock-gpu inside requesting
-  # Pods. This does NOT expose or accelerate with the Apple GPU.
-  gpuMock: true

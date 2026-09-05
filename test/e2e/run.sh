@@ -203,24 +203,6 @@ test_observability() {
     "http://$(url_host "${grafana_ip}"):3000/api/health" >/dev/null
 }
 
-test_gpu_mock() {
-  [[ "$(k get runtimeclass kiac-gpu -o jsonpath='{.handler}')" == runc ]]
-  k -n kiac-gpu-system rollout status daemonset/kiac-gpu-device-plugin --timeout=180s
-  local node capacity api
-  for node in ${CURRENT_NODES}; do
-    capacity=$(k get node "${node}" -o 'jsonpath={.status.capacity.kiac\.dev/gpu}')
-    api=$(k get node "${node}" -o 'jsonpath={.metadata.labels.kiac\.dev/gpu\.api}')
-    [[ "${capacity}" == 1 && "${api}" == mock ]] || {
-      printf '%s mock GPU contract capacity=%q api=%q, want 1/mock\n' "${node}" "${capacity}" "${api}" >&2
-      return 1
-    }
-  done
-  k apply -f "${ROOT}/examples/gpu-mock.yaml"
-  k wait --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-gpu-mock-check --timeout=120s
-  k logs pod/kiac-gpu-mock-check | grep -F 'no hardware acceleration is enabled' >/dev/null
-  k delete -f "${ROOT}/examples/gpu-mock.yaml" --wait=true
-}
-
 assert_k3s_node_addresses() {
   local node vm_ip internal_ips kindnet_ip node_exporter_ip saved_url live_url
   local cp="kiac-${CURRENT_CLUSTER}-control-plane"
@@ -291,7 +273,7 @@ run_cluster() {
   local create=(create cluster --name "${name}" --distro "${distro}" --workers "${workers}" --ip-family "${family}" --wait 8m
     --mount "type=bind,source=${mount_dir},target=/kiac-e2e-host")
   if [[ "${features}" == true ]]; then
-    create+=(--gateway --observability --gpu-mock)
+    create+=(--gateway --observability)
   fi
 
   printf '\n=== %s: %s %s, %s workers ===\n' "${label}" "${distro}" "${family}" "${workers}"
@@ -371,7 +353,6 @@ run_cluster() {
   if [[ "${features}" == true ]]; then
     test_gateway
     test_observability
-    test_gpu_mock
   fi
 
   if [[ "${restart}" == true ]]; then
@@ -415,7 +396,6 @@ run_cluster() {
       if [[ "${features}" == true ]]; then
         test_gateway
         test_observability
-        test_gpu_mock
       fi
       "${KIAC_BIN}" verify cluster --name "${name}"
     else
@@ -430,9 +410,6 @@ run_cluster() {
       # must have persisted and is checked immediately above.
       install_traffic_binary "${sender}"
       retry 5 2 test_upload "${sender}" "${ingress}" v4
-      if [[ "${features}" == true ]]; then
-        test_gpu_mock
-      fi
     fi
   fi
 
