@@ -87,6 +87,11 @@ jobs:
               echo "release ${RELEASE_TAG} already exists and is not a draft" >&2
               exit 1
             fi
+            draft_target="$(gh release view "${RELEASE_TAG}" --json targetCommitish --jq .targetCommitish)"
+            if [[ "${draft_target}" != "${GITHUB_SHA}" ]]; then
+              echo "release draft ${RELEASE_TAG} targets ${draft_target}, expected ${GITHUB_SHA}" >&2
+              exit 1
+            fi
           else
             gh release create "${RELEASE_TAG}" \
               --draft \
@@ -95,7 +100,8 @@ jobs:
               --title "${RELEASE_TAG}"
           fi
 
-          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          # GitHub materializes an immutable release tag only when its draft is published.
+          git tag --annotate "${RELEASE_TAG}" "${GITHUB_SHA}" --message "kiac ${RELEASE_TAG}"
           tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
           if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
             echo "release tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
@@ -164,10 +170,26 @@ jobs:
             git -C "${tap_dir}" push origin HEAD:main
           fi
 
-      - name: Publish immutable release
+      - name: Publish and verify immutable release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${RELEASE_TAG}" --draft=false --verify-tag
+        shell: bash
+        run: |
+          gh release edit "${RELEASE_TAG}" --draft=false
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
+          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "published tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          immutable="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq .immutable)"
+          if [[ "${immutable}" != "true" ]]; then
+            echo "published release ${RELEASE_TAG} is not immutable" >&2
+            exit 1
+          fi
 
       - name: Remove deploy key
         if: always()
