@@ -96,6 +96,9 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 		DefaultVersion    string   `json:"defaultVersion"`
 		K3sVersions       []string `json:"k3sVersions"`
 		DefaultK3sVersion string   `json:"defaultK3sVersion"`
+		GPUImages         []string `json:"gpuImages"`
+		DefaultGPUImage   string   `json:"defaultGPUImage"`
+		GPUDrivers        []string `json:"gpuDrivers"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
@@ -108,6 +111,9 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 	}
 	if got.DefaultVersion == got.DefaultK3sVersion {
 		t.Fatalf("expected distro defaults to differ while k3s 1.37 is unavailable; both are %q", got.DefaultVersion)
+	}
+	if len(got.GPUImages) == 0 || got.DefaultGPUImage == "" || strings.Join(got.GPUDrivers, ",") != "device-plugin,dra" {
+		t.Fatalf("GPU metadata = images %v default %q drivers %v", got.GPUImages, got.DefaultGPUImage, got.GPUDrivers)
 	}
 }
 
@@ -161,6 +167,7 @@ func TestClusterNode(t *testing.T) {
 		{"dev", "", false},
 		{"my-app", "kiac-my-app-control-plane", true},
 		{"my-app", "kiac-my-app-worker-2", true},
+		{"dev", "kiac-dev-gpu-1", true},
 		// "my" must not claim my-app's nodes via prefix confusion.
 		{"my", "kiac-my-app-worker-2", false},
 	}
@@ -430,6 +437,35 @@ func TestCreateClusterValidation(t *testing.T) {
 	}
 }
 
+func TestCreateClusterArgsForRealGPU(t *testing.T) {
+	args, err := createClusterArgs(createReq{
+		Name: "gpu", Workers: 1, GPUWorkers: 2, K8sVersion: "v1.37.0", Distro: "kubeadm", CNI: "cilium",
+		CPUs: "4", Memory: "3G", CPMemory: "5G", GPUImage: "fedora-44", GPUDiskSize: "24G",
+		GPUResourceDriver: "dra", NoEdgeProxy: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--gpu-workers 2", "--gpu-image fedora-44", "--gpu-disk-size 24G", "--gpu-resource-driver dra", "--cp-memory 5G", "--no-edge-proxy"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("GPU args missing %q: %s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "--kernel") {
+		t.Fatalf("krunkit Cilium request incorrectly selected an apple/container kernel: %s", joined)
+	}
+	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, GPUResourceDriver: "fake"}); err == nil {
+		t.Fatal("invalid GPU driver was accepted")
+	}
+	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, CNI: "none"}); err == nil {
+		t.Fatal("GPU kubeadm cluster with no CNI was accepted")
+	}
+	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, Gateway: true, NoLB: true}); err == nil {
+		t.Fatal("Gateway API without the built-in LoadBalancer was accepted")
+	}
+}
+
 func TestDeleteCluster(t *testing.T) {
 	s := testServer(t)
 	mux := s.routes()
@@ -473,6 +509,9 @@ func TestNodeRole(t *testing.T) {
 	}
 	if got := nodeRole("kiac-dev-worker-1"); got != "worker" {
 		t.Errorf("got %q, want worker", got)
+	}
+	if got := nodeRole("kiac-dev-gpu-1"); got != "gpu-worker" {
+		t.Errorf("got %q, want gpu-worker", got)
 	}
 }
 

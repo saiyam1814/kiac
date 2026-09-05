@@ -125,13 +125,17 @@ func (m *Manager) Verify(name string, timeout time.Duration) (VerificationReport
 		}
 		var command []string
 		if report.Distro == "k3s" {
-			command = []string{"sh", "-ec", `test -r /proc/1/status && (test -x /bin/kubectl || test -x /usr/local/bin/kubectl)`}
+			if info.Backend == runtime.BackendKrunkit {
+				command = []string{"systemctl", "is-active", "--quiet", "k3s.service"}
+			} else {
+				command = []string{"sh", "-ec", `test -r /proc/1/status && (test -x /bin/kubectl || test -x /usr/local/bin/kubectl)`}
+			}
 		} else {
 			command = []string{"systemctl", "is-active", "--quiet", "containerd", "kubelet"}
 		}
 		if _, err := m.rt.ExecTimeout(info.Name, timeout, command...); err != nil {
 			report.add(VerificationFail, id, label, "guest responds, but required node services are not healthy",
-				fmt.Sprintf("inspect: container exec %s %s", info.Name, nodeLogHint(report.Distro)))
+				nodeServiceLogHint(info, report.Distro))
 		} else {
 			report.add(VerificationPass, id, label, "guest and required node services are healthy", "")
 		}
@@ -140,14 +144,19 @@ func (m *Manager) Verify(name string, timeout time.Duration) (VerificationReport
 	if cpInfo == nil || !strings.EqualFold(cpInfo.Status, "running") {
 		report.skipKubernetesChecks("control-plane VM is not running")
 		report.add(VerificationSkip, "host.api", "API reachability from Mac", "control-plane VM is not running", "")
+		m.verifyGPUChecks(&report, infos, cpName, timeout, false)
 		finish()
 		return report, nil
 	}
 
 	apiReady := false
 	if out, err := m.diagnosticKubectl(cpName, report.Distro, timeout, "get", "--raw=/readyz"); err != nil {
+		hint := fmt.Sprintf("inspect from the VM: container exec %s kubectl get --raw=/readyz", cpName)
+		if cpInfo.Backend == runtime.BackendKrunkit {
+			hint = fmt.Sprintf("run: kiac support bundle --name %s", name)
+		}
 		report.add(VerificationFail, "kubernetes.api", "Kubernetes API", compactError(err),
-			fmt.Sprintf("inspect from the VM: container exec %s kubectl get --raw=/readyz", cpName))
+			hint)
 	} else if !strings.Contains(strings.ToLower(out), "ok") {
 		report.add(VerificationFail, "kubernetes.api", "Kubernetes API", "readyz did not return ok: "+compact(out), "")
 	} else {
@@ -198,6 +207,7 @@ func (m *Manager) Verify(name string, timeout time.Duration) (VerificationReport
 			report.add(VerificationFail, "host.api", "API reachability from Mac", endpoint+" is unreachable", hint)
 		}
 	}
+	m.verifyGPUChecks(&report, infos, cpName, timeout, apiReady)
 
 	finish()
 	return report, nil
@@ -396,11 +406,21 @@ func (m *Manager) verifyOptionalKubernetesAddons(report *VerificationReport, cp 
 	} else if strings.TrimSpace(out) == "" {
 		report.add(VerificationSkip, "observability.stack", "observability", "built-in observability is not installed", "")
 	} else {
-		address, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "service", "grafana", "-n", obsNamespace, "-o", "jsonpath={.status.loadBalancer.ingress[0].ip}")
-		if err != nil || strings.TrimSpace(address) == "" {
+		access, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "service", "grafana", "-n", obsNamespace,
+			"-o", "jsonpath={.spec.type}{' '}{.status.loadBalancer.ingress[0].ip}")
+		fields := strings.Fields(access)
+		switch {
+		case err != nil || len(fields) == 0:
+			report.add(VerificationFail, "observability.stack", "observability", "Grafana Service is unavailable", "kubectl get pods,svc -n "+obsNamespace)
+		case fields[0] == "ClusterIP":
+			report.add(VerificationPass, "observability.stack", "observability", "Grafana is cluster-internal (--no-lb)",
+				"kubectl -n "+obsNamespace+" port-forward service/grafana 3000:3000")
+		case fields[0] == "LoadBalancer" && len(fields) > 1:
+			report.add(VerificationPass, "observability.stack", "observability", "Grafana: http://"+fields[1]+":3000", "")
+		case fields[0] == "LoadBalancer":
 			report.add(VerificationFail, "observability.stack", "observability", "Grafana has no LoadBalancer address", "kubectl get pods,svc -n "+obsNamespace)
-		} else {
-			report.add(VerificationPass, "observability.stack", "observability", "Grafana: http://"+strings.TrimSpace(address)+":3000", "")
+		default:
+			report.add(VerificationFail, "observability.stack", "observability", "Grafana has unsupported Service type "+fields[0], "kubectl get service grafana -n "+obsNamespace)
 		}
 	}
 }
@@ -417,7 +437,9 @@ func (m *Manager) verifyNodeAddons(report *VerificationReport, infos []runtime.I
 		}
 		installed = append(installed, info.Name)
 		active := `PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/bin/aux:$PATH"; IPT="$(command -v iptables-legacy || command -v iptables)"; `
-		if report.Distro == "k3s" {
+		if info.Backend == runtime.BackendKrunkit {
+			active += `systemctl is-active --quiet kiac-edge-proxy.service; `
+		} else if report.Distro == "k3s" {
 			active += `found=; for p in /proc/[0-9]*; do [ "$(readlink "$p/exe" 2>/dev/null)" = "` + edgeProxyNodePath + `" ] && found=1 && break; done; [ -n "$found" ]; `
 		} else {
 			active += `systemctl is-active --quiet kiac-edge-proxy.service; `
@@ -443,13 +465,22 @@ func (m *Manager) verifyNodeAddons(report *VerificationReport, infos []runtime.I
 		return
 	}
 	var err error
-	if report.Distro == "k3s" {
+	cpBackend := ""
+	for _, info := range infos {
+		if info.Name == cp {
+			cpBackend = info.Backend
+			break
+		}
+	}
+	if cpBackend == runtime.BackendKrunkit {
+		_, err = m.rt.ExecTimeout(cp, timeout, "systemctl", "is-active", "--quiet", "kiac-lb.service")
+	} else if report.Distro == "k3s" {
 		_, err = m.rt.ExecTimeout(cp, timeout, "sh", "-ec", `pid="$(cat `+kiacLBK3sSupervisorPID+` 2>/dev/null)"; [ -n "$pid" ] && kill -0 "$pid"`)
 	} else {
 		_, err = m.rt.ExecTimeout(cp, timeout, "systemctl", "is-active", "--quiet", "kiac-lb.service")
 	}
 	if err != nil {
-		report.add(VerificationFail, "network.load-balancer", "LoadBalancer controller", "controller process is not healthy", nodeLBLogHint(report.Distro, cp))
+		report.add(VerificationFail, "network.load-balancer", "LoadBalancer controller", "controller process is not healthy", nodeLBLogHint(report.Distro, cpBackend, cp))
 		return
 	}
 	out, svcErr := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "services", "-A", "-o", "json")
@@ -474,10 +505,179 @@ func (m *Manager) verifyNodeAddons(report *VerificationReport, infos []runtime.I
 		}
 	}
 	if len(pending) > 0 {
-		report.add(VerificationFail, "network.load-balancer", "LoadBalancer controller", "pending Services: "+limitedList(pending, 6), nodeLBLogHint(report.Distro, cp))
+		report.add(VerificationFail, "network.load-balancer", "LoadBalancer controller", "pending Services: "+limitedList(pending, 6), nodeLBLogHint(report.Distro, cpBackend, cp))
 	} else {
 		report.add(VerificationPass, "network.load-balancer", "LoadBalancer controller", fmt.Sprintf("controller healthy; %d LoadBalancer Service(s) assigned", count), "")
 	}
+}
+
+// verifyGPUChecks appends GPU checks after the original verification schema.
+// A cluster without GPU nodes reports Skip, preserving verify as a useful
+// command for both feature-enabled and ordinary clusters.
+func (m *Manager) verifyGPUChecks(report *VerificationReport, infos []runtime.Info, cp string, timeout time.Duration, apiReady bool) {
+	var gpuNodes []runtime.Info
+	for _, info := range infos {
+		if info.GPU || isGPUNode(info.Name) {
+			gpuNodes = append(gpuNodes, info)
+		}
+	}
+	if len(gpuNodes) == 0 {
+		report.add(VerificationSkip, "gpu.device-plugin", "GPU resource driver", "real Apple GPU nodes are not configured", "")
+		report.add(VerificationSkip, "gpu.nodes", "GPU scheduling", "real Apple GPU nodes are not configured", "")
+		return
+	}
+	if !apiReady {
+		report.add(VerificationSkip, "gpu.device-plugin", "GPU resource driver", "Kubernetes API is not ready", "")
+		report.add(VerificationSkip, "gpu.nodes", "GPU scheduling", "Kubernetes API is not ready", "")
+		for _, info := range gpuNodes {
+			report.add(VerificationSkip, "gpu.node."+info.Name, "Apple GPU: "+info.Name, "Kubernetes API is not ready", "")
+		}
+		return
+	}
+
+	driverMode, driverHealthy, driverNodesReady := m.verifyGPUDriver(report, gpuNodes, cp, timeout)
+
+	out, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "nodes", "-o", "json")
+	if err != nil {
+		report.add(VerificationFail, "gpu.nodes", "GPU scheduling", compactError(err), "kubectl get nodes -L kiac.dev/gpu.present,kiac.dev/gpu.api")
+		for _, info := range gpuNodes {
+			report.add(VerificationSkip, "gpu.node."+info.Name, "Apple GPU: "+info.Name, "node capacity could not be read", "")
+		}
+		return
+	}
+	var list kubeNodeList
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		report.add(VerificationFail, "gpu.nodes", "GPU scheduling", "cannot parse node state: "+err.Error(), "")
+		for _, info := range gpuNodes {
+			report.add(VerificationSkip, "gpu.node."+info.Name, "Apple GPU: "+info.Name, "node capacity could not be parsed", "")
+		}
+		return
+	}
+	nodesByName := make(map[string]kubeNode, len(list.Items))
+	for _, node := range list.Items {
+		nodesByName[node.Metadata.Name] = node
+	}
+	var invalid []string
+	for _, info := range gpuNodes {
+		node, ok := nodesByName[info.Name]
+		valid := driverHealthy && driverNodesReady[info.Name] && ok && node.Metadata.Labels[gpuResourceDomain+"/gpu.present"] == "true" &&
+			node.Metadata.Labels[gpuResourceDomain+"/gpu.api"] == "venus" &&
+			node.Status.Capacity["nvidia.com/gpu"] == "" && node.Status.Allocatable["nvidia.com/gpu"] == ""
+		if driverMode == "device-plugin" {
+			valid = valid && node.Status.Capacity[gpuResourceName] == "1" && node.Status.Allocatable[gpuResourceName] == "1"
+		}
+		if !valid {
+			invalid = append(invalid, info.Name)
+		}
+	}
+	if len(invalid) > 0 {
+		report.add(VerificationFail, "gpu.nodes", "GPU scheduling", "invalid labels or capacity: "+limitedList(invalid, 6), "kubectl get nodes -o json")
+	} else {
+		detail := fmt.Sprintf("%d node(s) expose %s through %s; nvidia.com/gpu is absent", len(gpuNodes), gpuResourceName, driverMode)
+		report.add(VerificationPass, "gpu.nodes", "GPU scheduling", detail, "")
+	}
+
+	for _, info := range gpuNodes {
+		id := "gpu.node." + info.Name
+		if !strings.EqualFold(info.Status, "running") {
+			report.add(VerificationSkip, id, "Apple GPU: "+info.Name, "VM is "+orUnknown(info.Status), "")
+			continue
+		}
+		if _, err := m.rt.ExecTimeout(info.Name, timeout, "test", "-c", "/dev/dri/renderD128"); err != nil {
+			report.add(VerificationFail, id, "Apple GPU: "+info.Name, "Venus render device /dev/dri/renderD128 is missing", "inspect the krunkit GPU renderer and guest kernel")
+			continue
+		}
+		_, nodeExists := nodesByName[info.Name]
+		if !nodeExists || !driverHealthy || !driverNodesReady[info.Name] {
+			report.add(VerificationFail, id, "Apple GPU: "+info.Name, "render device exists, but schedulable GPU capacity is unhealthy", "kubectl describe node "+info.Name)
+			continue
+		}
+		report.add(VerificationPass, id, "Apple GPU: "+info.Name, "Venus render device and schedulable capacity are healthy", "")
+	}
+}
+
+func (m *Manager) verifyGPUDriver(report *VerificationReport, gpuNodes []runtime.Info, cp string, timeout time.Duration) (string, bool, map[string]bool) {
+	readyNodes := make(map[string]bool, len(gpuNodes))
+	expectedNodes := make(map[string]bool, len(gpuNodes))
+	for _, node := range gpuNodes {
+		expectedNodes[node.Name] = true
+	}
+	draOut, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "daemonset", "kiac-gpu-dra", "-n", "kube-system", "--ignore-not-found", "-o", "json")
+	if err != nil {
+		report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", compactError(err), "kubectl -n kube-system get daemonset kiac-gpu-dra")
+		return "unknown", false, readyNodes
+	}
+	if strings.TrimSpace(draOut) != "" {
+		var daemonset kubeDaemonSet
+		if err := json.Unmarshal([]byte(draOut), &daemonset); err != nil {
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", "cannot parse DRA DaemonSet state: "+err.Error(), "")
+			return "dra", false, readyNodes
+		}
+		if daemonset.Status.DesiredNumberScheduled != len(gpuNodes) || daemonset.Status.NumberReady != len(gpuNodes) {
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver",
+				fmt.Sprintf("%d/%d DRA pods Ready; %d desired", daemonset.Status.NumberReady, len(gpuNodes), daemonset.Status.DesiredNumberScheduled),
+				"kubectl -n kube-system get pods -l app.kubernetes.io/name=kiac-gpu-dra -o wide")
+			return "dra", false, readyNodes
+		}
+		deviceClass, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "deviceclass", "gpu.kiac.dev", "-o", "jsonpath={.spec.extendedResourceName}")
+		if err != nil || strings.TrimSpace(deviceClass) != gpuResourceName {
+			detail := compactError(err)
+			if err == nil {
+				detail = fmt.Sprintf("DeviceClass maps to %q, want %s", strings.TrimSpace(deviceClass), gpuResourceName)
+			}
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", detail, "kubectl get deviceclass gpu.kiac.dev -o yaml")
+			return "dra", false, readyNodes
+		}
+		slicesOut, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "resourceslices.resource.k8s.io", "-o", "json")
+		if err != nil {
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", compactError(err), "kubectl get resourceslices.resource.k8s.io")
+			return "dra", false, readyNodes
+		}
+		var slices resourceSliceList
+		if err := json.Unmarshal([]byte(slicesOut), &slices); err != nil {
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", "cannot parse ResourceSlices: "+err.Error(), "")
+			return "dra", false, readyNodes
+		}
+		for _, slice := range slices.Items {
+			if expectedNodes[slice.Spec.NodeName] && slice.Spec.Driver == "gpu.kiac.dev" && len(slice.Spec.Devices) == 1 && slice.Spec.Devices[0].Name == "venus-0" {
+				readyNodes[slice.Spec.NodeName] = true
+			}
+		}
+		if len(readyNodes) != len(gpuNodes) {
+			report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver",
+				fmt.Sprintf("%d/%d GPU nodes published a Venus ResourceSlice", len(readyNodes), len(gpuNodes)),
+				"kubectl get resourceslices.resource.k8s.io -o wide")
+			return "dra", false, readyNodes
+		}
+		report.add(VerificationPass, "gpu.device-plugin", "GPU resource driver", fmt.Sprintf("DRA agent and ResourceSlices Ready on %d node(s)", len(gpuNodes)), "")
+		return "dra", true, readyNodes
+	}
+
+	pluginOut, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "daemonset", "kiac-gpu-device-plugin", "-n", "kube-system", "--ignore-not-found", "-o", "json")
+	if err != nil {
+		report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", compactError(err), "kubectl -n kube-system get daemonset kiac-gpu-device-plugin")
+		return "device-plugin", false, readyNodes
+	}
+	if strings.TrimSpace(pluginOut) == "" {
+		report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", "no Apple GPU resource driver is installed", "reconcile the cluster GPU addon")
+		return "unknown", false, readyNodes
+	}
+	var daemonset kubeDaemonSet
+	if err := json.Unmarshal([]byte(pluginOut), &daemonset); err != nil {
+		report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver", "cannot parse DaemonSet state: "+err.Error(), "")
+		return "device-plugin", false, readyNodes
+	}
+	if daemonset.Status.DesiredNumberScheduled != len(gpuNodes) || daemonset.Status.NumberReady != len(gpuNodes) {
+		report.add(VerificationFail, "gpu.device-plugin", "GPU resource driver",
+			fmt.Sprintf("%d/%d plugin pods Ready; %d desired", daemonset.Status.NumberReady, len(gpuNodes), daemonset.Status.DesiredNumberScheduled),
+			"kubectl -n kube-system get pods -l app.kubernetes.io/name=kiac-gpu-device-plugin -o wide")
+		return "device-plugin", false, readyNodes
+	}
+	for _, node := range gpuNodes {
+		readyNodes[node.Name] = true
+	}
+	report.add(VerificationPass, "gpu.device-plugin", "GPU resource driver", fmt.Sprintf("device plugin Ready on %d node(s)", len(gpuNodes)), "")
+	return "device-plugin", true, readyNodes
 }
 
 func (m *Manager) diagnosticKubectl(cp, distro string, timeout time.Duration, args ...string) (string, error) {
@@ -495,7 +695,20 @@ func nodeLogHint(distro string) string {
 	return "journalctl -u containerd -u kubelet --no-pager -n 100"
 }
 
-func nodeLBLogHint(distro, cp string) string {
+func nodeServiceLogHint(info runtime.Info, distro string) string {
+	if info.Backend == runtime.BackendKrunkit {
+		if distro == "k3s" {
+			return fmt.Sprintf("inspect: journalctl -u k3s on %s", info.Name)
+		}
+		return fmt.Sprintf("inspect: journalctl -u containerd -u kubelet on %s", info.Name)
+	}
+	return fmt.Sprintf("inspect: container exec %s %s", info.Name, nodeLogHint(distro))
+}
+
+func nodeLBLogHint(distro, backend, cp string) string {
+	if backend == runtime.BackendKrunkit {
+		return fmt.Sprintf("inspect: journalctl -u kiac-lb on %s", cp)
+	}
 	if distro == "k3s" {
 		return fmt.Sprintf("inspect: container exec %s tail -100 %s", cp, kiacLBK3sLogPath)
 	}
@@ -581,12 +794,29 @@ type kubeCondition struct {
 }
 
 type kubeNodeList struct {
-	Items []struct {
-		Metadata kubeMetadata `json:"metadata"`
-		Status   struct {
-			Conditions []kubeCondition `json:"conditions"`
-		} `json:"status"`
-	} `json:"items"`
+	Items []kubeNode `json:"items"`
+}
+
+type kubeNode struct {
+	Metadata struct {
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		DeletionTimestamp string            `json:"deletionTimestamp"`
+		Annotations       map[string]string `json:"annotations"`
+		Labels            map[string]string `json:"labels"`
+	} `json:"metadata"`
+	Status struct {
+		Conditions  []kubeCondition   `json:"conditions"`
+		Capacity    map[string]string `json:"capacity"`
+		Allocatable map[string]string `json:"allocatable"`
+	} `json:"status"`
+}
+
+type kubeDaemonSet struct {
+	Status struct {
+		DesiredNumberScheduled int `json:"desiredNumberScheduled"`
+		NumberReady            int `json:"numberReady"`
+	} `json:"status"`
 }
 
 type kubePodList struct {

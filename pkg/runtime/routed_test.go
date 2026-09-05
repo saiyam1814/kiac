@@ -83,26 +83,35 @@ func (h *routedTestHost) ImageSave(string, string) error             { return ni
 func TestRoutedRuntimeDispatchesByNodeName(t *testing.T) {
 	primary := &routedTestHost{&routedTestBackend{name: BackendContainer}}
 	gpu := &routedTestBackend{name: BackendKrunkit}
+	owned := map[string]bool{"kiac-dev-control-plane": true, "kiac-dev-worker-1": true}
 	rt := NewRoutedRuntime(primary, BackendRoute{
 		Name:    BackendKrunkit,
-		Match:   func(name string) bool { return strings.Contains(name, "-gpu-") },
+		Match:   func(name string) bool { return owned[name] },
 		Backend: gpu,
 	})
 
-	if err := rt.RunDetached(RunOpts{Name: "kiac-dev-worker-1"}); err != nil {
+	if err := rt.RunDetached(RunOpts{Name: "kiac-cpu-worker-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.RunDetached(RunOpts{Name: "kiac-dev-gpu-1"}); err != nil {
+	if err := rt.RunDetached(RunOpts{Backend: BackendKrunkit, Name: "kiac-dev-control-plane"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := rt.Exec("kiac-dev-gpu-1", "true"); got != BackendKrunkit {
+	if got, _ := rt.Exec("kiac-dev-worker-1", "true"); got != BackendKrunkit {
 		t.Fatalf("GPU exec used %q backend", got)
 	}
-	if len(primary.calls) != 1 || primary.calls[0] != "run:kiac-dev-worker-1" {
+	if len(primary.calls) != 1 || primary.calls[0] != "run:kiac-cpu-worker-1" {
 		t.Fatalf("primary calls = %v", primary.calls)
 	}
-	if len(gpu.calls) != 2 || gpu.calls[0] != "run:kiac-dev-gpu-1" {
+	if len(gpu.calls) != 2 || gpu.calls[0] != "run:kiac-dev-control-plane" {
 		t.Fatalf("GPU calls = %v", gpu.calls)
+	}
+}
+
+func TestRoutedRuntimeRejectsUnknownExplicitBackend(t *testing.T) {
+	primary := &routedTestHost{&routedTestBackend{name: BackendContainer}}
+	rt := NewRoutedRuntime(primary)
+	if err := rt.RunDetached(RunOpts{Backend: "missing", Name: "kiac-dev-control-plane"}); err == nil || !strings.Contains(err.Error(), "unknown runtime backend") {
+		t.Fatalf("RunDetached error = %v", err)
 	}
 }
 

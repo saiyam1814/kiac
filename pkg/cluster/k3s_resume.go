@@ -10,6 +10,7 @@ import (
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -56,6 +57,14 @@ mv "$urltmp" ` + k3sResumeServerURL + `
 // launcher after their first boot; a second worker boot is needed only when
 // the live process still carries the old K3S_URL.
 func (m *Manager) resumeK3s(name string, infos []runtime.Info, waitTimeout time.Duration, started time.Time) error {
+	krunkit, err := krunkitOnlyCluster(infos)
+	if err != nil {
+		return err
+	}
+	if krunkit {
+		return m.resumeK3sSystemd(name, infos, waitTimeout, started)
+	}
+
 	cp, workers, err := orderNodes(name, infos)
 	if err != nil {
 		return err
@@ -186,9 +195,317 @@ func (m *Manager) resumeK3s(name string, infos []runtime.Info, waitTimeout time.
 	if reachable {
 		ui.Hintf("kubectl get nodes")
 	} else {
+		warnGPUAPIUnreachable(name, serverIP)
+	}
+	return nil
+}
+
+// krunkitOnlyCluster identifies the Fedora/systemd lifecycle. GPU clusters use
+// krunkit for every node because apple/container's vmnet and vmnet-helper do
+// not provide reliable bidirectional routing between their private networks.
+func krunkitOnlyCluster(infos []runtime.Info) (bool, error) {
+	krunkit := 0
+	for _, info := range infos {
+		if info.Backend == runtime.BackendKrunkit {
+			krunkit++
+		}
+	}
+	if krunkit == 0 {
+		return false, nil
+	}
+	if krunkit != len(infos) {
+		return false, fmt.Errorf("cluster mixes apple/container and krunkit nodes; recreate it so every GPU-cluster node uses krunkit")
+	}
+	return true, nil
+}
+
+// resumeK3sSystemd reconciles persistent Fedora VMs. K3s is a systemd service
+// here, not PID 1, and both node-ip and the agent server endpoint live in the
+// YAML config. Rewriting the structured config before restarting avoids
+// carrying a stale vmnet-helper lease into kubelet or Flannel.
+func (m *Manager) resumeK3sSystemd(name string, infos []runtime.Info, waitTimeout time.Duration, started time.Time) error {
+	cp, regularWorkers, gpuWorkers, err := orderNodeGroups(name, infos)
+	if err != nil {
+		return err
+	}
+	workers := append(append([]string(nil), regularWorkers...), gpuWorkers...)
+	nodes := append([]string{cp}, workers...)
+	if err := ui.Step("Preflight checks for Apple GPU VMs", m.krunkit.Preflight); err != nil {
+		return err
+	}
+
+	running := make(map[string]bool, len(infos))
+	var nodesChanged atomic.Bool
+	for _, info := range infos {
+		running[info.Name] = strings.EqualFold(info.Status, "running")
+		if !running[info.Name] {
+			nodesChanged.Store(true)
+		}
+	}
+
+	if err := ui.Step("Booting K3s server VM", func() error {
+		if !running[cp] {
+			if err := m.rt.Start(cp); err != nil {
+				return err
+			}
+		}
+		return m.rt.WaitReady(cp, waitTimeout)
+	}); err != nil {
+		return err
+	}
+	serverIP, err := m.rt.IP(cp)
+	if err != nil {
+		return err
+	}
+	if parsed := net.ParseIP(serverIP); parsed == nil || parsed.To4() == nil {
+		return fmt.Errorf("K3s server address %q is not IPv4", serverIP)
+	}
+	if err := ui.Step("Reconciling K3s server address", func() error {
+		changed, err := m.updateK3sSystemdConfig(cp, "server", serverIP, serverIP)
+		if err != nil {
+			return err
+		}
+		unitChanged, err := m.ensureK3sGPUUnit(cp, "server")
+		if err != nil {
+			return err
+		}
+		if changed || unitChanged {
+			nodesChanged.Store(true)
+		}
+		return m.ensureK3sSystemdService(cp, changed || unitChanged || !running[cp])
+	}); err != nil {
+		return err
+	}
+	if err := ui.Step("Waiting for the K3s API", func() error {
+		return m.waitK3sAPI(cp, waitTimeout)
+	}); err != nil {
+		return err
+	}
+
+	if len(workers) > 0 {
+		if err := ui.Step(fmt.Sprintf("Reconciling %d K3s agent(s)", len(workers)), func() error {
+			return inParallel(len(workers), func(i int) error {
+				node := workers[i]
+				if !running[node] {
+					if err := m.rt.Start(node); err != nil {
+						return err
+					}
+				}
+				if err := m.rt.WaitReady(node, waitTimeout); err != nil {
+					return err
+				}
+				nodeIP, err := m.rt.IP(node)
+				if err != nil {
+					return err
+				}
+				changed, err := m.updateK3sSystemdConfig(node, "agent", nodeIP, serverIP)
+				if err != nil {
+					return err
+				}
+				unitChanged, err := m.ensureK3sGPUUnit(node, "agent")
+				if err != nil {
+					return err
+				}
+				if changed || unitChanged {
+					nodesChanged.Store(true)
+				}
+				return m.ensureK3sSystemdService(node, changed || unitChanged || !running[node])
+			})
+		}); err != nil {
+			return err
+		}
+	}
+
+	if err := ui.Step("Waiting for current K3s node addresses", func() error {
+		return m.waitK3sNodeAddresses(cp, nodes, waitTimeout)
+	}); err != nil {
+		return err
+	}
+	if nodesChanged.Load() {
+		if err := ui.Step("Refreshing node-addressed pods", func() error {
+			return m.refreshOptionalNodeExporter(cp, "k3s", waitTimeout)
+		}); err != nil {
+			return err
+		}
+	}
+	if len(gpuWorkers) > 0 {
+		if err := ui.Step("Reconciling GPU resource driver", func() error {
+			return m.reconcileInstalledGPUResources(cp, "k3s", gpuWorkers, waitTimeout)
+		}); err != nil {
+			return err
+		}
+	}
+	if err := ui.Step("Waiting for built-in addons", func() error {
+		return m.waitSystemdManagedAddons(cp, "k3s", waitTimeout)
+	}); err != nil {
+		return err
+	}
+
+	if err := ui.Step("Healing K3s networking helpers", func() error {
+		if err := m.healEdgeProxySystemd(cp, name, k3sKubeconfig, nodes); err != nil {
+			return err
+		}
+		if _, err := m.rt.Exec(cp, "test", "-x", kiacLBScriptPath); err == nil {
+			_, err = m.rt.Exec(cp, "systemctl", "restart", "kiac-lb.service")
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	var kubeconfigPath string
+	if err := ui.Step("Writing kubeconfig", func() error {
+		raw, err := m.rt.Exec(cp, "cat", k3sKubeconfig)
+		if err != nil {
+			return err
+		}
+		kubeconfigPath, err = mergeKubeconfig(name, raw, serverIP)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	reachable := false
+	_ = ui.Step("Checking API server reachability from your Mac", func() error {
+		reachable = hostReachAPI(serverIP, 10*time.Second)
+		if !reachable {
+			return fmt.Errorf("host cannot reach %s:6443", serverIP)
+		}
+		return nil
+	})
+
+	ui.Successf("K3s cluster %q resumed in %s.", name, time.Since(started).Round(time.Second))
+	ui.Infof("context kiac-%s updated in %s", name, kubeconfigPath)
+	if reachable {
+		ui.Hintf("kubectl get nodes")
+	} else {
 		warnAPIUnreachable(cp, name, serverIP)
 	}
 	return nil
+}
+
+func (m *Manager) updateK3sSystemdConfig(node, role, nodeIP, serverIP string) (bool, error) {
+	raw, err := m.rt.Exec(node, "cat", "/etc/rancher/k3s/config.yaml")
+	if err != nil {
+		return false, err
+	}
+	config := map[string]any{}
+	if err := yaml.Unmarshal([]byte(raw), &config); err != nil {
+		return false, fmt.Errorf("parsing K3s config on %s: %w", node, err)
+	}
+	changed := setK3sConfigString(config, "node-ip", nodeIP)
+	switch role {
+	case "server":
+		changed = setK3sConfigString(config, "advertise-address", serverIP) || changed
+		wantSANs := []string{node, serverIP}
+		if !stringListEqual(config["tls-san"], wantSANs) {
+			config["tls-san"] = wantSANs
+			changed = true
+		}
+	case "agent":
+		changed = setK3sConfigString(config, "server", "https://"+net.JoinHostPort(serverIP, "6443")) || changed
+	default:
+		return false, fmt.Errorf("invalid K3s role %q", role)
+	}
+	if !changed {
+		return false, nil
+	}
+	updated, err := yaml.Marshal(config)
+	if err != nil {
+		return false, err
+	}
+	if err := m.rt.ExecStdin(node, strings.NewReader(string(updated)), "sh", "-euc", `
+tmp="$(mktemp /etc/rancher/k3s/config.yaml.XXXXXX)"
+cat > "$tmp"
+chmod 0600 "$tmp"
+mv "$tmp" /etc/rancher/k3s/config.yaml
+`); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func setK3sConfigString(config map[string]any, key, value string) bool {
+	if current, ok := config[key].(string); ok && current == value {
+		return false
+	}
+	config[key] = value
+	return true
+}
+
+func stringListEqual(value any, want []string) bool {
+	var got []string
+	switch values := value.(type) {
+	case []any:
+		for _, item := range values {
+			text, ok := item.(string)
+			if !ok {
+				return false
+			}
+			got = append(got, text)
+		}
+	case []string:
+		got = values
+	default:
+		return false
+	}
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Manager) ensureK3sSystemdService(node string, restart bool) error {
+	if restart {
+		_, err := m.rt.Exec(node, "systemctl", "--no-block", "restart", "k3s.service")
+		return err
+	}
+	if _, err := m.rt.Exec(node, "systemctl", "is-active", "--quiet", "k3s.service"); err == nil {
+		return nil
+	}
+	_, err := m.rt.Exec(node, "systemctl", "--no-block", "start", "k3s.service")
+	return err
+}
+
+// healK3sEdgeProxySystemd refreshes only the API credential file. The
+// per-cluster tunnel token deliberately stays untouched so restarted nodes can
+// still authenticate proxy-to-proxy traffic with their existing peers.
+func (m *Manager) healEdgeProxySystemd(cp, name, sourceKubeconfig string, nodes []string) error {
+	installed := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if _, err := m.rt.Exec(node, "sh", "-c", "test -x "+edgeProxyNodePath+" -a -f "+edgeProxyKubeconfigPath+" -a -f "+edgeProxyTokenPath); err == nil {
+			installed = append(installed, node)
+		}
+	}
+	if len(installed) == 0 {
+		return nil
+	}
+	kubeconfig, err := m.edgeProxyKubeconfig(cp, name, sourceKubeconfig)
+	if err != nil {
+		return err
+	}
+	if err := inParallel(len(installed), func(i int) error {
+		node := installed[i]
+		if err := m.rt.ExecStdin(node, strings.NewReader(kubeconfig), "sh", "-euc", `
+tmp="$(mktemp `+edgeProxyKubeconfigPath+`.XXXXXX)"
+cat > "$tmp"
+chmod 0600 "$tmp"
+mv "$tmp" `+edgeProxyKubeconfigPath+`
+`); err != nil {
+			return err
+		}
+		_, err := m.rt.Exec(node, "systemctl", "restart", "kiac-edge-proxy.service")
+		return err
+	}); err != nil {
+		return err
+	}
+	return m.waitEdgeProxyRules(installed)
 }
 
 type k3sNodeStateList struct {
@@ -294,14 +611,19 @@ func (m *Manager) refreshK3sNodePods(cp string, timeout time.Duration) error {
 	if _, err := m.k3sKubectl(cp, "-n", "kube-system", "rollout", "status", "daemonset/kindnet", timeoutArg); err != nil {
 		return err
 	}
-	out, err := m.k3sKubectl(cp, "-n", obsNamespace, "get", "daemonset", "node-exporter", "--ignore-not-found", "-o", "name")
+	return m.refreshOptionalNodeExporter(cp, "k3s", timeout)
+}
+
+func (m *Manager) refreshOptionalNodeExporter(cp, distro string, timeout time.Duration) error {
+	out, err := m.gpuKubectl(cp, distro, "-n", obsNamespace, "get", "daemonset", "node-exporter", "--ignore-not-found", "-o", "name")
 	if err != nil || strings.TrimSpace(out) == "" {
 		return err
 	}
-	if _, err := m.k3sKubectl(cp, "-n", obsNamespace, "rollout", "restart", "daemonset/node-exporter"); err != nil {
+	if _, err := m.gpuKubectl(cp, distro, "-n", obsNamespace, "rollout", "restart", "daemonset/node-exporter"); err != nil {
 		return err
 	}
-	_, err = m.k3sKubectl(cp, "-n", obsNamespace, "rollout", "status", "daemonset/node-exporter", timeoutArg)
+	timeoutArg := fmt.Sprintf("--timeout=%ds", int(timeout.Seconds()))
+	_, err = m.gpuKubectl(cp, distro, "-n", obsNamespace, "rollout", "status", "daemonset/node-exporter", timeoutArg)
 	return err
 }
 

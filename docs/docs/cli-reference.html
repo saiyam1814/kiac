@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -64,6 +65,7 @@ kiac create cluster --name dev --workers 2
 kiac create cluster --memory 8G --cpus 4
 kiac create cluster --distro k3s --workers 1
 kiac create cluster --cni cilium --kernel full
+kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly
 kiac create cluster --config cluster.yaml</code></pre>
   <table>
@@ -71,12 +73,17 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--config</code></td><td></td><td>cluster config YAML (see <a href="config-file.html">Config file</a>); flags set explicitly on the command line override file values</td></tr>
     <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name (lowercase letters, digits, dashes)</td></tr>
     <tr><td><code>--workers</code></td><td><code>0</code></td><td>number of worker nodes (control plane is untainted when 0)</td></tr>
+    <tr><td><code>--gpu-workers</code></td><td><code>0</code></td><td>real Apple GPU workers (alpha); a positive value runs the complete cluster topology on krunkit while only <code>-gpu-N</code> nodes publish GPU inventory</td></tr>
+    <tr><td><code>--gpu-image</code></td><td><code>fedora-44</code></td><td>verified GPU VM base-image alias, or a local raw disk path</td></tr>
+    <tr><td><code>--gpu-disk-size</code></td><td><code>20G</code></td><td>persistent disk size for every krunkit-backed node in a GPU cluster</td></tr>
+    <tr><td><code>--gpu-resource-driver</code></td><td><code>device-plugin</code></td><td><code>device-plugin</code>, or <code>dra</code> on Kubernetes 1.36+; see <a href="gpu.html">Apple GPU</a></td></tr>
     <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.36 (1.32-1.36 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
     <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
-    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code> (needs <code>--kernel full</code> and the <code>cilium</code> CLI), or <code>none</code> (bring your own). kubeadm distro only; the k3s path always gets kindnet</td></tr>
+    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium needs <code>--kernel full</code>; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
     <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Given, it replaces the runtime's default resolv.conf entirely rather than adding to it (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
+    <tr><td><code>--ip-family</code></td><td><code>ipv4</code></td><td><code>ipv4</code>, <code>dual</code>, or <code>ipv6</code>. Non-IPv4 ordinary clusters select the full kernel; GPU clusters currently require IPv4</td></tr>
     <tr><td><code>--mount</code></td><td></td><td>bind a host directory into every node VM; repeat <code>type=bind,source=/host/path,target=/node/path[,readonly]</code>. Explicit CLI mounts replace config-file mounts</td></tr>
     <tr><td><code>--cpus</code></td><td><code>4</code></td><td>vCPUs per node VM</td></tr>
     <tr><td><code>--memory</code></td><td><code>2G</code></td><td>memory per worker VM (idle workers use a few hundred MB)</td></tr>
@@ -85,12 +92,12 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--no-storage</code></td><td><code>false</code></td><td>skip installing the local-path default StorageClass</td></tr>
     <tr><td><code>--no-lb</code></td><td><code>false</code></td><td>skip installing kiac-lb (<code>type: LoadBalancer</code> support)</td></tr>
     <tr><td><code>--no-edge-proxy</code></td><td><code>false</code></td><td>skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers</td></tr>
-    <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter, Grafana on a LoadBalancer IP</td></tr>
+    <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter; Grafana uses a LoadBalancer IP or ClusterIP with <code>--no-lb</code></td></tr>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
     <tr><td><code>--wait</code></td><td><code>5m</code></td><td>timeout for each cluster readiness step, including CNI installation; passed to Cilium as <code>--wait-duration</code></td></tr>
   </table>
   <p>Version resolution: a minor like <code>1.34</code> uses kiac's digest-pinned node image (<code>kindest/node</code>, or <code>rancher/k3s</code> with <code>--distro k3s</code>); an exact patch matches the pin when it is the pinned patch, otherwise falls back to the matching upstream tag unpinned.</p>
-  <p><code>--distro</code> and <code>--kernel</code> are CLI flags only for now; they are not <a href="config-file.html">config file</a> keys yet.</p>
+  <p><code>--kernel</code> is CLI-only. <code>distro</code> and the GPU options are also available as <a href="config-file.html">config file</a> keys.</p>
 
   <h2 id="delete-cluster">kiac delete cluster</h2>
   <p>Delete a cluster's node VMs and its kubeconfig entries.</p>
@@ -183,6 +190,27 @@ kiac doctor --fix</code></pre>
   <table>
     <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>--fix</code></td><td><code>false</code></td><td>attempt to fix failed checks (starts the container system service)</td></tr>
+  </table>
+
+  <h2 id="gpu">kiac gpu</h2>
+  <p>Inspect and configure the optional real Apple GPU backend. See <a href="gpu.html">Real Apple GPU nodes</a> for the architecture, prerequisites, and complete lab.</p>
+  <pre><code>kiac gpu doctor
+kiac gpu status --name gpu-lab
+kiac gpu status --name gpu-lab -o json
+kiac gpu bench --name gpu-lab
+kiac gpu bench --name gpu-lab --skip-host -o json
+kiac gpu values vllm
+kiac gpu values ollama
+kiac gpu values kserve
+kiac gpu compat enable --name gpu-lab --namespace demo
+kiac gpu compat disable --name gpu-lab --namespace demo</code></pre>
+  <table>
+    <tr><th>Command</th><th>Purpose</th></tr>
+    <tr><td><code>gpu doctor</code></td><td>validate krunkit, vmnet-helper, SSH/cloud-init tools, and the Venus-capable renderer</td></tr>
+    <tr><td><code>gpu status</code></td><td>show persisted GPU windows, render devices, driver health, schedulability, and compatibility namespaces; supports <code>-o text|json</code></td></tr>
+    <tr><td><code>gpu bench</code></td><td>run the pinned Venus llama.cpp benchmark and, when installed, the same workload with host Metal; accepts <code>--model</code>, <code>--skip-host</code>, <code>--timeout</code>, and <code>-o text|json</code></td></tr>
+    <tr><td><code>gpu values TARGET</code></td><td>print scheduling fragments for <code>vllm</code>, <code>ollama</code>, or <code>kserve</code>; application images must still support Venus/Vulkan</td></tr>
+    <tr><td><code>gpu compat enable|disable</code></td><td>manage the explicit namespace-scoped NVIDIA resource-name rewrite; <code>enable</code> also accepts <code>--rotate-certificate</code></td></tr>
   </table>
 
   <h2 id="ui">kiac ui</h2>

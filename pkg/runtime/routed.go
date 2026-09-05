@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -43,6 +44,17 @@ func (r *RoutedRuntime) backendFor(name string) NodeBackend {
 }
 
 func (r *RoutedRuntime) RunDetached(opts RunOpts) error {
+	if opts.Backend != "" {
+		if opts.Backend == BackendContainer {
+			return r.Primary.RunDetached(opts)
+		}
+		for _, route := range r.Routes {
+			if route.Name == opts.Backend && route.Backend != nil {
+				return route.Backend.RunDetached(opts)
+			}
+		}
+		return fmt.Errorf("unknown runtime backend %q", opts.Backend)
+	}
 	return r.backendFor(opts.Name).RunDetached(opts)
 }
 
@@ -75,10 +87,7 @@ func (r *RoutedRuntime) IPv6(name string) (string, error) {
 }
 
 func (r *RoutedRuntime) List(prefix string) ([]Info, error) {
-	infos, err := r.Primary.List(prefix)
-	if err != nil {
-		return nil, err
-	}
+	infos, primaryErr := r.Primary.List(prefix)
 	for i := range infos {
 		if infos[i].Backend == "" {
 			infos[i].Backend = BackendContainer
@@ -88,6 +97,7 @@ func (r *RoutedRuntime) List(prefix string) ([]Info, error) {
 	for _, info := range infos {
 		seen[info.Name] = struct{}{}
 	}
+	alternateRows := 0
 	for _, route := range r.Routes {
 		if route.Backend == nil {
 			continue
@@ -104,8 +114,15 @@ func (r *RoutedRuntime) List(prefix string) ([]Info, error) {
 				info.Backend = route.Name
 			}
 			infos = append(infos, info)
+			alternateRows++
 			seen[info.Name] = struct{}{}
 		}
+	}
+	// A GPU-only cluster remains manageable even when apple/container is not
+	// installed or its service is unavailable. Preserve the primary error when
+	// no alternate inventory can answer, so ordinary clusters are not hidden.
+	if primaryErr != nil && alternateRows == 0 {
+		return nil, primaryErr
 	}
 	return infos, nil
 }
@@ -120,12 +137,13 @@ func (r *RoutedRuntime) Remove(names ...string) error {
 		backend := r.backendFor(name)
 		groups[backend] = append(groups[backend], name)
 	}
+	var removeErrs []error
 	for backend, group := range groups {
 		if err := backend.Remove(group...); err != nil {
-			return fmt.Errorf("removing nodes %s: %w", strings.Join(group, ", "), err)
+			removeErrs = append(removeErrs, fmt.Errorf("removing nodes %s: %w", strings.Join(group, ", "), err))
 		}
 	}
-	return nil
+	return errors.Join(removeErrs...)
 }
 
 func (r *RoutedRuntime) Available() bool { return r.Primary.Available() }

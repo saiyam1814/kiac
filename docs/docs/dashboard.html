@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -64,7 +65,7 @@ kiac ui --port 0       <span class="c"># pick any free port</span></code></pre>
   <h3>Cluster cards</h3>
   <p>Each cluster gets a card, auto-refreshed every 5 seconds, with a row per node showing:</p>
   <ul>
-    <li>Role (control-plane or worker), state, and the node VM's IP.</li>
+    <li>Role (control-plane, worker, or GPU worker), state, and the node VM's IP.</li>
     <li><b>Live resource bars</b>: CPU and memory per node, fed by your Mac's <code>kubectl top nodes</code> against the cluster's <code>kiac-&lt;name&gt;</code> context, so they work on every distro (kubeadm and k3s alike). Bars turn red at 85%. They appear once metrics-server has scraped (about a minute after create) and degrade gracefully to plain node state before that.</li>
     <li><b>Stop / Start buttons</b> per node, running the same <a href="node-chaos.html">node chaos</a> commands as the CLI. LoadBalancer IPs re-point automatically after a restart; there is no pool state to re-sync.</li>
   </ul>

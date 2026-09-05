@@ -6,13 +6,16 @@ on:
     paths:
       - "cmd/**"
       - "pkg/**"
+      - "internal/gpudriver/**"
       - "test/e2e/**"
+      - "examples/gpu-*.yaml"
       - "go.mod"
       - "go.sum"
       - "Makefile"
       - ".github/workflows/runtime-smoke.yml"
   schedule:
     - cron: "17 3 * * 1"
+    - cron: "43 4 1 * *"
   workflow_dispatch:
     inputs:
       profile:
@@ -25,6 +28,7 @@ on:
           - kubeadm
           - k3s
           - dual
+          - gpu
           - full
 
 permissions:
@@ -52,24 +56,35 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.25.12"
+          go-version: "1.26.6"
           cache: true
+          cache-dependency-path: |
+            go.sum
+            internal/gpudriver/go.sum
 
       - name: Select profile
         id: profile
         shell: bash
         env:
           DISPATCH_PROFILE: ${{ inputs.profile }}
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
           case "${GITHUB_EVENT_NAME}" in
-            schedule) profile=full ;;
+            schedule)
+              if [[ "${SCHEDULE}" == "43 4 1 * *" ]]; then profile=gpu; else profile=full; fi
+              ;;
             workflow_dispatch) profile="${DISPATCH_PROFILE}" ;;
             *) profile=quick ;;
           esac
           echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
 
-      - name: Exercise real Apple-container clusters
-        run: ./test/e2e/run.sh "${{ steps.profile.outputs.profile }}"
+      - name: Exercise real Kiac clusters
+        run: |
+          if [[ "${{ steps.profile.outputs.profile }}" == gpu ]]; then
+            ./test/e2e/gpu.sh
+          else
+            ./test/e2e/run.sh "${{ steps.profile.outputs.profile }}"
+          fi
 
       - name: Remove test clusters
         if: always()

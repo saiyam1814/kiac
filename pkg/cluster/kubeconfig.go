@@ -204,9 +204,15 @@ func removeKubeconfig(name string) error {
 		}
 		return err
 	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil
+	}
 	var dest map[string]any
 	if err := yaml.Unmarshal(raw, &dest); err != nil {
 		return fmt.Errorf("parsing kubeconfig %s: %w", path, err)
+	}
+	if dest == nil {
+		return nil
 	}
 	dest["clusters"] = drop(listOf(dest["clusters"]), entry)
 	dest["users"] = drop(listOf(dest["users"]), entry)

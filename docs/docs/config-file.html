@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -62,10 +63,16 @@
   <h2 id="example">Full example</h2>
   <p>This is <a href="https://github.com/saiyam1814/kiac/blob/main/examples/cluster.yaml">examples/cluster.yaml</a> from the repo; every key is optional:</p>
   <pre><code>name: dev            <span class="c"># cluster name: lowercase letters, digits, dashes</span>
+distro: kubeadm      <span class="c"># kubeadm or k3s</span>
 workers: 2           <span class="c"># worker node count; 0 untaints the control plane</span>
 k8sVersion: "1.36"   <span class="c"># works with both distros; kubeadm also supports "1.37"</span>
+<span class="c"># gpuWorkers: 1                 # alpha: real Apple GPU workers</span>
+<span class="c"># gpuImage: fedora-44           # verified cloud image alias</span>
+<span class="c"># gpuDiskSize: 20G              # persistent disk per krunkit VM</span>
+<span class="c"># gpuResourceDriver: dra        # device-plugin, or dra on Kubernetes 1.36+</span>
 <span class="c"># image: docker.io/kindest/node:v1.36.4   # node image, overrides k8sVersion</span>
-cni: kindnet         <span class="c"># pod network: kindnet, or none to bring your own</span>
+cni: kindnet         <span class="c"># pod network: kindnet, cilium, or none</span>
+ipFamily: ipv4       <span class="c"># ipv4, dual, or ipv6; GPU mode is currently ipv4-only</span>
 <span class="c"># dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the</span>
 <span class="c">#                    # runtime default resolv.conf entirely when set</span>
 <span class="c"># Host directories mounted into every node VM:</span>
@@ -90,10 +97,16 @@ addons:
   <table>
     <tr><th>Key</th><th>Type</th><th>Default</th><th>Maps to flag</th></tr>
     <tr><td><code>name</code></td><td>string</td><td><code>dev</code></td><td><code>--name</code></td></tr>
+    <tr><td><code>distro</code></td><td>string</td><td><code>kubeadm</code></td><td><code>--distro</code></td></tr>
     <tr><td><code>workers</code></td><td>int</td><td><code>0</code></td><td><code>--workers</code></td></tr>
+    <tr><td><code>gpuWorkers</code></td><td>int</td><td><code>0</code></td><td><code>--gpu-workers</code></td></tr>
+    <tr><td><code>gpuImage</code></td><td>string</td><td><code>fedora-44</code></td><td><code>--gpu-image</code></td></tr>
+    <tr><td><code>gpuDiskSize</code></td><td>string</td><td><code>20G</code></td><td><code>--gpu-disk-size</code></td></tr>
+    <tr><td><code>gpuResourceDriver</code></td><td>string</td><td><code>device-plugin</code></td><td><code>--gpu-resource-driver</code></td></tr>
     <tr><td><code>k8sVersion</code></td><td>string</td><td>distro latest: kubeadm <code>"1.37"</code>, k3s <code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
+    <tr><td><code>ipFamily</code></td><td>string</td><td><code>ipv4</code></td><td><code>--ip-family</code></td></tr>
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
     <tr><td><code>mounts</code></td><td>list of <code>source</code>, <code>target</code>, <code>readOnly</code></td><td>none</td><td><code>--mount</code></td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
@@ -114,7 +127,8 @@ addons:
     <li>Quote <code>cpus</code>: YAML parses a bare <code>4</code> as a number, and the field is a string.</li>
     <li>An empty file is valid and means "all defaults".</li>
     <li>Each mount source must be an existing absolute macOS directory and each target an absolute Linux path. Targets must be unique. Commas are unsupported because they delimit Apple Container's mount fields.</li>
-    <li><code>--distro</code> and <code>--kernel</code> are <b>not config file keys yet</b>; pass them on the command line (they compose with <code>--config</code> for everything else).</li>
+    <li><code>--kernel</code> is not a config file key; pass it on the command line. GPU mode does not accept a custom kernel.</li>
+    <li>A positive <code>gpuWorkers</code> value opts the complete cluster into the krunkit backend. See <a href="gpu.html">Real Apple GPU nodes</a> for requirements and current constraints.</li>
   </ul>
 
   <h2 id="precedence">Precedence</h2>

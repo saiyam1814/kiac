@@ -1,0 +1,47 @@
+# Explicit DRA capacity request. This is an alternative to the simpler
+# kiac.dev/gpu extended-resource syntax in gpu-vulkan.yaml and requires a
+# cluster created with --gpu-resource-driver dra on Kubernetes 1.36+.
+#
+#   kubectl apply -f examples/gpu-dra-memory.yaml
+#   kubectl wait --for=condition=Ready pod/kiac-gpu-dra-memory --timeout=5m
+#   kubectl exec kiac-gpu-dra-memory -- test -c /dev/dri/renderD128
+#   kubectl delete -f examples/gpu-dra-memory.yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: kiac-gpu-memory-8gi
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.kiac.dev
+          capacity:
+            requests:
+              memory: 8Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-dra-memory
+spec:
+  restartPolicy: Never
+  runtimeClassName: nvidia
+  nodeSelector:
+    kiac.dev/gpu.present: "true"
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  resourceClaims:
+    - name: gpu
+      resourceClaimName: kiac-gpu-memory-8gi
+  containers:
+    - name: hold
+      image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      imagePullPolicy: IfNotPresent
+      command: [sh, -c, "test -c /dev/dri/renderD128 && sleep 600"]
+      resources:
+        claims:
+          - name: gpu

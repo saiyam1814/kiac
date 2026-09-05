@@ -1,6 +1,5 @@
-// Package cluster turns apple/container lightweight VMs into a Kubernetes
-// cluster: one VM per node, kubeadm inside, kindnet CNI, metrics-server on
-// by default.
+// Package cluster provisions and manages Kubernetes clusters across Kiac's
+// apple/container and krunkit VM backends.
 package cluster
 
 import (
@@ -87,7 +86,8 @@ const ipv6BootPrep = `KIAC_IF="$(ip -4 route show default 2>/dev/null | awk '{pr
 // transfers at line rate. Offloads are runtime state, so this runs on
 // every boot and resume. Best-effort: a node without ethtool still
 // works, just slower.
-const senderOffloadFix = "command -v ethtool >/dev/null 2>&1 && ethtool -K eth0 tso off gso off || true"
+const senderOffloadFix = `KIAC_IF="$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')"; ` +
+	`[ -n "$KIAC_IF" ] && command -v ethtool >/dev/null 2>&1 && ethtool -K "$KIAC_IF" tso off gso off || true`
 
 // WantsIPv6 reports whether the family carries IPv6 traffic at all.
 func (f IPFamily) WantsIPv6() bool { return f == DualStack || f == IPv6 }
@@ -105,7 +105,13 @@ func (f IPFamily) Valid() bool {
 // Config describes a cluster to create.
 type Config struct {
 	Name          string
+	Distro        string // kubeadm or k3s; persisted by non-OCI VM backends
+	K8sVersion    string // exact resolved version when the VM image does not encode it
 	Workers       int
+	GPUWorkers    int    // real Apple GPU workers; zero keeps the apple/container path
+	GPUImage      string // resolved bootable raw Fedora disk for GPU clusters
+	GPUDiskSize   string // writable disk size for each krunkit VM
+	GPUDriver     string // device-plugin or dra
 	Image         string
 	CPUs          string
 	Memory        string // worker VMs; measured idle usage is ~400Mi, so 2G default
@@ -135,10 +141,21 @@ func (c Config) family() IPFamily {
 
 // Manager orchestrates cluster lifecycle on top of the container runtime.
 type Manager struct {
-	rt runtime.HostRuntime
+	rt        runtime.HostRuntime
+	container *runtime.Client
+	krunkit   *runtime.KrunkitClient
 }
 
-func NewManager() *Manager { return &Manager{rt: runtime.New()} }
+func NewManager() *Manager {
+	primary := runtime.New()
+	krunkit := runtime.NewKrunkit()
+	routed := runtime.NewRoutedRuntime(primary, runtime.BackendRoute{
+		Name:    runtime.BackendKrunkit,
+		Match:   krunkit.Owns,
+		Backend: krunkit,
+	})
+	return &Manager{rt: routed, container: primary, krunkit: krunkit}
+}
 
 // NodeIP returns a node address through the runtime that owns that node.
 // Keeping this lookup on Manager prevents UI callers from depending on a
@@ -168,9 +185,14 @@ func ControlPlane(name string) string { return prefix(name) + "control-plane" }
 
 func worker(name string, i int) string { return fmt.Sprintf("%sworker-%d", prefix(name), i) }
 
+func gpuWorker(name string, i int) string { return fmt.Sprintf("%sgpu-%d", prefix(name), i) }
+
 // Create boots the node VMs and brings up Kubernetes. Progress is
 // reported through ui.Step so the caller stays a thin cobra shim.
 func (m *Manager) Create(cfg Config) error {
+	if cfg.GPUWorkers > 0 {
+		return m.createKubeadmGPU(cfg)
+	}
 	start := time.Now()
 	if !ValidName(cfg.Name) {
 		return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", cfg.Name)
@@ -589,7 +611,7 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 // packets, which take vmnet's fast path (~285MB/s measured) instead of
 // the slow forwarded path that punishes routed CNIs.
 func (m *Manager) installCilium(cp string, cfg Config) error {
-	if cfg.Kernel == "" {
+	if cfg.Kernel == "" && cfg.GPUWorkers == 0 {
 		return fmt.Errorf("--cni cilium needs the full node kernel: add --kernel full (or a --kernel path)")
 	}
 	if _, err := exec.LookPath("cilium"); err != nil {
@@ -771,13 +793,8 @@ func (m *Manager) Clusters() ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 	for _, i := range infos {
-		rest := strings.TrimPrefix(i.Name, "kiac-")
-		var name string
-		if idx := strings.LastIndex(rest, "-control-plane"); idx >= 0 {
-			name = rest[:idx]
-		} else if idx := strings.LastIndex(rest, "-worker-"); idx >= 0 {
-			name = rest[:idx]
-		} else {
+		name, ok := clusterNameFromNode(i.Name)
+		if !ok {
 			continue
 		}
 		if !seen[name] {
