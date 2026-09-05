@@ -361,6 +361,7 @@ type Info struct {
 	Status  string
 	IP      string // first IPv4 without CIDR suffix; empty while stopped
 	Created string // creation timestamp as the CLI reports it (RFC3339)
+	Backend string // container or krunkit; empty is accepted for legacy callers
 }
 
 // List returns containers whose names start with prefix (running or not).
@@ -387,6 +388,7 @@ func parseList(out, prefix string) ([]Info, error) {
 			Status:  firstString(row, "status.state", "status", "state"),
 			IP:      firstIPv4(row),
 			Created: firstString(row, "configuration.creationDate", "creationDate", "created"),
+			Backend: BackendContainer,
 		}
 		if info.Name == "" || !strings.HasPrefix(info.Name, prefix) {
 			continue

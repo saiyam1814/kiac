@@ -135,12 +135,15 @@ func (c Config) family() IPFamily {
 
 // Manager orchestrates cluster lifecycle on top of the container runtime.
 type Manager struct {
-	rt *runtime.Client
+	rt runtime.HostRuntime
 }
 
 func NewManager() *Manager { return &Manager{rt: runtime.New()} }
 
-func (m *Manager) Runtime() *runtime.Client { return m.rt }
+// NodeIP returns a node address through the runtime that owns that node.
+// Keeping this lookup on Manager prevents UI callers from depending on a
+// concrete VM implementation.
+func (m *Manager) NodeIP(name string) (string, error) { return m.rt.IP(name) }
 
 // ValidName reports whether a cluster name is safe for container names,
 // kubeconfig entries, and the UI: lowercase letters, digits, dashes.

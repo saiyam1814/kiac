@@ -118,7 +118,7 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 	return SupportBundleResult{Path: output, Files: len(collector.files), Warnings: collector.warnings}, nil
 }
 
-func (c *supportCollector) collectHost(rt *runtime.Client, timeout time.Duration) {
+func (c *supportCollector) collectHost(rt runtime.HostRuntime, timeout time.Duration) {
 	out, err := hostDiagnosticCommand(timeout, "sw_vers")
 	c.addCommand("host/macos.txt", "sw_vers", out, err, true)
 	out, err = hostDiagnosticCommand(timeout, "uname", "-mrs")
@@ -164,7 +164,7 @@ func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, repo
 	}
 }
 
-func (c *supportCollector) collectNodes(rt *runtime.Client, infos []runtime.Info, distro string, timeout time.Duration) {
+func (c *supportCollector) collectNodes(rt runtime.NodeBackend, infos []runtime.Info, distro string, timeout time.Duration) {
 	for _, info := range infos {
 		base := "nodes/" + info.Name + "/"
 		if !strings.EqualFold(info.Status, "running") {

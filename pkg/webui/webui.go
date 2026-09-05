@@ -177,7 +177,7 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 			ni := nodeInfo{Name: nd.Name, Status: nd.Status, Image: nd.Image, Role: nodeRole(nd.Name)}
 			// IPs come from inside the VM; a stopped node has none.
 			if strings.EqualFold(nd.Status, "running") {
-				if ip, err := s.mgr.Runtime().IP(nd.Name); err == nil {
+				if ip, err := s.mgr.NodeIP(nd.Name); err == nil {
 					ni.IP = ip
 				}
 			}
