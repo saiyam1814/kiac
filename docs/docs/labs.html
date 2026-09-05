@@ -36,7 +36,6 @@
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
     <a href="gateway-api.html">Gateway API</a>
-    <a href="gpu.html">GPU scheduling alpha</a>
   </div>
   <div class="group"><div class="glabel">Hands-on</div>
     <a class="on" href="labs.html">Integration labs</a>
@@ -88,13 +87,12 @@
   <div class="lab-actions"><a href="rancher.html">Run Rancher on kiac</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/rancher.sh">Installation script</a></div>
   <p>The script uses a dedicated cluster because Rancher creates cluster-wide controllers, roles, webhooks, custom resources, and system namespaces. Cleanup deletes that owned cluster instead of attempting a partial uninstall from an unrelated environment.</p>
 
-  <h2 id="addons">Built-in addon labs</h2>
+  <h2 id="addons">Gateway API and observability</h2>
   <p>These labs exercise kiac's built-in addons through their user-facing endpoints:</p>
   <table>
     <tr><th>Lab</th><th>What it proves</th></tr>
     <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/gateway-api-lab.md">Gateway API</a></td><td>GatewayClass and Gateway readiness, HTTPRoute attachment, hostname and path matching, and traffic through the assigned LoadBalancer IP.</td></tr>
     <tr><td><a href="https://github.com/saiyam1814/kiac/blob/main/examples/observability-lab.md">Observability</a></td><td>Grafana access, Prometheus target discovery, application metrics, generated traffic, and metric queries.</td></tr>
-    <tr><td><a href="gpu.html">GPU scheduling alpha</a></td><td>A GPU-shaped Pod requests <code>kiac.dev/gpu</code>, uses RuntimeClass <code>kiac-gpu</code>, and verifies allocation of the mock marker device. This mode does not accelerate workloads.</td></tr>
   </table>
 
   <h2 id="multi-cluster">Multi-cluster and platform labs</h2>
@@ -115,7 +113,7 @@
   Integrations stay outside the kiac binary unless they are part of the local-cluster foundation. This keeps startup fast and lets each workload declare its own security and resource cost.</div>
 
   <div class="pn">
-    <a href="gpu.html"><span>Previous</span>GPU scheduling alpha</a>
+    <a href="gateway-api.html"><span>Previous</span>Gateway API</a>
     <a class="next" href="portainer.html"><span>Next</span>Portainer on kiac</a>
   </div>
 </main>

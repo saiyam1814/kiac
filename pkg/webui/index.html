@@ -150,7 +150,6 @@
         <label><input type="checkbox" id="storage" checked> local-path storage</label>
         <label><input type="checkbox" id="observability"> Observability <small>Prometheus + Grafana</small></label>
         <label><input type="checkbox" id="gateway"> Gateway API <small>Traefik</small></label>
-        <label><input type="checkbox" id="gpu-mock"> Mock GPU scheduling <small>no acceleration</small></label>
       </div>
       <button class="primary" id="go">Create cluster</button>
     </form>
@@ -320,7 +319,6 @@ $('f').addEventListener('submit', async e => {
     cpus: $('cpus').value.trim(), memory: $('memory').value.trim(),
     noLB: !$('lb').checked, noMetrics: !$('metrics').checked, noStorage: !$('storage').checked,
     observability: $('observability').checked, gateway: $('gateway').checked,
-    gpuMock: $('gpu-mock').checked,
   };
   const r = await j('/api/clusters', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (r.error) { alert(r.error); return; }

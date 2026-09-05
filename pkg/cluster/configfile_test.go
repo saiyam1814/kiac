@@ -49,7 +49,6 @@ addons:
   edgeProxy: false
   observability: true
   gateway: true
-  gpuMock: true
 `,
 			check: func(t *testing.T, fc *FileConfig) {
 				if fc.Name != "demo" || fc.Workers == nil || *fc.Workers != 3 {
@@ -71,8 +70,8 @@ addons:
 				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer || a.EdgeProxy == nil || *a.EdgeProxy {
 					t.Errorf("metrics/storage/loadBalancer/edgeProxy = %v/%v/%v/%v", a.Metrics, a.Storage, a.LoadBalancer, a.EdgeProxy)
 				}
-				if a.Observability == nil || !*a.Observability || a.Gateway == nil || !*a.Gateway || a.GPUMock == nil || !*a.GPUMock {
-					t.Errorf("observability/gateway/gpuMock = %v/%v/%v", a.Observability, a.Gateway, a.GPUMock)
+				if a.Observability == nil || !*a.Observability || a.Gateway == nil || !*a.Gateway {
+					t.Errorf("observability/gateway = %v/%v", a.Observability, a.Gateway)
 				}
 			},
 		},
@@ -83,7 +82,7 @@ addons:
 				if fc.Workers != nil {
 					t.Errorf("workers = %v, want nil", fc.Workers)
 				}
-				if fc.Addons.Metrics != nil || fc.Addons.Gateway != nil || fc.Addons.GPUMock != nil {
+				if fc.Addons.Metrics != nil || fc.Addons.Gateway != nil {
 					t.Errorf("addons = %+v, want all nil", fc.Addons)
 				}
 			},
@@ -186,7 +185,6 @@ func TestMerge(t *testing.T) {
 			EdgeProxy:     boolPtr(false),
 			Observability: boolPtr(true),
 			Gateway:       boolPtr(true),
-			GPUMock:       boolPtr(true),
 		},
 	}
 
@@ -212,7 +210,7 @@ func TestMerge(t *testing.T) {
 				Memory:    "8G",
 				CPMemory:  "4G",
 				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
-				Observability: true, Gateway: true, GPUMock: true,
+				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
 			wantVersion: "1.34",
@@ -245,7 +243,7 @@ func TestMerge(t *testing.T) {
 				Memory:    "8G",
 				CPMemory:  "4G",
 				NoMetrics: false, NoStorage: true, NoLB: true, NoEdgeProxy: true,
-				Observability: true, Gateway: true, GPUMock: true,
+				Observability: true, Gateway: true,
 				WaitTimeout: 5 * time.Minute,
 			},
 			wantVersion: "1.36",
@@ -253,7 +251,7 @@ func TestMerge(t *testing.T) {
 		{
 			name:    "explicit addon flags override file toggles",
 			file:    full,
-			changed: map[string]bool{"observability": true, "gateway": true, "gpu-mock": true, "no-lb": true, "no-edge-proxy": true},
+			changed: map[string]bool{"observability": true, "gateway": true, "no-lb": true, "no-edge-proxy": true},
 			wantCfg: Config{
 				Name: "demo", Workers: 3,
 				Image:     "docker.io/kindest/node:v1.34.8",
@@ -286,7 +284,7 @@ func TestMerge(t *testing.T) {
 				Memory:    "8G",
 				CPMemory:  "4G",
 				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
-				Observability: true, Gateway: true, GPUMock: true,
+				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
 			wantVersion: "1.34",
@@ -308,7 +306,7 @@ func TestMerge(t *testing.T) {
 				Memory:    "8G",
 				CPMemory:  "4G",
 				NoMetrics: true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
-				Observability: true, Gateway: true, GPUMock: true,
+				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
 			wantVersion: "1.34",
@@ -369,24 +367,7 @@ func TestLoadAndMergeExample(t *testing.T) {
 	if cfg.Name != "dev" || cfg.Workers != 2 || version != "1.36" {
 		t.Errorf("example merged to name=%q workers=%d version=%q", cfg.Name, cfg.Workers, version)
 	}
-	if cfg.NoMetrics || cfg.NoStorage || cfg.NoLB || cfg.Observability || cfg.Gateway || cfg.GPUMock {
+	if cfg.NoMetrics || cfg.NoStorage || cfg.NoLB || cfg.Observability || cfg.Gateway {
 		t.Errorf("example addons should match defaults, got %+v", cfg)
-	}
-}
-
-func TestLoadAndMergeFullExample(t *testing.T) {
-	fc, err := LoadConfigFile("../../examples/cluster-full.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, version := cliDefaults()
-	if err := fc.Merge(&cfg, &version, func(string) bool { return false }); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Name != "full" || cfg.Workers != 3 || cfg.CNI != "kindnet" || version != "1.36" {
-		t.Errorf("full example merged to name=%q workers=%d cni=%q version=%q", cfg.Name, cfg.Workers, cfg.CNI, version)
-	}
-	if cfg.NoMetrics || cfg.NoStorage || cfg.NoLB || cfg.NoEdgeProxy || !cfg.Observability || !cfg.Gateway || !cfg.GPUMock {
-		t.Errorf("full example should enable every addon, got %+v", cfg)
 	}
 }

@@ -385,11 +385,6 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			ui.Infof("gateway stack not installed: %v", err)
 		}
 	}
-	if cfg.GPUMock {
-		if err := m.installGPUK3s(cp, cfg); err != nil {
-			ui.Infof("mock GPU scheduling not installed: %v", err)
-		}
-	}
 
 	var kubeconfigPath string
 	if err := ui.Step("Writing kubeconfig", func() error {
