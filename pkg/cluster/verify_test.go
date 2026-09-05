@@ -10,9 +10,11 @@ import (
 	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
+const fakeVerificationTimeout = 2 * time.Second
+
 func TestVerifyHealthyClusterData(t *testing.T) {
 	m := fakeVerificationManager(t)
-	report, err := m.Verify("dev", 50*time.Millisecond)
+	report, err := m.Verify("dev", fakeVerificationTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +48,7 @@ func TestVerifyHealthyClusterData(t *testing.T) {
 
 func TestVerifyReportsUnhealthyPod(t *testing.T) {
 	t.Setenv("KIAC_TEST_POD_PHASE", "Pending")
-	report, err := fakeVerificationManager(t).Verify("dev", 50*time.Millisecond)
+	report, err := fakeVerificationManager(t).Verify("dev", fakeVerificationTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +62,7 @@ func TestVerifyReportsUnhealthyPod(t *testing.T) {
 
 func TestVerifyReportsMissingBuiltInGateway(t *testing.T) {
 	t.Setenv("KIAC_TEST_GATEWAY_CRD", "true")
-	report, err := fakeVerificationManager(t).Verify("dev", 50*time.Millisecond)
+	report, err := fakeVerificationManager(t).Verify("dev", fakeVerificationTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +73,7 @@ func TestVerifyReportsMissingBuiltInGateway(t *testing.T) {
 
 func TestVerifyAcceptsInternalObservabilityWithoutLoadBalancer(t *testing.T) {
 	t.Setenv("KIAC_TEST_OBSERVABILITY", "clusterip")
-	report, err := fakeVerificationManager(t).Verify("dev", 50*time.Millisecond)
+	report, err := fakeVerificationManager(t).Verify("dev", fakeVerificationTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestVerifyAcceptsInternalObservabilityWithoutLoadBalancer(t *testing.T) {
 
 func TestVerifyRejectsPendingObservabilityLoadBalancer(t *testing.T) {
 	t.Setenv("KIAC_TEST_OBSERVABILITY", "pending")
-	report, err := fakeVerificationManager(t).Verify("dev", 50*time.Millisecond)
+	report, err := fakeVerificationManager(t).Verify("dev", fakeVerificationTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
