@@ -137,7 +137,7 @@ func TestMergeIPFamily(t *testing.T) {
 	// File value applies when the flag was not set on the command line.
 	cfg := Config{}
 	fc := FileConfig{IPFamily: "dual"}
-	if err := fc.Merge(&cfg, new(string), func(string) bool { return false }); err != nil {
+	if err := fc.Merge(&cfg, new(string), new(string), func(string) bool { return false }); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.IPFamily != DualStack {
@@ -145,7 +145,7 @@ func TestMergeIPFamily(t *testing.T) {
 	}
 	// An explicit --ip-family flag wins over the file.
 	cfg = Config{IPFamily: IPv6}
-	if err := fc.Merge(&cfg, new(string), func(f string) bool { return f == "ip-family" }); err != nil {
+	if err := fc.Merge(&cfg, new(string), new(string), func(f string) bool { return f == "ip-family" }); err != nil {
 		t.Fatal(err)
 	}
 	if cfg.IPFamily != IPv6 {

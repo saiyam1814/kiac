@@ -1,0 +1,41 @@
+# Proves that a pod scheduled through kiac.dev/gpu sees the host Apple GPU via
+# Venus. The digest is the tested linux/arm64 image, not a moving tag.
+#
+#   kubectl apply -f examples/gpu-vulkan.yaml
+#   kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-gpu-vulkan --timeout=5m
+#   kubectl logs kiac-gpu-vulkan
+#   kubectl delete pod kiac-gpu-vulkan
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-vulkan
+  labels:
+    app.kubernetes.io/name: kiac-gpu-vulkan
+spec:
+  restartPolicy: Never
+  runtimeClassName: nvidia
+  nodeSelector:
+    kiac.dev/gpu.present: "true"
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  containers:
+    - name: vulkaninfo
+      image: quay.io/slopezpa/fedora-vgpu@sha256:d1fd35583d1c72bc7380bb977d5d51e70d70c77a2279a0412c2e6ac462f61f16
+      imagePullPolicy: IfNotPresent
+      command: [/bin/bash, -euo, pipefail, -c]
+      args:
+        - |
+          vulkaninfo --summary 2>&1 | tee /tmp/vulkaninfo
+          grep -q 'deviceName.*Virtio-GPU Venus' /tmp/vulkaninfo
+          echo KIAC_REAL_APPLE_GPU_OK
+      env:
+        - name: XDG_RUNTIME_DIR
+          value: /tmp
+      resources:
+        requests:
+          kiac.dev/gpu: "1"
+        limits:
+          kiac.dev/gpu: "1"

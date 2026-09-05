@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"flag"
 	"fmt"
@@ -18,6 +17,8 @@ import (
 )
 
 const tunnelProtocol = "KIACEDGE/2"
+
+const maxUploadBytes = 64 << 20
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -76,7 +77,7 @@ func uploadHandler() http.Handler {
 	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		h := sha256.New()
-		n, err := io.Copy(h, http.MaxBytesReader(w, r.Body, 16<<20))
+		n, err := io.Copy(h, http.MaxBytesReader(w, r.Body, maxUploadBytes))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -90,10 +91,16 @@ func upload(url string, size int) error {
 	if url == "" || size < 1 {
 		return fmt.Errorf("upload needs a URL and positive byte count")
 	}
-	payload := testPayload(size)
-	want := sha256.Sum256(payload)
+	hash := sha256.New()
+	payload := io.TeeReader(newTestPayloadReader(size), hash)
+	req, err := http.NewRequest(http.MethodPost, url, payload)
+	if err != nil {
+		return fmt.Errorf("creating POST %s: %w", url, err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = int64(size)
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Post(url, "application/octet-stream", bytes.NewReader(payload))
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", url, err)
 	}
@@ -107,7 +114,7 @@ func upload(url string, size int) error {
 	if _, err := fmt.Fscan(resp.Body, &gotSize, &gotHash); err != nil {
 		return fmt.Errorf("reading upload response: %w", err)
 	}
-	wantHash := fmt.Sprintf("%x", want)
+	wantHash := fmt.Sprintf("%x", hash.Sum(nil))
 	if gotSize != size || gotHash != wantHash {
 		return fmt.Errorf("upload mismatch: got %d %s, want %d %s", gotSize, gotHash, size, wantHash)
 	}
@@ -115,12 +122,28 @@ func upload(url string, size int) error {
 	return nil
 }
 
-func testPayload(size int) []byte {
-	p := make([]byte, size)
-	for i := range p {
-		p[i] = byte((i*31 + 17) % 251)
+type testPayloadReader struct {
+	offset int
+	size   int
+}
+
+func newTestPayloadReader(size int) io.Reader {
+	return &testPayloadReader{size: size}
+}
+
+func (r *testPayloadReader) Read(p []byte) (int, error) {
+	remaining := r.size - r.offset
+	if remaining <= 0 {
+		return 0, io.EOF
 	}
-	return p
+	if len(p) > remaining {
+		p = p[:remaining]
+	}
+	for i := range p {
+		p[i] = byte(((r.offset+i)*31 + 17) % 251)
+	}
+	r.offset += len(p)
+	return len(p), nil
 }
 
 func expectTunnelRejection(addr string) error {

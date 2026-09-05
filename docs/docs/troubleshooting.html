@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -92,6 +93,19 @@ dev   0/3 stopped</span></code></pre>
     <li><b>Cluster name too long</b>: a node's container name is also its Linux hostname, capped at 63 characters. kiac rejects names that would overflow; use a shorter name.</li>
   </ul>
 
+  <h2 id="gpu-preflight">GPU preflight or workload fails</h2>
+  <p>GPU mode has its own host check because ordinary <code>kiac doctor</code> intentionally does not require the optional backend:</p>
+  <pre><code>kiac gpu doctor
+kiac gpu status --name gpu-lab
+kiac verify cluster --name gpu-lab</code></pre>
+  <ul>
+    <li><b>krunkit or vmnet-helper is missing/old:</b> install the versions and taps shown on the <a href="gpu.html#requirements">GPU requirements</a> page, then rerun <code>kiac gpu doctor</code>.</li>
+    <li><b>The renderer check fails:</b> reinstall krunkit from <code>libkrun/krun</code> so Homebrew installs its current Venus-capable renderer dependency. If you previously used <code>slp/krunkit</code> or <code>slp/krun</code>, follow krunkit's upstream legacy-tap removal instructions first.</li>
+    <li><b><code>/dev/dri</code> exists but Vulkan finds no device:</b> use the digest-pinned <code>examples/gpu-vulkan.yaml</code>. A random Mesa image may lack a compatible Venus build; the checked-in probe validates Vulkan enumeration, not just the device file.</li>
+    <li><b>A CUDA image reports no NVIDIA driver:</b> that is expected. Kiac provides Venus/Vulkan, not CUDA, NVML, <code>nvidia-smi</code>, Metal, or MLX inside pods. Changing a resource name cannot change an application's GPU API.</li>
+    <li><b>A DRA workload remains Pending:</b> inspect <code>kubectl describe resourceclaim</code>, <code>kubectl get resourceslices.resource.k8s.io</code>, and <code>kiac gpu status</code>. Requested memory is capacity-accounted in 1 GiB steps and cannot exceed the node's reported window.</li>
+  </ul>
+
   <h2 id="vpn-dns">Image pulls fail with VPN software on the Mac</h2>
   <p>Symptom: the cluster creates, but pods stay in <code>ImagePullBackOff</code> and node logs show something like <code>lookup registry.k8s.io on 192.168.64.1:53: read: connection refused</code>.</p>
   <p>Node VMs get their DNS from the vmnet gateway (<code>192.168.64.1</code>), which is your Mac's own mDNSResponder answering on the NAT network. Some VPN and Zero Trust clients assume control of the host's port 53 to run their own DNS proxy; mDNSResponder then stops serving the gateway address, and every lookup from the VMs is refused. The VPN's own proxy typically listens only on loopback, so the VMs cannot reach it either.</p>
@@ -123,11 +137,12 @@ dev   0/3 stopped</span></code></pre>
 --cni cilium with --kernel full, or --cni none to bring your own</span></code></pre>
   <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle flannel or Calico manifests. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
 
-  <h2 id="kernel-download">Kernel downloads and the ~/.kiac cache</h2>
+  <h2 id="kernel-download">Downloads and the ~/.kiac cache</h2>
   <p><code>--kernel full</code> downloads the published kernel release asset (about 15MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
   <ul>
     <li>A <code>sha256 mismatch</code> error means the download was corrupted (or the cache tampered with); the file is discarded, just re-run.</li>
-    <li>Deleting <code>~/.kiac</code> is always safe; kiac re-downloads and re-verifies on the next create.</li>
+    <li>Deleting a download-only subdirectory such as <code>~/.kiac/kernels</code>, <code>~/.kiac/images</code>, or <code>~/.kiac/models</code> triggers a fresh verified download when needed.</li>
+    <li><b>Do not delete <code>~/.kiac/gpu-nodes</code> by hand.</b> It contains the persistent disks and process identity used to own real GPU clusters. Remove those clusters with <code>kiac delete cluster</code> first.</li>
     <li>Offline? The first <code>--kernel full</code> or <code>--distro k3s</code> create needs the network once; after that the cache serves.</li>
   </ul>
 

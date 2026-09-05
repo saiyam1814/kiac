@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -60,9 +61,9 @@
   <pre><code>kiac resume cluster --name dev</code></pre>
 
   <h2 id="what-a-reboot-does">What a reboot actually does to a cluster</h2>
-  <p>Rebooting your Mac (or running <code>container system stop</code>) halts every node VM. The VMs' disks persist, so nothing is lost, but two things change on the next boot:</p>
+  <p>Rebooting your Mac (or stopping its VM services) halts every node VM. The VMs' disks persist, so nothing is lost, but two things change on the next boot:</p>
   <ul>
-    <li>The container service reports every node as <code>stopped</code>; <code>kiac get clusters</code> shows <code>0/N stopped</code>.</li>
+    <li>Kiac's merged runtime inventory reports every node as <code>stopped</code>; <code>kiac get clusters</code> shows <code>0/N stopped</code>.</li>
     <li>vmnet hands out <b>fresh IPs</b>. Node addresses are not stored anywhere; every boot gets the next free one.</li>
   </ul>
   <p>What becomes stale depends on the distro. kubeadm pins the control-plane address into its serving certificate, kubeconfigs, static pod manifests, worker kubelet configs, and kube-proxy ConfigMap. k3s persists the original server address in each agent VM's startup environment, while host-network pod objects can retain their previous Node IP. Resume detects the distro and repairs the corresponding state.</p>
@@ -91,7 +92,7 @@ control-plane IP changed 192.168.64.2 -&gt; 192.168.64.5; healing certs and kube
     <li><b>LoadBalancer IPs</b>: nothing to do explicitly. kiac-lb reads the healed <code>admin.conf</code> on every pass, so any Service ingress IP pinned to a dead address is re-pointed within seconds. See <a href="networking.html#loadbalancer">Networking</a>.</li>
   </ul>
   <p>One expected kubeadm oddity: the control-plane VM may die once during its first boot after an IP change (an artifact of the node image's own IP fixup). resume detects that, boots it again, and says so; it is part of the normal flow, not a failure.</p>
-  <p>On a k3s cluster, resume starts the server first, writes its current URL to a root-only file on each agent, and restarts only agents whose live <code>K3S_URL</code> is stale. The tiny transparent launcher execs the existing <code>/bin/k3s</code>; there is no sidecar, image, or background process. Resume then waits until every Kubernetes Node reports its VM's current address, recreates kindnet and optional node-exporter host-network pods, heals the node-local edge proxies, and writes the host kubeconfig. Clusters created before this support are migrated automatically on first resume without touching their join token.</p>
+  <p>On a K3s cluster, resume starts the server first, writes its current URL to a root-only file on each agent, and restarts only agents whose live <code>K3S_URL</code> is stale. Resume then waits until every Kubernetes Node reports its VM's current address, refreshes host-network pods, heals the node-local edge proxies, and writes the host kubeconfig. Ordinary clusters use the tiny PID-1 launcher and recreate kindnet; GPU clusters reconcile the persistent K3s systemd services, which refreshes bundled Flannel, and recreate optional node-exporter pods. Existing ordinary K3s clusters are migrated automatically on first resume without touching their join token.</p>
   <p>Measured end to end: kubeadm resumed a 3-node cluster across a vmnet subnet change in <b>46 seconds</b>. k3s resume has also been exercised repeatedly across fresh addresses, including an existing-cluster migration and cross-node 1 MiB uploads after recovery.</p>
 
   <h2 id="idempotent">Idempotent by design</h2>

@@ -42,6 +42,12 @@
   .checks label{display:flex;align-items:center;gap:8px;margin:0;font-size:13.5px;font-weight:500;color:var(--ink)}
   .checks input{width:auto;accent-color:var(--accent)}
   .checks small{color:var(--mid);font-weight:400}
+  .gpu-toggle{grid-column:1/-1;padding:10px 0 2px;border-top:1px solid var(--divider)}
+  .gpu-toggle label{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:13.5px;font-weight:600}
+  .gpu-toggle input{width:auto;accent-color:var(--accent)}
+  .gpu-options{grid-column:1/-1;border:0;border-bottom:1px solid var(--divider);padding:0 0 12px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .gpu-options[hidden]{display:none}
+  .gpu-note{grid-column:1/-1;color:var(--mid);font-size:12px;line-height:1.45}
   button.primary{grid-column:1/-1;background:var(--accent);color:#fff;border:none;border-radius:99px;padding:12px;font-size:15px;font-weight:600;cursor:pointer}
   button.primary:hover{background:var(--accent-hover)}
   button.primary:disabled{opacity:.5;cursor:default}
@@ -143,11 +149,23 @@
       <div><label>CNI</label><select id="cni"></select></div>
       <div><label>CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
       <div><label>Memory / node</label><input id="memory" value="2G"></div>
+      <div><label>Control-plane memory</label><input id="cp-memory" value="4G"></div>
       <div class="full" id="cni-note" style="display:none;font-size:12px;color:var(--mid);margin-top:-6px"></div>
+      <div class="gpu-toggle">
+        <label><input type="checkbox" id="gpu"> Apple GPU nodes <small>alpha</small></label>
+      </div>
+      <fieldset class="gpu-options" id="gpu-options" hidden>
+        <div><label>GPU workers</label><input id="gpu-workers" type="number" min="1" max="4" value="1"></div>
+        <div><label>Resource driver</label><select id="gpu-driver"></select></div>
+        <div><label>VM image</label><select id="gpu-image"></select></div>
+        <div><label>Disk / node</label><input id="gpu-disk" value="20G"></div>
+        <div class="gpu-note">All nodes use krunkit networking in this mode; only GPU workers publish schedulable Apple Venus GPU inventory.</div>
+      </fieldset>
       <div class="checks">
         <label><input type="checkbox" id="lb" checked> LoadBalancer <small>kiac-lb</small></label>
         <label><input type="checkbox" id="metrics" checked> metrics-server</label>
         <label><input type="checkbox" id="storage" checked> local-path storage</label>
+        <label><input type="checkbox" id="edge-proxy" checked> large-upload edge proxy</label>
         <label><input type="checkbox" id="observability"> Observability <small>Prometheus + Grafana</small></label>
         <label><input type="checkbox" id="gateway"> Gateway API <small>Traefik</small></label>
       </div>
@@ -185,6 +203,9 @@ async function loadMeta() {
   const m = await j('/api/meta');
   $('cni').innerHTML = m.cnis.map(c => `<option>${esc(c)}</option>`).join('');
   $('distro').innerHTML = (m.distros || ['kubeadm']).map(d => `<option>${esc(d)}</option>`).join('');
+  $('gpu-image').innerHTML = (m.gpuImages || ['fedora-44']).map(v => `<option>${esc(v)}</option>`).join('');
+  $('gpu-image').value = m.defaultGPUImage || 'fedora-44';
+  $('gpu-driver').innerHTML = (m.gpuDrivers || ['device-plugin', 'dra']).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
   const syncVersions = (useDefault = false) => {
     const k3s = $('distro').value === 'k3s';
     const versions = k3s ? (m.k3sVersions || m.versions) : m.versions;
@@ -196,14 +217,18 @@ async function loadMeta() {
   const syncForm = () => {
     const k3s = $('distro').value === 'k3s';
     const cil = !k3s && $('cni').value === 'cilium';
+    const gpu = $('gpu').checked;
     $('cni').disabled = k3s;
+    $('gpu-options').hidden = !gpu;
     const note = $('cni-note');
-    if (k3s) { note.textContent = 'k3s always runs kindnet; local-path and metrics-server come bundled; kiac-lb handles LoadBalancers.'; note.style.display = 'block'; }
+    if (gpu) { note.textContent = cil ? 'Cilium runs inside the Fedora krunkit nodes; no custom kiac kernel is needed.' : 'Real GPU clusters use the verified Fedora disk and require krunkit plus vmnet-helper.'; note.style.display = 'block'; }
+    else if (k3s) { note.textContent = 'Ordinary k3s clusters use kindnet; GPU k3s clusters use bundled Flannel. Local-path and metrics-server come bundled; kiac-lb handles LoadBalancers.'; note.style.display = 'block'; }
     else if (cil) { note.textContent = 'Cilium downloads the full node kernel once (~40MB) and needs the cilium CLI: brew install cilium-cli.'; note.style.display = 'block'; }
     else { note.style.display = 'none'; }
   };
   $('distro').addEventListener('change', () => { syncVersions(true); syncForm(); });
   $('cni').addEventListener('change', syncForm);
+  $('gpu').addEventListener('change', syncForm);
   syncVersions();
   syncForm();
 }
@@ -316,8 +341,11 @@ $('f').addEventListener('submit', async e => {
   const body = {
     name: $('name').value.trim(), workers: +$('workers').value,
     k8sVersion: $('version').value, distro: $('distro').value, cni: $('cni').value,
-    cpus: $('cpus').value.trim(), memory: $('memory').value.trim(),
+    cpus: $('cpus').value.trim(), memory: $('memory').value.trim(), cpMemory: $('cp-memory').value.trim(),
+    gpuWorkers: $('gpu').checked ? +$('gpu-workers').value : 0,
+    gpuImage: $('gpu-image').value, gpuDiskSize: $('gpu-disk').value.trim(), gpuResourceDriver: $('gpu-driver').value,
     noLB: !$('lb').checked, noMetrics: !$('metrics').checked, noStorage: !$('storage').checked,
+    noEdgeProxy: !$('edge-proxy').checked,
     observability: $('observability').checked, gateway: $('gateway').checked,
   };
   const r = await j('/api/clusters', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });

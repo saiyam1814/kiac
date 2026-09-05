@@ -154,6 +154,14 @@ spec:
           ports:
             - name: http
               containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 30
           resources:
             requests:
               cpu: 50m

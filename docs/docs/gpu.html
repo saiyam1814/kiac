@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Real Apple GPU nodes (alpha) · kiac docs</title>
+<meta name="description" content="Run real Apple GPU Vulkan workloads and inference in Kiac Kubernetes clusters through krunkit, Venus, a device plugin, or Kubernetes DRA.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a class="on" href="gpu.html">Apple GPU (alpha)</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Hands-on</div>
+    <a href="labs.html">Integration labs</a>
+    <a href="portainer.html">Portainer on kiac</a>
+    <a href="rancher.html">Rancher on kiac</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Alpha · Apple silicon</div>
+  <h1>Real Apple GPU nodes</h1>
+  <p class="lede">Kiac can map the Mac's Apple GPU into krunkit Linux VMs and expose selected workers' Venus Vulkan devices to Kubernetes workloads through the honest <code>kiac.dev/gpu</code> resource.</p>
+
+  <div class="warn"><b>This is Vulkan, not CUDA.</b>
+  The GPU is real, but the API inside the Linux guest is Mesa Venus over virtio-gpu. CUDA, NVML, <code>nvidia-smi</code>, Metal, and MLX are not available in pods. Kiac never advertises <code>nvidia.com/gpu</code> as node capacity.</div>
+
+  <h2 id="architecture">Architecture</h2>
+  <p>Ordinary Kiac clusters keep using the fast apple/container backend. A cluster with <code>--gpu-workers</code> uses krunkit and vmnet-helper for its complete topology: control plane, ordinary workers, and GPU workers. This keeps every node on one reliable VM network. Only nodes named <code>-gpu-N</code> publish GPU labels, receive the <code>kiac.dev/gpu=true:NoSchedule</code> taint, and provide schedulable GPU inventory. Kiac mounts <code>/dev/dri</code> only into workloads allocated through its GPU driver.</p>
+  <p>GPU mode is opt-in, so its dependencies, larger disk image, and longer first boot add no startup or idle overhead to an ordinary cluster. Existing LoadBalancer, edge proxy, storage, metrics, Gateway API, observability, verify, support, stop/start, delete, and resume paths work through the same cluster manager.</p>
+
+  <h2 id="requirements">Requirements</h2>
+  <table>
+    <tr><th>Requirement</th><th>Detail</th></tr>
+    <tr><td>Apple silicon Mac</td><td>macOS arm64; Kiac refuses GPU mode on other hosts</td></tr>
+    <tr><td>krunkit 1.3.2+</td><td>installed from the official libkrun tap, including its Venus-capable virglrenderer</td></tr>
+    <tr><td>vmnet-helper 0.13.0+</td><td>provides the shared multi-VM network</td></tr>
+    <tr><td><code>kubectl</code> and SSH tools</td><td>used for Kubernetes access and VM provisioning</td></tr>
+  </table>
+  <pre><code>brew tap libkrun/krun
+brew trust libkrun/krun
+brew install krunkit
+
+<span class="c"># vmnet-helper on macOS 26+</span>
+brew tap nirs/vmnet-helper
+brew trust nirs/vmnet-helper
+brew install vmnet-helper
+kiac gpu doctor</code></pre>
+  <p>On macOS 14 or 15, use vmnet-helper's upstream installer and sudoers setup instead of Homebrew. If krunkit came from the old <code>slp/krunkit</code> or <code>slp/krun</code> tap, remove the legacy tap before reinstalling from <code>libkrun/krun</code>. <code>kiac gpu doctor</code> checks the host architecture, tool versions, SSH, disk-image, and host-network tooling, and that a Venus-capable renderer from the official krunkit dependency stack is installed.</p>
+
+  <h2 id="create">Create a GPU cluster</h2>
+  <p>K3s 1.36 with DRA is the shortest path to the complete feature:</p>
+  <pre><code>kiac create cluster --name gpu-lab --distro k3s --k8s-version 1.36 \
+  --workers 1 --gpu-workers 1 --gpu-resource-driver dra
+
+kubectl get nodes \
+  -L kiac.dev/gpu.present,kiac.dev/gpu.api,kiac.dev/gpu.memory
+kiac gpu status --name gpu-lab</code></pre>
+  <p>Kubeadm is supported too. Its pinned GPU path currently uses Kubernetes 1.37:</p>
+  <pre><code>kiac create cluster --name gpu-ka --distro kubeadm --k8s-version 1.37 \
+  --workers 1 --gpu-workers 1 --gpu-resource-driver device-plugin</code></pre>
+  <p>The first create downloads the checksum-pinned Fedora 44 ARM64 cloud image and converts it from qcow2 to raw in process, then caches both under <code>~/.kiac/images</code>. Each node gets a persistent copy-on-write disk under <code>~/.kiac/gpu-nodes</code>. VM provisioning installs the pinned Kubernetes artifacts and guest packages, so the first GPU cluster is intentionally slower than an apple/container cluster.</p>
+  <div class="note"><b>Current topology constraints</b>
+  GPU clusters are IPv4-only. K3s uses its normal Flannel path. Kubeadm supports kindnet or Cilium; Cilium requires the host <code>cilium</code> CLI, but not <code>--kernel full</code>. Custom kernel paths apply only to apple/container-backed clusters.</div>
+
+  <h2 id="resources">Resource contract</h2>
+  <table>
+    <tr><th>Contract</th><th>Meaning</th></tr>
+    <tr><td><code>kiac.dev/gpu</code></td><td>one schedulable real Venus device per GPU worker</td></tr>
+    <tr><td><code>kiac.dev/gpu.present=true</code></td><td>node has passed Kiac's render-device discovery</td></tr>
+    <tr><td><code>kiac.dev/gpu.api=venus</code></td><td>workloads must use a Venus/Vulkan-capable userspace</td></tr>
+    <tr><td><code>kiac.dev/gpu.memory</code></td><td>recorded VM-level krunkit GPU window in MiB; scheduler accounting is per node and does not prevent aggregate host unified-memory overcommit across VMs</td></tr>
+    <tr><td><code>kiac.dev/gpu=true:NoSchedule</code></td><td>keeps ordinary workloads off dedicated GPU workers unless tolerated</td></tr>
+    <tr><td><code>RuntimeClass/nvidia</code></td><td>compatibility name using the normal runtime handler; it does not install NVIDIA software</td></tr>
+  </table>
+
+  <h2 id="drivers">Device plugin or DRA</h2>
+  <p><code>--gpu-resource-driver device-plugin</code> is the default and exposes one ordinary extended resource per GPU worker. It is the simplest choice for manifests that request:</p>
+  <pre><code>resources:
+  requests:
+    kiac.dev/gpu: "1"
+  limits:
+    kiac.dev/gpu: "1"</code></pre>
+  <p><code>--gpu-resource-driver dra</code> requires Kubernetes 1.36 or newer. The embedded node agent registers the <code>gpu.kiac.dev</code> driver, publishes a <code>DeviceClass</code> and one <code>ResourceSlice</code> per GPU worker, and uses CDI to inject the render device after allocation. Its <code>extendedResourceName</code> also lets the ordinary <code>kiac.dev/gpu</code> request above allocate through DRA.</p>
+  <p>For explicit capacity scheduling, a ResourceClaim can request the reported memory in 1 GiB steps; see <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-dra-memory.yaml"><code>examples/gpu-dra-memory.yaml</code></a>. Capacity is scheduler accounting against krunkit's VM GPU window. It is not dedicated physical VRAM, hard per-process memory isolation, or a compute quota.</p>
+
+  <h2 id="prove">Prove the GPU path</h2>
+  <pre><code>kubectl apply -f examples/gpu-vulkan.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
+  pod/kiac-gpu-vulkan --timeout=5m
+kubectl logs kiac-gpu-vulkan</code></pre>
+  <p>The pinned test fails unless <code>vulkaninfo</code> identifies a real Venus device. A valid run includes output like:</p>
+  <pre><code><span class="o">deviceName = Virtio-GPU Venus (Apple M1 Max)
+driverName = venus
+KIAC_REAL_APPLE_GPU_OK</span></code></pre>
+  <p>The workload image is digest-pinned because a generic image with a different Mesa build may expose <code>/dev/dri</code> without successfully enumerating Venus. The test checks the API, not just the device file.</p>
+
+  <h2 id="inference">Inference and benchmark</h2>
+  <pre><code>kiac gpu bench --name gpu-lab
+kubectl apply -f examples/gpu-inference.yaml
+kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=10m</code></pre>
+  <p>The benchmark uses the same revision-pinned TinyLlama Q4_K_M model and pinned ARM64 llama.cpp container for every run. It performs three Venus runs and, when host <code>llama-bench</code> is available, the same prompt and generation workload on native Metal. This is a regression baseline, not a promise that virtualized Vulkan equals Metal performance. Use <code>--skip-host</code> or <code>-o json</code> for automation.</p>
+
+  <h2 id="integrations">Inference integrations</h2>
+  <pre><code>kiac gpu values vllm
+kiac gpu values ollama
+kiac gpu values kserve</code></pre>
+  <p>These commands generate scheduling fragments, not magic CUDA conversion. Stock CUDA-oriented vLLM, Ollama, and KServe images still need to be replaced with an application image that genuinely supports Venus/Vulkan.</p>
+  <p>For a legacy manifest that hard-codes an NVIDIA resource name, enable the namespace-scoped admission rewrite explicitly:</p>
+  <pre><code>kiac gpu compat enable --name gpu-lab --namespace demo
+kiac gpu compat disable --name gpu-lab --namespace demo</code></pre>
+  <p>The webhook rewrites supported <code>nvidia.com/gpu</code> requests to <code>kiac.dev/gpu</code>, adds the GPU toleration, and records an audit annotation. It rejects ambiguous aliases and never creates NVIDIA capacity, CUDA, or NVML.</p>
+
+  <h2 id="operations">Operate and remove</h2>
+  <pre><code>kiac gpu status --name gpu-lab
+kiac verify cluster --name gpu-lab
+kiac support bundle --name gpu-lab
+kiac stop node gpu-1 --name gpu-lab
+kiac start node gpu-1 --name gpu-lab
+kiac resume cluster --name gpu-lab
+kiac delete cluster --name gpu-lab</code></pre>
+  <p>The complete reproducible walkthrough, including DRA memory, LoadBalancer inference, compatibility mode, and cleanup, lives in <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md"><code>examples/gpu-lab.md</code></a>.</p>
+
+  <div class="pn">
+    <a href="cilium.html"><span>Previous</span>Cilium &amp; the full kernel</a>
+    <a class="next" href="observability.html"><span>Next</span>Observability</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

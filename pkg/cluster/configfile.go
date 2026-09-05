@@ -16,19 +16,24 @@ import (
 // fields distinguish "omitted" from an explicit zero value, and addon
 // toggles are positive booleans that Merge maps onto the No* fields.
 type FileConfig struct {
-	Name       string         `yaml:"name"`
-	Workers    *int           `yaml:"workers"`
-	K8sVersion string         `yaml:"k8sVersion"`
-	Image      string         `yaml:"image"`
-	CNI        string         `yaml:"cni"`
-	IPFamily   string         `yaml:"ipFamily"`
-	DNS        []string       `yaml:"dns"`
-	Mounts     runtime.Mounts `yaml:"mounts"`
-	CPUs       string         `yaml:"cpus"`
-	Memory     string         `yaml:"memory"`
-	CPMemory   string         `yaml:"cpMemory"`
-	Wait       string         `yaml:"wait"`
-	Addons     FileAddons     `yaml:"addons"`
+	Name        string         `yaml:"name"`
+	Distro      string         `yaml:"distro"`
+	Workers     *int           `yaml:"workers"`
+	GPUWorkers  *int           `yaml:"gpuWorkers"`
+	GPUImage    string         `yaml:"gpuImage"`
+	GPUDiskSize string         `yaml:"gpuDiskSize"`
+	GPUDriver   string         `yaml:"gpuResourceDriver"`
+	K8sVersion  string         `yaml:"k8sVersion"`
+	Image       string         `yaml:"image"`
+	CNI         string         `yaml:"cni"`
+	IPFamily    string         `yaml:"ipFamily"`
+	DNS         []string       `yaml:"dns"`
+	Mounts      runtime.Mounts `yaml:"mounts"`
+	CPUs        string         `yaml:"cpus"`
+	Memory      string         `yaml:"memory"`
+	CPMemory    string         `yaml:"cpMemory"`
+	Wait        string         `yaml:"wait"`
+	Addons      FileAddons     `yaml:"addons"`
 }
 
 // FileAddons toggles the optional cluster addons. Omitted keys keep the
@@ -75,12 +80,27 @@ func LoadConfigFile(path string) (*FileConfig, error) {
 // not explicitly set. changed is cobra's Flags().Changed, so a flag
 // given on the command line always wins over the file. k8sVersion is
 // merged separately because the CLI resolves it to an image afterwards.
-func (fc *FileConfig) Merge(cfg *Config, k8sVersion *string, changed func(string) bool) error {
+func (fc *FileConfig) Merge(cfg *Config, distro, k8sVersion *string, changed func(string) bool) error {
 	if fc.Name != "" && !changed("name") {
 		cfg.Name = fc.Name
 	}
+	if fc.Distro != "" && !changed("distro") {
+		*distro = fc.Distro
+	}
 	if fc.Workers != nil && !changed("workers") {
 		cfg.Workers = *fc.Workers
+	}
+	if fc.GPUWorkers != nil && !changed("gpu-workers") {
+		cfg.GPUWorkers = *fc.GPUWorkers
+	}
+	if fc.GPUImage != "" && !changed("gpu-image") {
+		cfg.GPUImage = fc.GPUImage
+	}
+	if fc.GPUDiskSize != "" && !changed("gpu-disk-size") {
+		cfg.GPUDiskSize = fc.GPUDiskSize
+	}
+	if fc.GPUDriver != "" && !changed("gpu-resource-driver") {
+		cfg.GPUDriver = fc.GPUDriver
 	}
 	if fc.K8sVersion != "" && !changed("k8s-version") {
 		*k8sVersion = fc.K8sVersion

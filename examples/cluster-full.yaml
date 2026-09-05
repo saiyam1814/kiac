@@ -15,9 +15,22 @@
 # kiac-<name>-control-plane and kiac-<name>-worker-N. Default: dev.
 name: full
 
+# Kubernetes distribution: kubeadm (default) or k3s.
+distro: kubeadm
+
 # Worker node count. Each node is its own lightweight VM. With 0
 # workers the control plane is untainted and runs your pods. Default: 0.
 workers: 3
+
+# Real Apple GPU workers are alpha and require krunkit plus vmnet-helper.
+# Setting gpuWorkers above zero moves every VM in this cluster to krunkit so
+# all nodes share one reliable network; only -gpu-N nodes publish schedulable
+# GPU inventory and Kiac mounts /dev/dri only into allocated GPU pods. See
+# examples/gpu-cluster.yaml and gpu-lab.md.
+# gpuWorkers: 1
+# gpuImage: fedora-44
+# gpuDiskSize: 20G
+# gpuResourceDriver: device-plugin # or dra on Kubernetes 1.36+
 
 # Kubernetes version: a supported minor ("1.32" through "1.37") or an
 # exact patch. Each minor is pinned to a tested image digest. This
@@ -64,6 +77,7 @@ ipFamily: ipv4
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G
+cpMemory: 4G
 
 # Timeout for nodes to become Ready. Default: 5m.
 wait: 5m

@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a class="on" href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -58,6 +59,8 @@
   <p class="lede">Apple's stock node kernel cannot run Cilium. kiac ships a published, sha-pinned kernel build that can, and one flag pair boots your nodes on it and drives the official Cilium installer.</p>
 
   <pre><code>kiac create cluster --name dev --workers 2 --cni cilium --kernel full</code></pre>
+  <div class="note"><b>GPU-cluster exception</b>
+  Kubeadm clusters created with <code>--gpu-workers</code> already run krunkit's capable guest kernel, so they support <code>--cni cilium</code> with the host Cilium CLI and reject <code>--kernel full</code>. The rest of this page describes ordinary apple/container-backed clusters.</div>
 
   <h2 id="prereqs">Prerequisites</h2>
   <table>
@@ -144,12 +147,12 @@ kubectl delete networkpolicy deny-web</code></pre>
     <li>Both prerequisites are checked before any VM boots, so a missing <code>cilium</code> binary or kernel costs seconds, not minutes.</li>
     <li>The kernel cache lives at <code>~/.kiac/kernels/</code>; deleting it just triggers a fresh verified download next time.</li>
     <li><code>--cni flannel</code> and <code>--cni calico</code> are not wired up: they fail fast with a pointer to <code>--cni cilium</code> or <code>--cni none</code> (bring your own on the full kernel).</li>
-    <li><code>--kernel</code> and <code>--distro</code> are CLI flags only for now; they are not <a href="config-file.html">config file</a> keys yet.</li>
+    <li><code>--kernel</code> is CLI-only; <code>distro</code> is also available in the <a href="config-file.html">config file</a>.</li>
   </ul>
 
   <div class="pn">
     <a href="k3s.html"><span>Previous</span>k3s distro</a>
-    <a class="next" href="observability.html"><span>Next</span>Observability</a>
+    <a class="next" href="gpu.html"><span>Next</span>Apple GPU (alpha)</a>
   </div>
 </main>
 </div>

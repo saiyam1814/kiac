@@ -4,7 +4,7 @@ project_name: kiac
 
 before:
   hooks:
-    - make edge-proxy-asset
+    - make edge-proxy-asset gpu-agent-asset
 
 builds:
   - main: .

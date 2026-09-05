@@ -75,6 +75,8 @@ func TestValidateMounts(t *testing.T) {
 		{"duplicate target", []Mount{{Source: source, Target: "/workspace"}, {Source: source, Target: "/workspace/"}}, "duplicates mount 1"},
 		{"comma in source", []Mount{{Source: source + ",data", Target: "/workspace"}}, "commas are not supported"},
 		{"comma in target", []Mount{{Source: source, Target: "/work,space"}}, "commas are not supported"},
+		{"newline in source", []Mount{{Source: source + "\n/dev/vda", Target: "/workspace"}}, "newlines are not supported"},
+		{"newline in target", []Mount{{Source: source, Target: "/workspace\n/dev/vda /etc none bind 0 0"}}, "newlines are not supported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateMounts(tc.mounts)

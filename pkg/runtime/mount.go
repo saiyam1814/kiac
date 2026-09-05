@@ -102,6 +102,9 @@ func ValidateMounts(mounts []Mount) error {
 	targets := make(map[string]int, len(mounts))
 	for i, mount := range mounts {
 		label := fmt.Sprintf("mount %d (source %q, target %q)", i+1, mount.Source, mount.Target)
+		if strings.ContainsAny(mount.Source, "\r\n") || strings.ContainsAny(mount.Target, "\r\n") {
+			return fmt.Errorf("invalid %s: newlines are not supported in mount paths", label)
+		}
 		if !filepath.IsAbs(mount.Source) {
 			return fmt.Errorf("invalid %s: source must be an absolute host path", label)
 		}

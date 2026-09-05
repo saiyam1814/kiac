@@ -47,6 +47,12 @@ type supportCollector struct {
 	home     string
 }
 
+type supportKubectlCommand struct {
+	file     string
+	args     []string
+	optional bool
+}
+
 // SupportBundle collects bounded, read-only diagnostics. It deliberately does
 // not read kubeconfigs, Kubernetes Secrets, container inspect output, process
 // environments, or workload logs. All collected text still passes through the
@@ -73,6 +79,14 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	distro := distroFromNodes(infos)
 	cp := ControlPlane(name)
+	hasGPU := supportHasGPU(infos)
+	hasContainer := false
+	for _, info := range infos {
+		if info.Backend == "" || info.Backend == runtime.BackendContainer {
+			hasContainer = true
+			break
+		}
+	}
 
 	home, _ := os.UserHomeDir()
 	collector := &supportCollector{home: home}
@@ -84,11 +98,24 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 	}
 	collector.addJSON("cluster/verify.json", report)
 
-	version, versionErr := m.rt.Version()
-	if versionErr != nil {
-		collector.warnings = append(collector.warnings, "runtime version: "+compactError(versionErr))
+	version := ""
+	if hasContainer {
+		var versionErr error
+		version, versionErr = m.rt.Version()
+		if versionErr != nil {
+			collector.warnings = append(collector.warnings, "runtime version: "+compactError(versionErr))
+		}
 	}
 	statuses := BuildStatuses(infos)
+	var gpuStatus *GPUStatus
+	if hasGPU {
+		status, statusErr := m.GPUStatusForCluster(name)
+		if statusErr != nil {
+			collector.warnings = append(collector.warnings, "GPU status: "+compactError(statusErr))
+		} else {
+			gpuStatus = &status
+		}
+	}
 	metadata := struct {
 		SchemaVersion    int             `json:"schemaVersion"`
 		GeneratedAt      string          `json:"generatedAt"`
@@ -97,6 +124,7 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 		Cluster          string          `json:"cluster"`
 		Distro           string          `json:"distro"`
 		Status           []ClusterStatus `json:"status"`
+		GPU              *GPUStatus      `json:"gpu,omitempty"`
 	}{
 		SchemaVersion:    1,
 		GeneratedAt:      now.Format(time.RFC3339),
@@ -105,11 +133,12 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 		Cluster:          name,
 		Distro:           distro,
 		Status:           statuses,
+		GPU:              gpuStatus,
 	}
 	collector.addJSON("metadata.json", metadata)
 
-	collector.collectHost(m.rt, opts.CommandTimeout)
-	collector.collectKubernetes(m, cp, distro, report, opts.CommandTimeout)
+	collector.collectHost(m.rt, opts.CommandTimeout, hasContainer, hasGPU)
+	collector.collectKubernetes(m, cp, distro, report, opts.CommandTimeout, hasGPU)
 	collector.collectNodes(m.rt, infos, distro, opts.CommandTimeout)
 
 	if err := writeSupportArchive(output, "kiac-support-"+name, now, collector.files); err != nil {
@@ -118,53 +147,68 @@ func (m *Manager) SupportBundle(name string, opts SupportBundleOptions) (Support
 	return SupportBundleResult{Path: output, Files: len(collector.files), Warnings: collector.warnings}, nil
 }
 
-func (c *supportCollector) collectHost(rt *runtime.Client, timeout time.Duration) {
+func (c *supportCollector) collectHost(rt runtime.HostRuntime, timeout time.Duration, hasContainer, hasGPU bool) {
 	out, err := hostDiagnosticCommand(timeout, "sw_vers")
 	c.addCommand("host/macos.txt", "sw_vers", out, err, true)
 	out, err = hostDiagnosticCommand(timeout, "uname", "-mrs")
 	c.addCommand("host/kernel.txt", "uname -mrs", out, err, true)
-	out, err = rt.SystemStatus(timeout)
-	c.addCommand("runtime/system-status.txt", "container system status", out, err, false)
+	if hasContainer {
+		out, err = rt.SystemStatus(timeout)
+		c.addCommand("runtime/container-system-status.txt", "container system status", out, err, false)
+	}
+	if hasGPU {
+		out, err = hostDiagnosticCommand(timeout, "krunkit", "--version")
+		c.addCommand("runtime/krunkit-version.txt", "krunkit --version", out, err, true)
+		out, err = hostDiagnosticCommand(timeout, "vmnet-run", "--version")
+		c.addCommand("runtime/vmnet-helper-version.txt", "vmnet-run --version", out, err, true)
+	}
 }
 
-func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, report VerificationReport, timeout time.Duration) {
+func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, report VerificationReport, timeout time.Duration, hasGPU bool) {
 	if !verificationReachedAPI(report) {
 		c.addText("kubernetes/NOT-COLLECTED.txt", "The control-plane VM or Kubernetes API was unavailable. See cluster/verify.json.\n")
 		return
 	}
-	commands := []struct {
-		file string
-		args []string
-	}{
-		{"version.txt", []string{"version", "-o", "yaml"}},
-		{"nodes.txt", []string{"get", "nodes", "-o", "wide"}},
-		{"pods.txt", []string{"get", "pods", "-A", "-o", "wide"}},
-		{"workloads.txt", []string{"get", "deployments,statefulsets,daemonsets", "-A", "-o", "wide"}},
-		{"services.txt", []string{"get", "services,endpointslices", "-A", "-o", "wide"}},
-		{"storage.txt", []string{"get", "storageclass,persistentvolumeclaim,persistentvolume", "-A", "-o", "wide"}},
-		{"api-services.txt", []string{"get", "apiservices", "-o", "wide"}},
-		{"events.txt", []string{"get", "events", "-A", "--sort-by=.metadata.creationTimestamp"}},
+	commands := []supportKubectlCommand{
+		{file: "version.txt", args: []string{"version", "-o", "yaml"}},
+		{file: "nodes.txt", args: []string{"get", "nodes", "-o", "wide"}},
+		{file: "pods.txt", args: []string{"get", "pods", "-A", "-o", "wide"}},
+		{file: "workloads.txt", args: []string{"get", "deployments,statefulsets,daemonsets", "-A", "-o", "wide"}},
+		{file: "services.txt", args: []string{"get", "services,endpointslices", "-A", "-o", "wide"}},
+		{file: "storage.txt", args: []string{"get", "storageclass,persistentvolumeclaim,persistentvolume", "-A", "-o", "wide"}},
+		{file: "api-services.txt", args: []string{"get", "apiservices", "-o", "wide"}},
+		{file: "events.txt", args: []string{"get", "events", "-A", "--sort-by=.metadata.creationTimestamp"}},
 	}
 	if verificationStatus(report, "metrics.api") != VerificationSkip {
-		commands = append(commands, struct {
-			file string
-			args []string
-		}{"metrics.txt", []string{"top", "nodes"}})
+		commands = append(commands, supportKubectlCommand{file: "metrics.txt", args: []string{"top", "nodes"}})
 	}
 	if verificationStatus(report, "gateway.api") != VerificationSkip {
-		commands = append(commands, struct {
-			file string
-			args []string
-		}{"gateway.txt", []string{"get", "gatewayclasses,gateways,httproutes", "-A", "-o", "wide"}})
+		commands = append(commands, supportKubectlCommand{file: "gateway.txt", args: []string{"get", "gatewayclasses,gateways,httproutes", "-A", "-o", "wide"}})
+	}
+	if hasGPU {
+		commands = append(commands,
+			supportKubectlCommand{file: "gpu-driver.txt", args: []string{"get", "daemonsets,pods", "-n", "kube-system", "-l", "app.kubernetes.io/name in (kiac-gpu-dra,kiac-gpu-device-plugin,kiac-gpu-compat)", "-o", "wide"}},
+			supportKubectlCommand{file: "gpu-dra.txt", args: []string{"get", "deviceclasses.resource.k8s.io,resourceslices.resource.k8s.io", "-o", "yaml"}, optional: true},
+			supportKubectlCommand{file: "gpu-compat.txt", args: []string{"get", "mutatingwebhookconfiguration", gpuCompatName, "--ignore-not-found", "-o", "yaml"}, optional: true},
+			supportKubectlCommand{file: "gpu-compat-namespaces.txt", args: []string{"get", "namespaces", "-l", gpuCompatNamespaceLabel, "--show-labels"}, optional: true},
+		)
 	}
 	for _, command := range commands {
 		out, err := m.diagnosticKubectl(cp, distro, timeout, command.args...)
-		full := "container exec " + cp + " kubectl " + strings.Join(command.args, " ")
-		c.addCommand("kubernetes/"+command.file, full, out, err, false)
+		full := "runtime exec " + cp + " kubectl " + strings.Join(command.args, " ")
+		c.addCommand("kubernetes/"+command.file, full, out, err, command.optional)
+	}
+	if hasGPU {
+		for _, workload := range []string{"daemonset/kiac-gpu-dra", "daemonset/kiac-gpu-device-plugin", "deployment/" + gpuCompatName} {
+			args := []string{"logs", "-n", "kube-system", workload, "--all-pods=true", "--tail=500"}
+			out, err := m.diagnosticKubectl(cp, distro, timeout, args...)
+			file := "kubernetes/" + strings.NewReplacer("/", "-", "kiac-", "").Replace(workload) + ".log"
+			c.addCommand(file, "runtime exec "+cp+" kubectl "+strings.Join(args, " "), out, err, true)
+		}
 	}
 }
 
-func (c *supportCollector) collectNodes(rt *runtime.Client, infos []runtime.Info, distro string, timeout time.Duration) {
+func (c *supportCollector) collectNodes(rt runtime.NodeBackend, infos []runtime.Info, distro string, timeout time.Duration) {
 	for _, info := range infos {
 		base := "nodes/" + info.Name + "/"
 		if !strings.EqualFold(info.Status, "running") {
@@ -172,7 +216,7 @@ func (c *supportCollector) collectNodes(rt *runtime.Client, infos []runtime.Info
 			continue
 		}
 		out, err := rt.Logs(info.Name, timeout)
-		c.addCommand(base+"console.log", "container logs "+info.Name, out, err, false)
+		c.addCommand(base+"console.log", "runtime logs "+info.Name, out, err, false)
 
 		commands := []struct {
 			file string
@@ -183,12 +227,31 @@ func (c *supportCollector) collectNodes(rt *runtime.Client, infos []runtime.Info
 			{"containers.txt", []string{"sh", "-c", "crictl ps -a 2>/dev/null || ctr -n k8s.io containers list 2>/dev/null || true"}},
 			{"edge-proxy.log", []string{"sh", "-c", "tail -500 " + edgeProxyLogPath + " 2>/dev/null || true"}},
 		}
+		if info.GPU || isGPUNode(info.Name) {
+			commands = append(commands, struct {
+				file string
+				args []string
+			}{"gpu.txt", []string{"sh", "-c", "ls -la /dev/dri 2>/dev/null || true; printf '\\nrender device:\\n'; readlink -f /sys/class/drm/renderD128/device 2>/dev/null || true; cat /sys/class/drm/renderD128/device/uevent 2>/dev/null || true"}})
+		}
 		if distro == "k3s" {
-			if strings.HasSuffix(info.Name, "-control-plane") {
+			if info.Backend == runtime.BackendKrunkit {
 				commands = append(commands, struct {
 					file string
 					args []string
-				}{"load-balancer.log", []string{"sh", "-c", "tail -500 " + kiacLBK3sLogPath + " 2>/dev/null || true"}})
+				}{"k3s.log", []string{"journalctl", "--no-pager", "-n", "500", "-u", "k3s"}})
+			}
+			if strings.HasSuffix(info.Name, "-control-plane") {
+				if info.Backend == runtime.BackendKrunkit {
+					commands = append(commands, struct {
+						file string
+						args []string
+					}{"load-balancer.log", []string{"journalctl", "--no-pager", "-n", "500", "-u", "kiac-lb"}})
+				} else {
+					commands = append(commands, struct {
+						file string
+						args []string
+					}{"load-balancer.log", []string{"sh", "-c", "tail -500 " + kiacLBK3sLogPath + " 2>/dev/null || true"}})
+				}
 			}
 		} else {
 			commands = append(commands,
@@ -210,7 +273,7 @@ func (c *supportCollector) collectNodes(rt *runtime.Client, infos []runtime.Info
 		}
 		for _, command := range commands {
 			out, err := rt.ExecTimeout(info.Name, timeout, command.args...)
-			full := "container exec " + info.Name + " " + strings.Join(command.args, " ")
+			full := "runtime exec " + info.Name + " " + strings.Join(command.args, " ")
 			c.addCommand(base+command.file, full, out, err, false)
 		}
 	}
@@ -284,6 +347,15 @@ func verificationStatus(report VerificationReport, id string) VerificationStatus
 		}
 	}
 	return VerificationSkip
+}
+
+func supportHasGPU(infos []runtime.Info) bool {
+	for _, info := range infos {
+		if info.GPU || isGPUNode(info.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 func supportOutputPath(name string, now time.Time, requested string) (string, error) {
@@ -378,6 +450,8 @@ var supportRedactions = []struct {
 	repl string
 }{
 	{regexp.MustCompile(`(?is)-----BEGIN [^-\n]*PRIVATE KEY-----.*?-----END [^-\n]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
+	{regexp.MustCompile(`(?i)(?:\$HOME|/Users/[^/\s]+)?/\.kiac/gpu-nodes/id_ed25519(?:\.pub)?`), "[REDACTED GPU SSH KEY PATH]"},
+	{regexp.MustCompile(`(?im)^(\s*(?:identityfile|ssh_key|private_key_path)\s*[:=]?\s*).*(?:id_ed25519|gpu-nodes).*$`), `${1}[REDACTED GPU SSH KEY PATH]`},
 	{regexp.MustCompile(`(?im)^(\s*"?(?:token|password|client-key-data|client-certificate-data|certificate-authority-data|k3s_token|tunnel_token)"?\s*[:=]\s*).+$`), `${1}[REDACTED]`},
 	{regexp.MustCompile(`(?i)(authorization\s*[:=]\s*bearer\s+)\S+`), `${1}[REDACTED]`},
 	{regexp.MustCompile(`(?i)(--(?:token|password)(?:=|\s+))\S+`), `${1}[REDACTED]`},
@@ -401,14 +475,15 @@ func redactSupportText(text, home string) string {
 
 const supportBundleReadme = `kiac support bundle
 
-This archive contains read-only host, Apple container runtime, Kubernetes,
-and kiac node diagnostics. It intentionally excludes:
+This archive contains read-only host, active VM runtime, Kubernetes, kiac
+node, and Apple GPU diagnostics. It intentionally excludes:
 
 - kubeconfig files and client certificates
 - Kubernetes Secret objects
 - raw container inspect output and process environments
 - application workload logs
 - edge-proxy token and credential files
+- kiac GPU SSH private keys and compatibility webhook TLS Secrets
 
 Collected text is bounded and passed through credential-pattern redaction.
 Names, image references, IP addresses, Kubernetes events, and system logs are

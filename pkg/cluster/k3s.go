@@ -218,6 +218,9 @@ func k3sToken() (string, error) {
 // PID 1 (single binary, sqlite datastore, no systemd), so the kubeadm
 // path's systemd-based readiness and addon installs do not apply here.
 func (m *Manager) CreateK3s(cfg Config) error {
+	if cfg.GPUWorkers > 0 {
+		return m.createK3sGPU(cfg)
+	}
 	start := time.Now()
 	if !ValidName(cfg.Name) {
 		return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", cfg.Name)
@@ -348,18 +351,18 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	// with a kiac.io/lb-primary nodeSelector, remain schedulable. kiac-lb
 	// also prefers a node hosting the Service endpoint before falling back
 	// to this primary label.
+	primary := cp
+	if cfg.Workers > 0 {
+		primary = worker(cfg.Name, 1)
+	}
+	if err := ui.Step("Labeling primary addon node", func() error {
+		_, err := m.k3sKubectl(cp, "label", "node", primary, "kiac.io/lb-primary=true", "--overwrite")
+		return err
+	}); err != nil {
+		m.cleanupOnFailure(cfg.Name)
+		return err
+	}
 	if !cfg.NoLB {
-		primary := cp
-		if cfg.Workers > 0 {
-			primary = worker(cfg.Name, 1)
-		}
-		if err := ui.Step("Labeling primary LoadBalancer node", func() error {
-			_, err := m.k3sKubectl(cp, "label", "node", primary, "kiac.io/lb-primary=true", "--overwrite")
-			return err
-		}); err != nil {
-			m.cleanupOnFailure(cfg.Name)
-			return err
-		}
 		if err := m.installKiacLBK3s(cp); err != nil {
 			m.cleanupOnFailure(cfg.Name)
 			return err
@@ -376,7 +379,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	// Optional addons apply through k3s kubectl; failures degrade the
 	// cluster rather than tearing it down, matching the kubeadm path.
 	if cfg.Observability {
-		if err := m.installObservabilityK3s(cp); err != nil {
+		if err := m.installObservabilityK3s(cp, cfg.NoLB); err != nil {
 			ui.Infof("observability stack not installed: %v", err)
 		}
 	}
@@ -503,12 +506,24 @@ func k3sNodesReady(out string, want int) bool {
 // installObservabilityK3s mirrors installObservability for the k3s
 // distro: same embedded manifests, applied through k3s kubectl, with
 // kiac-lb assigning Grafana its LoadBalancer IP.
-func (m *Manager) installObservabilityK3s(cp string) error {
+func (m *Manager) installObservabilityK3s(cp string, noLB bool) error {
 	if err := ui.Step("Installing observability (Prometheus + Grafana)", func() error {
 		manifest := strings.Join(observabilityManifests(), "\n---\n")
 		return m.k3sKubectlStdin(cp, strings.NewReader(manifest), "apply", "-f", "-")
 	}); err != nil {
 		return err
+	}
+	if noLB {
+		if err := ui.Step("Keeping Grafana internal (--no-lb)", func() error {
+			_, err := m.k3sKubectl(cp, "patch", "service", "grafana", "-n", obsNamespace,
+				"--type=merge", "-p", `{"spec":{"type":"ClusterIP"}}`)
+			return err
+		}); err != nil {
+			return err
+		}
+		ui.Infof("Grafana: http://grafana.%s.svc:3000 (cluster-internal)", obsNamespace)
+		ui.Hintf("kubectl -n %s port-forward service/grafana 3000:3000", obsNamespace)
+		return nil
 	}
 
 	var grafanaIP string

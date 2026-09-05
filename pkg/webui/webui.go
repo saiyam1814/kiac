@@ -143,6 +143,9 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		"defaultK3sVersion": cluster.DefaultK3sVersion,
 		"cnis":              []string{"kindnet", "cilium", "none"},
 		"distros":           []string{"kubeadm", "k3s"},
+		"gpuImages":         cluster.SupportedGPUImages(),
+		"defaultGPUImage":   cluster.DefaultGPUImage,
+		"gpuDrivers":        cluster.SupportedGPUResourceDrivers(),
 	})
 }
 
@@ -177,7 +180,7 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 			ni := nodeInfo{Name: nd.Name, Status: nd.Status, Image: nd.Image, Role: nodeRole(nd.Name)}
 			// IPs come from inside the VM; a stopped node has none.
 			if strings.EqualFold(nd.Status, "running") {
-				if ip, err := s.mgr.Runtime().IP(nd.Name); err == nil {
+				if ip, err := s.mgr.NodeIP(nd.Name); err == nil {
 					ni.IP = ip
 				}
 			}
@@ -192,6 +195,9 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 func nodeRole(node string) string {
 	if strings.HasSuffix(node, "-control-plane") {
 		return "control-plane"
+	}
+	if idx := strings.LastIndex(node, "-gpu-"); idx >= 0 && decimalIndex(node[idx+len("-gpu-"):]) {
+		return "gpu-worker"
 	}
 	return "worker"
 }
@@ -378,18 +384,24 @@ func (s *server) kubectlConsole(w http.ResponseWriter, r *http.Request) {
 }
 
 type createReq struct {
-	Name          string `json:"name"`
-	Workers       int    `json:"workers"`
-	K8sVersion    string `json:"k8sVersion"`
-	Distro        string `json:"distro"`
-	CNI           string `json:"cni"`
-	CPUs          string `json:"cpus"`
-	Memory        string `json:"memory"`
-	NoLB          bool   `json:"noLB"`
-	NoMetrics     bool   `json:"noMetrics"`
-	NoStorage     bool   `json:"noStorage"`
-	Observability bool   `json:"observability"`
-	Gateway       bool   `json:"gateway"`
+	Name              string `json:"name"`
+	Workers           int    `json:"workers"`
+	GPUWorkers        int    `json:"gpuWorkers"`
+	GPUImage          string `json:"gpuImage"`
+	GPUDiskSize       string `json:"gpuDiskSize"`
+	GPUResourceDriver string `json:"gpuResourceDriver"`
+	K8sVersion        string `json:"k8sVersion"`
+	Distro            string `json:"distro"`
+	CNI               string `json:"cni"`
+	CPUs              string `json:"cpus"`
+	Memory            string `json:"memory"`
+	CPMemory          string `json:"cpMemory"`
+	NoLB              bool   `json:"noLB"`
+	NoMetrics         bool   `json:"noMetrics"`
+	NoStorage         bool   `json:"noStorage"`
+	NoEdgeProxy       bool   `json:"noEdgeProxy"`
+	Observability     bool   `json:"observability"`
+	Gateway           bool   `json:"gateway"`
 }
 
 func sanitizeName(s string) bool { return cluster.ValidName(s) }
@@ -400,27 +412,54 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	if !sanitizeName(req.Name) {
-		writeJSON(w, 400, map[string]string{"error": "name must be lowercase letters, digits, and dashes"})
+	args, err := createClusterArgs(req)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
+	}
+	id, err := s.startJob(req.Name, args)
+	if err != nil {
+		writeJSON(w, 409, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, 202, map[string]string{"job": id})
+}
+
+func createClusterArgs(req createReq) ([]string, error) {
+	if !sanitizeName(req.Name) {
+		return nil, fmt.Errorf("name must be lowercase letters, digits, and dashes")
+	}
+	if req.Workers < 0 || req.GPUWorkers < 0 {
+		return nil, fmt.Errorf("worker counts must be zero or greater")
 	}
 	switch req.Distro {
 	case "", "kubeadm", "k3s":
 	default:
-		writeJSON(w, 400, map[string]string{"error": "distro must be kubeadm or k3s"})
-		return
+		return nil, fmt.Errorf("distro must be kubeadm or k3s")
 	}
-	args := []string{"create", "cluster", "--name", req.Name,
-		"--workers", strconv.Itoa(req.Workers)}
+	if req.GPUResourceDriver != "" && req.GPUResourceDriver != "device-plugin" && req.GPUResourceDriver != "dra" {
+		return nil, fmt.Errorf("GPU resource driver must be device-plugin or dra")
+	}
+	if req.Gateway && req.NoLB {
+		return nil, fmt.Errorf("Gateway API needs the built-in LoadBalancer")
+	}
+	if req.GPUWorkers > 0 && req.Distro != "k3s" {
+		switch req.CNI {
+		case "", "kindnet", "cilium":
+		default:
+			return nil, fmt.Errorf("GPU kubeadm clusters support kindnet or cilium, not %q", req.CNI)
+		}
+	}
+	args := []string{"create", "cluster", "--name", req.Name, "--workers", strconv.Itoa(req.Workers)}
 	if req.K8sVersion != "" {
 		args = append(args, "--k8s-version", req.K8sVersion)
 	}
 	if req.Distro == "k3s" {
-		// The k3s path always runs kindnet; the CLI rejects --cni here.
+		// The backend selects K3s networking; the CLI rejects --cni here.
 		args = append(args, "--distro", "k3s")
 	} else if req.CNI != "" {
 		args = append(args, "--cni", req.CNI)
-		if req.CNI == "cilium" {
+		if req.CNI == "cilium" && req.GPUWorkers == 0 {
 			// Cilium needs the full kernel; 'full' downloads the
 			// published sha-pinned build once and caches it.
 			args = append(args, "--kernel", "full")
@@ -432,6 +471,21 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	if req.Memory != "" {
 		args = append(args, "--memory", req.Memory)
 	}
+	if req.CPMemory != "" {
+		args = append(args, "--cp-memory", req.CPMemory)
+	}
+	if req.GPUWorkers > 0 {
+		args = append(args, "--gpu-workers", strconv.Itoa(req.GPUWorkers))
+		if req.GPUImage != "" {
+			args = append(args, "--gpu-image", req.GPUImage)
+		}
+		if req.GPUDiskSize != "" {
+			args = append(args, "--gpu-disk-size", req.GPUDiskSize)
+		}
+		if req.GPUResourceDriver != "" {
+			args = append(args, "--gpu-resource-driver", req.GPUResourceDriver)
+		}
+	}
 	if req.NoLB {
 		args = append(args, "--no-lb")
 	}
@@ -441,18 +495,16 @@ func (s *server) createCluster(w http.ResponseWriter, r *http.Request) {
 	if req.NoStorage {
 		args = append(args, "--no-storage")
 	}
+	if req.NoEdgeProxy {
+		args = append(args, "--no-edge-proxy")
+	}
 	if req.Observability {
 		args = append(args, "--observability")
 	}
 	if req.Gateway {
 		args = append(args, "--gateway")
 	}
-	id, err := s.startJob(req.Name, args)
-	if err != nil {
-		writeJSON(w, 409, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, 202, map[string]string{"job": id})
+	return args, nil
 }
 
 func (s *server) deleteCluster(w http.ResponseWriter, r *http.Request) {
@@ -494,11 +546,19 @@ func clusterNode(name, node string) bool {
 	if node == cluster.ControlPlane(name) {
 		return true
 	}
-	rest, ok := strings.CutPrefix(node, "kiac-"+name+"-worker-")
-	if !ok || rest == "" {
+	for _, marker := range []string{"worker-", "gpu-"} {
+		if rest, ok := strings.CutPrefix(node, "kiac-"+name+"-"+marker); ok {
+			return decimalIndex(rest)
+		}
+	}
+	return false
+}
+
+func decimalIndex(value string) bool {
+	if value == "" || value[0] == '0' {
 		return false
 	}
-	for _, r := range rest {
+	for _, r := range value {
 		if r < '0' || r > '9' {
 			return false
 		}

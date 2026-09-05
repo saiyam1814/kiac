@@ -1,0 +1,27 @@
+# Real Apple GPU cluster used by examples/gpu-lab.md.
+#
+#   kiac gpu doctor
+#   kiac create cluster --config examples/gpu-cluster.yaml
+#
+# GPU mode is alpha. It uses krunkit for every VM in this cluster so all nodes
+# share one reliable network. Only gpuWorkers publish GPU labels, a taint, and
+# schedulable kiac.dev/gpu inventory; Kiac mounts /dev/dri only into GPU pods.
+name: gpu-lab
+distro: k3s
+k8sVersion: "1.36"
+workers: 1
+gpuWorkers: 1
+gpuImage: fedora-44
+gpuDiskSize: 20G
+gpuResourceDriver: dra
+cpus: "4"
+memory: 4G
+cpMemory: 4G
+wait: 8m
+addons:
+  metrics: true
+  storage: true
+  loadBalancer: true
+  edgeProxy: true
+  observability: false
+  gateway: false

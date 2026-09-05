@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,7 +68,10 @@ func BuildStatuses(infos []runtime.Info) []ClusterStatus {
 			cs.Running++
 		}
 		if cs.K8sVersion == "" {
-			cs.K8sVersion = K8sVersionFromImage(i.Image)
+			cs.K8sVersion = i.K8sVersion
+			if cs.K8sVersion == "" {
+				cs.K8sVersion = K8sVersionFromImage(i.Image)
+			}
 		}
 		// The control plane's timestamp is the cluster's; workers only
 		// stand in when the control-plane row lacks one.
@@ -94,6 +98,9 @@ func BuildStatuses(infos []runtime.Info) []ClusterStatus {
 // the rancher/k3s repository name.
 func distroFromNodes(infos []runtime.Info) string {
 	for _, info := range infos {
+		if info.Distro == "k3s" || info.Distro == "kubeadm" {
+			return info.Distro
+		}
 		if strings.Contains(strings.ToLower(info.Image), "rancher/k3s") {
 			return "k3s"
 		}
@@ -118,13 +125,22 @@ func clusterNameFromNode(node string) (string, bool) {
 	if rest == node {
 		return "", false
 	}
-	if idx := strings.LastIndex(rest, "-control-plane"); idx > 0 {
+	if idx := strings.LastIndex(rest, "-control-plane"); idx > 0 && idx+len("-control-plane") == len(rest) {
 		return rest[:idx], true
 	}
-	if idx := strings.LastIndex(rest, "-worker-"); idx > 0 {
-		return rest[:idx], true
+	for _, marker := range []string{"-worker-", "-gpu-"} {
+		if idx := strings.LastIndex(rest, marker); idx > 0 {
+			if canonicalPositiveIndex(rest[idx+len(marker):]) {
+				return rest[:idx], true
+			}
+		}
 	}
 	return "", false
+}
+
+func canonicalPositiveIndex(value string) bool {
+	index, err := strconv.Atoi(value)
+	return err == nil && index > 0 && strconv.Itoa(index) == value
 }
 
 var versionTagRe = regexp.MustCompile(`^v?\d+\.\d+`)
@@ -133,7 +149,7 @@ var versionTagRe = regexp.MustCompile(`^v?\d+\.\d+`)
 // tag ("kindest/node:v1.36.1@sha256:..." -> "v1.36.1"). The runtime
 // reports resolved digest-only references ("kindest/node@sha256:...")
 // with no tag to parse, so those reverse-map through kiac's own pinned
-// image table. Returns "" when neither yields a version.
+// image tables. Returns "" when neither yields a version.
 func K8sVersionFromImage(image string) string {
 	tagged := image
 	if idx := strings.Index(tagged, "@"); idx >= 0 {
@@ -146,9 +162,11 @@ func K8sVersionFromImage(image string) string {
 	}
 	if idx := strings.Index(image, "@sha256:"); idx >= 0 {
 		digest := image[idx+1:]
-		for _, pinned := range nodeImages {
-			if strings.HasSuffix(pinned, digest) {
-				return K8sVersionFromImage(strings.Split(pinned, "@")[0])
+		for _, images := range []map[string]string{nodeImages, k3sImages} {
+			for _, pinned := range images {
+				if strings.HasSuffix(pinned, digest) {
+					return K8sVersionFromImage(strings.Split(pinned, "@")[0])
+				}
 			}
 		}
 	}

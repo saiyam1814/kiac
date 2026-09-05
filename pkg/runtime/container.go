@@ -29,6 +29,7 @@ func New() *Client { return &Client{Bin: "container"} }
 // CommandError carries the captured output of a failed CLI invocation so
 // callers can surface actionable diagnostics instead of "exit status 1".
 type CommandError struct {
+	Tool   string
 	Args   []string
 	Output string
 	Err    error
@@ -39,7 +40,11 @@ func (e *CommandError) Error() string {
 	if len(out) > 2000 {
 		out = out[len(out)-2000:]
 	}
-	return fmt.Sprintf("container %s failed: %v\n%s", strings.Join(e.Args, " "), e.Err, out)
+	tool := e.Tool
+	if tool == "" {
+		tool = "container"
+	}
+	return fmt.Sprintf("%s %s failed: %v\n%s", tool, strings.Join(e.Args, " "), e.Err, out)
 }
 
 // Unwrap lets callers distinguish timeouts and other execution failures
@@ -57,7 +62,7 @@ func (c *Client) runContext(ctx context.Context, args ...string) (string, error)
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}
-		return string(out), &CommandError{Args: args, Output: string(out), Err: err}
+		return string(out), &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}
 	return string(out), nil
 }
@@ -116,10 +121,16 @@ func (c *Client) SystemStart(installDefaultKernel bool) error {
 
 // RunOpts describes one node VM.
 type RunOpts struct {
+	Backend    string // explicit backend for first creation; empty uses route ownership/default
 	Name       string
-	Image      string
+	Image      string // OCI image for container, bootable raw disk for krunkit
+	Distro     string // persisted lifecycle identity (kubeadm or k3s) for non-OCI backends
+	K8sVersion string // persisted Kubernetes version for images that do not encode it
+	GPU        bool   // this node exposes a real GPU device to Kubernetes
 	CPUs       string
 	Memory     string
+	DiskSize   string   // krunkit writable disk size; empty defaults to 20G
+	NetworkID  string   // krunkit nodes with the same ID share one vmnet subnet
 	Env        []string // KEY=VALUE pairs, passed as -e flags
 	Entrypoint string   // overrides the image entrypoint when non-empty
 	Kernel     string   // custom kernel Image path (--kernel), empty = bundled default
@@ -238,7 +249,7 @@ func (c *Client) ExecStdin(name string, r io.Reader, command ...string) error {
 	cmd.Stdin = r
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return &CommandError{Args: args, Output: string(out), Err: err}
+		return &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}
 	return nil
 }
@@ -356,11 +367,15 @@ func (c *Client) NetworkHasIPv6(network string) (bool, error) {
 
 // Info is one row from `container ls`.
 type Info struct {
-	Name    string
-	Image   string
-	Status  string
-	IP      string // first IPv4 without CIDR suffix; empty while stopped
-	Created string // creation timestamp as the CLI reports it (RFC3339)
+	Name       string
+	Image      string
+	Status     string
+	IP         string // first IPv4 without CIDR suffix; empty while stopped
+	Created    string // creation timestamp as the CLI reports it (RFC3339)
+	Backend    string // container or krunkit; empty is accepted for legacy callers
+	Distro     string // kubeadm or k3s when persisted by the backend
+	K8sVersion string // explicit version when it cannot be derived from Image
+	GPU        bool   // node owns a real GPU device
 }
 
 // List returns containers whose names start with prefix (running or not).
@@ -387,6 +402,7 @@ func parseList(out, prefix string) ([]Info, error) {
 			Status:  firstString(row, "status.state", "status", "state"),
 			IP:      firstIPv4(row),
 			Created: firstString(row, "configuration.creationDate", "creationDate", "created"),
+			Backend: BackendContainer,
 		}
 		if info.Name == "" || !strings.HasPrefix(info.Name, prefix) {
 			continue

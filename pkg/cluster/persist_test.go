@@ -53,7 +53,8 @@ func TestOrderNodes(t *testing.T) {
 		{Name: "kiac-dev-worker-2"},
 		{Name: "kiac-dev-control-plane"},
 		{Name: "kiac-dev-worker-1"},
-		{Name: "kiac-dev-worker-x"}, // not a kiac node shape; ignored
+		{Name: "kiac-dev-gpu-10"},
+		{Name: "kiac-dev-gpu-2"},
 	}
 	cp, workers, err := orderNodes("dev", infos)
 	if err != nil {
@@ -62,9 +63,20 @@ func TestOrderNodes(t *testing.T) {
 	if cp != "kiac-dev-control-plane" {
 		t.Errorf("cp = %q", cp)
 	}
-	want := []string{"kiac-dev-worker-1", "kiac-dev-worker-2", "kiac-dev-worker-10"}
+	want := []string{"kiac-dev-worker-1", "kiac-dev-worker-2", "kiac-dev-worker-10", "kiac-dev-gpu-2", "kiac-dev-gpu-10"}
 	if strings.Join(workers, ",") != strings.Join(want, ",") {
 		t.Errorf("workers = %v, want %v (numeric order, not lexical)", workers, want)
+	}
+}
+
+func TestOrderNodesRejectsUnknownOrMalformedNames(t *testing.T) {
+	for _, bad := range []string{"kiac-dev-worker-x", "kiac-dev-worker-0", "kiac-dev-worker-01", "kiac-dev-other-1"} {
+		t.Run(bad, func(t *testing.T) {
+			_, _, err := orderNodes("dev", []runtime.Info{{Name: "kiac-dev-control-plane"}, {Name: bad}})
+			if err == nil || !strings.Contains(err.Error(), bad) {
+				t.Fatalf("orderNodes error = %v, want error naming %q", err, bad)
+			}
+		})
 	}
 }
 

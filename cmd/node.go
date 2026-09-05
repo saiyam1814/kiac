@@ -20,7 +20,7 @@ var stopNodeCmd = &cobra.Command{
 	Use:   "node <node>",
 	Short: "Stop a node VM to test real node failure",
 	Long: `Stop one node's VM and let Kubernetes react: the node goes NotReady
-and its pods reschedule. Accepts the short node name (worker-1,
+and its pods reschedule. Accepts the short node name (worker-1, gpu-1,
 control-plane) or the full container name (kiac-dev-worker-1).
 
 Stopping the control plane of a single-node cluster is refused; on
@@ -44,6 +44,7 @@ var startNodeCmd = &cobra.Command{
 	Use:   "node <node>",
 	Short: "Start a previously stopped node VM",
 	Example: `  kiac start node worker-1
+	  kiac start node gpu-1 --name gpu-lab
   kiac start node worker-2 --name staging`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

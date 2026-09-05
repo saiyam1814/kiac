@@ -42,6 +42,13 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 	if distroFromNodes(infos) == "k3s" {
 		return m.resumeK3s(name, infos, waitTimeout, start)
 	}
+	krunkit, err := krunkitOnlyCluster(infos)
+	if err != nil {
+		return err
+	}
+	if krunkit {
+		return m.resumeKubeadmSystemd(name, infos, waitTimeout, start)
+	}
 	cp, workers, err := orderNodes(name, infos)
 	if err != nil {
 		return err
@@ -305,37 +312,72 @@ func apiServerIP(kubeconfig string) (string, error) {
 // orderNodes splits a cluster's containers into the control plane and
 // its workers sorted by index, the same order Create booted them in.
 func orderNodes(name string, infos []runtime.Info) (string, []string, error) {
+	cp, workers, gpuWorkers, err := orderNodeGroups(name, infos)
+	if err != nil {
+		return "", nil, err
+	}
+	return cp, append(workers, gpuWorkers...), nil
+}
+
+// orderNodeGroups keeps ordinary and GPU workers distinct while preserving
+// the stable numeric order within each class. Generic lifecycle callers use
+// orderNodes; GPU-aware reconciliation uses the three groups directly.
+func orderNodeGroups(name string, infos []runtime.Info) (string, []string, []string, error) {
 	cp := ControlPlane(name)
 	found := false
 	type wk struct {
 		idx  int
 		name string
 	}
-	var ws []wk
+	var regular, gpu []wk
+	seenRegular := make(map[int]bool)
+	seenGPU := make(map[int]bool)
 	for _, i := range infos {
 		if i.Name == cp {
+			if found {
+				return "", nil, nil, fmt.Errorf("cluster %q contains duplicate control-plane entries", name)
+			}
 			found = true
 			continue
 		}
-		rest := strings.TrimPrefix(i.Name, prefix(name)+"worker-")
-		if rest == i.Name {
-			continue
+		matched := false
+		for _, group := range []struct {
+			marker string
+			dest   *[]wk
+			seen   map[int]bool
+		}{{"worker-", &regular, seenRegular}, {"gpu-", &gpu, seenGPU}} {
+			rest := strings.TrimPrefix(i.Name, prefix(name)+group.marker)
+			if rest == i.Name {
+				continue
+			}
+			matched = true
+			if !canonicalPositiveIndex(rest) {
+				return "", nil, nil, fmt.Errorf("cluster %q has invalid node name %q; expected %s%s<positive integer>", name, i.Name, prefix(name), group.marker)
+			}
+			idx, _ := strconv.Atoi(rest)
+			if group.seen[idx] {
+				return "", nil, nil, fmt.Errorf("cluster %q contains duplicate %s index %d", name, strings.TrimSuffix(group.marker, "-"), idx)
+			}
+			group.seen[idx] = true
+			*group.dest = append(*group.dest, wk{idx, i.Name})
+			break
 		}
-		idx, err := strconv.Atoi(rest)
-		if err != nil {
-			continue
+		if !matched {
+			return "", nil, nil, fmt.Errorf("cluster %q has unrecognized node name %q; expected %s, %sworker-N, or %sgpu-N", name, i.Name, cp, prefix(name), prefix(name))
 		}
-		ws = append(ws, wk{idx, i.Name})
 	}
 	if !found {
-		return "", nil, fmt.Errorf("cluster %q has no control-plane container %s; it cannot be resumed, only recreated", name, cp)
+		return "", nil, nil, fmt.Errorf("cluster %q has no control-plane container %s; it cannot be resumed, only recreated", name, cp)
 	}
-	sort.Slice(ws, func(a, b int) bool { return ws[a].idx < ws[b].idx })
-	names := make([]string, len(ws))
-	for i, w := range ws {
-		names[i] = w.name
+	toNames := func(nodes []wk) []string {
+		sort.Slice(nodes, func(a, b int) bool { return nodes[a].idx < nodes[b].idx })
+		names := make([]string, len(nodes))
+		for i, node := range nodes {
+			names[i] = node.name
+		}
+		return names
 	}
-	return cp, names, nil
+	return cp, toNames(regular), toNames(gpu), nil
 }
 
 // healControlPlaneScript rewrites every control-plane file that pins the
