@@ -101,7 +101,7 @@ jobs:
           fi
 
           # GitHub materializes an immutable release tag only when its draft is published.
-          git tag --annotate "${RELEASE_TAG}" "${GITHUB_SHA}" --message "kiac ${RELEASE_TAG}"
+          git tag "${RELEASE_TAG}" "${GITHUB_SHA}"
           tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
           if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
             echo "release tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
