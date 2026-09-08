@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // The upstream CNI plugin binaries the k3s distro needs. kindnet's
@@ -28,7 +29,7 @@ const (
 // many nodes reads the already-cached file instead of racing N
 // downloads. tar exits non-zero on a missing member, which ExecStdin
 // surfaces as an error.
-func (m *Manager) extractCNIPlugins(node, archive string, members ...string) error {
+func (m *Manager) extractCNIPlugins(node, archive string, timeout time.Duration, members ...string) error {
 	// The member list is spliced into a shell command line inside the
 	// node. Every caller passes compile-time literals today; refuse
 	// anything else so a future config-derived name cannot become a
@@ -43,8 +44,16 @@ func (m *Manager) extractCNIPlugins(node, archive string, members ...string) err
 		return err
 	}
 	defer f.Close()
-	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
+	return m.rt.ExecStdinTimeout(node, transferBudget(timeout), f, "/bin/sh", "-c",
 		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin "+strings.Join(members, " "))
+}
+
+// transferBudget bounds a data transfer into a node (archive extraction,
+// manifest apply) by the cluster wait budget, floored at a minute so a
+// deliberately tiny --wait, which is a readiness knob, cannot cut a
+// transfer that would have finished.
+func transferBudget(wait time.Duration) time.Duration {
+	return max(wait, time.Minute)
 }
 
 // cniPluginMember is the only shape of archive member extractCNIPlugins

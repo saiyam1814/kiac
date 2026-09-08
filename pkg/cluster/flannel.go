@@ -10,16 +10,19 @@ import (
 )
 
 // FlannelVersion is the pinned upstream flannel release embedded in the
-// binary. The manifest is the release's kube-flannel.yml with each image
-// tag additionally pinned to its registry digest; bump both together,
-// refresh the digests, and re-verify the delegate plugin set below.
+// binary. Bump it together with the manifest: `make flannel-manifest
+// FLANNEL_VERSION=vX.Y.Z` regenerates assets/flannel.yaml with digests
+// and probes, then re-verify the delegate plugin set below.
 const FlannelVersion = "v0.28.9"
 
-// flannelManifest is upstream kube-flannel.yml at FlannelVersion. The
-// only local edits are the @sha256 digests on the image references
-// (mutable tags alone would let a retag change what every node runs as
-// root); dropping them yields the upstream release asset byte for byte.
-// The pod network is patched at apply time (see flannelManifestWithCIDR),
+// flannelManifest is upstream kube-flannel.yml at FlannelVersion with
+// two local edits, both applied by internal/cmd/flannel-manifest so a
+// version bump reproduces them: the @sha256 digests on the image
+// references (mutable tags alone would let a retag change what every
+// node runs as root), and the liveness/readiness probes upstream ships
+// in its Documentation copy but not in the release asset, without which
+// `kubectl rollout status` would mean Running rather than healthy. The
+// pod network is patched at apply time (see flannelManifestWithCIDR),
 // not here, so the embedded bytes stay diffable against upstream.
 //
 //go:embed assets/flannel.yaml
@@ -75,7 +78,7 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 			return err
 		}
 		if err := inParallel(len(nodes), func(i int) error {
-			if err := m.extractCNIPlugins(nodes[i], archive, flannelDelegatePlugins...); err != nil {
+			if err := m.extractCNIPlugins(nodes[i], archive, cfg.WaitTimeout, flannelDelegatePlugins...); err != nil {
 				return fmt.Errorf("installing bridge CNI plugin on %s: %w", nodes[i], err)
 			}
 			return nil
@@ -86,7 +89,9 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 		if err != nil {
 			return err
 		}
-		if err := m.rt.ExecStdin(cp, strings.NewReader(manifest),
+		// Bounded like the extraction: an apply that wedges must not hang
+		// create past its budget.
+		if err := m.rt.ExecStdinTimeout(cp, transferBudget(cfg.WaitTimeout), strings.NewReader(manifest),
 			"kubectl", "--kubeconfig", adminConf, "apply", "-f", "-"); err != nil {
 			return err
 		}
@@ -182,7 +187,9 @@ func flannelDiagnostics(cp string, exec execFunc) string {
 		// for events.k8s.io-recorded ones, which would sort first and be
 		// the ones the tail drops.
 		{"recent events", 20, []string{"get", "events", "--sort-by=.metadata.creationTimestamp"}},
-		{"logs", 0, []string{"logs", "-l", "app=flannel", "--all-containers", "--prefix", "--ignore-errors", "--tail=10"}},
+		// Ten lines per container, capped overall so a large cluster
+		// still yields a readable error.
+		{"logs", 200, []string{"logs", "-l", "app=flannel", "--all-containers", "--prefix", "--ignore-errors", "--tail=10"}},
 	}
 	deadline := time.Now().Add(flannelDiagnosticBudget)
 	var out []string

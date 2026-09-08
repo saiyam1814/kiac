@@ -14,6 +14,7 @@ type NodeBackend interface {
 	Exec(name string, command ...string) (string, error)
 	ExecTimeout(name string, timeout time.Duration, command ...string) (string, error)
 	ExecStdin(name string, r io.Reader, command ...string) error
+	ExecStdinTimeout(name string, timeout time.Duration, r io.Reader, command ...string) error
 	WaitReady(name string, timeout time.Duration) error
 	Logs(name string, timeout time.Duration) (string, error)
 	IP(name string) (string, error)

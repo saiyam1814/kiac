@@ -307,7 +307,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.36 (pins 1.32-1.36) |
 | `--distro` | `kubeadm` | `kubeadm` or `k3s`; ordinary k3s replaces Flannel with kindnet, while GPU k3s uses bundled Flannel on krunkit's capable kernel; `--cni` does not apply to k3s |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
-| `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, `flannel`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full`; Flannel (v0.28.9 embedded, VXLAN, no host CLI) needs `--kernel full` and is not available on GPU clusters |
+| `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, `flannel`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full`; Flannel (v0.28.9 embedded, VXLAN, no host CLI) needs `--kernel full` and is not available on GPU clusters. Only Cilium enforces NetworkPolicy |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
 | `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |

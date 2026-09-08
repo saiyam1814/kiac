@@ -430,7 +430,7 @@ func TestValidateCNIFailsBeforeBoot(t *testing.T) {
 func TestExtractCNIPluginsRefusesUnexpectedMembers(t *testing.T) {
 	m := NewManager()
 	for _, member := range []string{"bridge", "../bridge", "./bridge; reboot", "./a b", "./$(id)", ""} {
-		err := m.extractCNIPlugins("node", "/nonexistent.tgz", member)
+		err := m.extractCNIPlugins("node", "/nonexistent.tgz", time.Minute, member)
 		if err == nil || !strings.Contains(err.Error(), "refusing CNI plugin archive member") {
 			t.Errorf("member %q: err = %v, want refusal before any exec", member, err)
 		}
@@ -593,5 +593,24 @@ func TestInstallFlannelFailsWhenArchiveUnavailable(t *testing.T) {
 	}
 	if lines := readLogLines(t, log); len(lines) != 0 {
 		t.Fatalf("nodes were touched before the archive was verified: %v", lines)
+	}
+}
+
+func TestFlannelManifestHasHealthProbes(t *testing.T) {
+	// The release asset ships no probes, so a rollout would count a
+	// flanneld that is merely Running. The refresh tool adds upstream's
+	// Documentation-copy probes; the wait only means "healthy" with them.
+	for _, want := range []string{
+		"- --healthz-port=8081",
+		"path: /readyz",
+		"path: /healthz",
+		"containerPort: 8081",
+	} {
+		if !strings.Contains(flannelManifest, want) {
+			t.Errorf("flannel manifest lacks %q; regenerate it with make flannel-manifest", want)
+		}
+	}
+	if strings.Count(flannelManifest, "readinessProbe:") != 1 || strings.Count(flannelManifest, "livenessProbe:") != 1 {
+		t.Error("expected exactly one readiness and one liveness probe (the kube-flannel container)")
 	}
 }

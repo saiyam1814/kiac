@@ -130,6 +130,7 @@ spec:
       - args:
         - --ip-masq
         - --kube-subnet-mgr
+        - --healthz-port=8081
         command:
         - /opt/bin/flanneld
         env:
@@ -146,7 +147,23 @@ spec:
         - name: CONT_WHEN_CACHE_NOT_READY
           value: "false"
         image: ghcr.io/flannel-io/flannel:v0.28.9@sha256:708a2c9c1cfbfe529d1dbb249cb7113af117f3ed26b5e3e4c8ee015e10555204
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 10
+          periodSeconds: 30
         name: kube-flannel
+        ports:
+        - containerPort: 8081
+          name: healthz
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: healthz
+          initialDelaySeconds: 5
+          periodSeconds: 10
         resources:
           requests:
             cpu: 100m

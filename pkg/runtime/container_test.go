@@ -492,3 +492,40 @@ func readArgLines(t *testing.T, path string) []string {
 	}
 	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 }
+
+func TestExecStdinTimeoutBoundsWedgedExec(t *testing.T) {
+	// A transfer into a node that never finishes (the exec session
+	// wedged after draining stdin) must be killed at the deadline, and a
+	// descendant holding the pipe must not extend that.
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > /dev/null\nsleep 20 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	timeout := time.Second
+	started := time.Now()
+	err := (&Client{Bin: bin}).ExecStdinTimeout("node", timeout, strings.NewReader("manifest"), "kubectl", "apply", "-f", "-")
+	elapsed := time.Since(started)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecStdinTimeout error = %v, want context deadline", err)
+	}
+	if elapsed > timeout+pipeWaitDelay+5*time.Second {
+		t.Fatalf("ExecStdinTimeout took %s, want about %s", elapsed, timeout+pipeWaitDelay)
+	}
+}
+
+func TestExecStdinTimeoutDeliversInput(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	got := filepath.Join(dir, "stdin.txt")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > \"$KIAC_TEST_STDIN\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIAC_TEST_STDIN", got)
+	if err := (&Client{Bin: bin}).ExecStdinTimeout("node", 5*time.Second, strings.NewReader("hello\n"), "cat"); err != nil {
+		t.Fatalf("ExecStdinTimeout = %v", err)
+	}
+	data, err := os.ReadFile(got)
+	if err != nil || string(data) != "hello\n" {
+		t.Fatalf("stdin delivered = %q, %v", data, err)
+	}
+}

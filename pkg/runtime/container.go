@@ -263,11 +263,36 @@ func (c *Client) Logs(name string, timeout time.Duration) (string, error) {
 
 // ExecStdin runs a command inside a node with r piped to stdin.
 func (c *Client) ExecStdin(name string, r io.Reader, command ...string) error {
+	return c.execStdinContext(context.Background(), name, r, command...)
+}
+
+// ExecStdinTimeout is ExecStdin bounded by a deadline, for transfers
+// that must not be able to wedge a create (plugin extraction, manifest
+// apply) the way an unbounded exec can.
+func (c *Client) ExecStdinTimeout(name string, timeout time.Duration, r io.Reader, command ...string) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.execStdinContext(ctx, name, r, command...)
+}
+
+func (c *Client) execStdinContext(ctx context.Context, name string, r io.Reader, command ...string) error {
 	args := append([]string{"exec", "-i", name}, command...)
-	cmd := exec.Command(c.Bin, args...)
+	cmd := exec.CommandContext(ctx, c.Bin, args...)
 	cmd.Stdin = r
+	if _, bounded := ctx.Deadline(); bounded {
+		cmd.WaitDelay = pipeWaitDelay
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			err = ctx.Err()
+		case errors.Is(err, exec.ErrWaitDelay):
+			return nil
+		}
 		return &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}
 	return nil
