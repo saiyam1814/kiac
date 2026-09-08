@@ -135,7 +135,8 @@ KIAC_REAL_APPLE_GPU_OK</span></code></pre>
   <pre><code>kiac gpu bench --name gpu-lab
 kubectl apply -f examples/gpu-inference.yaml
 kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=10m</code></pre>
-  <p>The benchmark uses the same revision-pinned TinyLlama Q4_K_M model and pinned ARM64 llama.cpp container for every run. It performs three Venus runs and, when host <code>llama-bench</code> is available, the same prompt and generation workload on native Metal. This is a regression baseline, not a promise that virtualized Vulkan equals Metal performance. Use <code>--skip-host</code> or <code>-o json</code> for automation.</p>
+  <p>The benchmark uses the same revision-pinned TinyLlama Q4_K_M model and pinned ARM64 llama.cpp container for every run. It performs three repetitions with four CPU threads per backend and, when host <code>llama-bench</code> is available, the same prompt and generation workload on native Metal. Reports preserve build IDs, GPU identity, thread counts, and timing standard deviations when provided by llama.cpp; conflicting metadata is rejected. The host binary is not version-pinned, and differing build IDs trigger a warning in text output. Even matched revisions use different Metal and Vulkan backends, so this is a regression baseline, not an isolated virtualization-overhead measurement. Use <code>--skip-host</code> or <code>-o json</code> for automation.</p>
+  <p>Every run creates a uniquely labelled pod in the <code>default</code> namespace, independent of the context's configured namespace. Cleanup targets only that run's label, including after a lost creation response. Cleanup is best-effort when the API is unavailable; the pod's active deadline bounds execution but does not garbage-collect the pod object.</p>
 
   <h2 id="integrations">Inference integrations</h2>
   <pre><code>kiac gpu values vllm
@@ -155,6 +156,7 @@ kiac stop node gpu-1 --name gpu-lab
 kiac start node gpu-1 --name gpu-lab
 kiac resume cluster --name gpu-lab
 kiac delete cluster --name gpu-lab</code></pre>
+  <p><code>kiac gpu status</code> checks node readiness and cordon state as well as render-device and resource-driver inventory. Cordoned, deleting, or NotReady nodes are not reported as schedulable. This is not a measure of unused GPU capacity or a guarantee that a particular workload's scheduling constraints can be satisfied.</p>
   <p>The complete reproducible walkthrough, including DRA memory, LoadBalancer inference, compatibility mode, and cleanup, lives in <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md"><code>examples/gpu-lab.md</code></a>.</p>
 
   <div class="pn">

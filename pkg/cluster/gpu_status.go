@@ -123,6 +123,9 @@ func (m *Manager) GPUStatusForCluster(name string) (GPUStatus, error) {
 }
 
 func gpuNodeSchedulable(driver string, status GPUNodeStatus, node kubeNode) bool {
+	if node.Spec.Unschedulable || node.Metadata.DeletionTimestamp != "" || !conditionTrue(node.Status.Conditions, "Ready") {
+		return false
+	}
 	inventoryReady := status.RenderDevice &&
 		status.KubernetesAPI == "venus" &&
 		node.Metadata.Labels[gpuResourceDomain+"/gpu.present"] == "true"
