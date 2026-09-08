@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -69,13 +70,15 @@ var k3sImages = map[string]string{
 	"1.36": "docker.io/rancher/k3s:v1.36.4-k3s1@sha256:edad48e12bf81c3a09ac1c05c0c0ffaaa22145980b989d6fae84543a76b83657",
 }
 
+var k3sVersionRe = regexp.MustCompile(`^\d+\.\d+(?:\.\d+(?:[+-]k3s\d+)?)?$`)
+
 // ResolveK3sImage maps a Kubernetes version to a pinned rancher/k3s
 // image, mirroring ResolveImage. Full patch versions outside the pin
 // table fall back to the matching -k3s1 tag, unpinned.
 func ResolveK3sImage(version string) (string, error) {
 	v := strings.TrimPrefix(strings.TrimSpace(version), "v")
 	parts := strings.Split(v, ".")
-	if len(parts) < 2 {
+	if !k3sVersionRe.MatchString(v) {
 		return "", fmt.Errorf("invalid Kubernetes version %q (want e.g. %s)", version, DefaultK3sVersion)
 	}
 	minor := parts[0] + "." + parts[1]
@@ -83,10 +86,14 @@ func ResolveK3sImage(version string) (string, error) {
 		return img, nil
 	}
 	if len(parts) == 3 {
-		if img, ok := k3sImages[minor]; ok && strings.Contains(img, ":v"+v+"-k3s") {
+		v = strings.Replace(v, "+k3s", "-k3s", 1)
+		if !strings.Contains(v, "-k3s") {
+			v += "-k3s1"
+		}
+		if img, ok := k3sImages[minor]; ok && strings.Contains(img, ":v"+v+"@") {
 			return img, nil
 		}
-		return "docker.io/rancher/k3s:v" + v + "-k3s1", nil
+		return "docker.io/rancher/k3s:v" + v, nil
 	}
 	return "", fmt.Errorf("no pinned k3s image for Kubernetes %q (k3s-supported minors: %s)", version, strings.Join(SupportedK3sVersions(), ", "))
 }

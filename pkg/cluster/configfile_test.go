@@ -378,6 +378,47 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestMergeWaitValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		wait    string
+		changed bool
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "positive", wait: "1ns", want: time.Nanosecond},
+		{name: "zero", wait: "0", want: 5 * time.Minute, wantErr: `invalid wait "0" in config file (must be > 0)`},
+		{name: "zero duration", wait: "0s", want: 5 * time.Minute, wantErr: `invalid wait "0s" in config file (must be > 0)`},
+		{name: "negative", wait: "-1s", want: 5 * time.Minute, wantErr: `invalid wait "-1s" in config file (must be > 0)`},
+		{name: "CLI overrides zero", wait: "0s", changed: true, want: 2 * time.Minute},
+		{name: "CLI overrides negative", wait: "-1s", changed: true, want: 2 * time.Minute},
+		{name: "CLI overrides malformed", wait: "banana", changed: true, want: 2 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, version := cliDefaults()
+			distro := "kubeadm"
+			if tc.changed {
+				cfg.WaitTimeout = 2 * time.Minute
+			}
+			file := FileConfig{Wait: tc.wait}
+			err := file.Merge(&cfg, &distro, &version, func(flag string) bool {
+				return flag == "wait" && tc.changed
+			})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Merge error = %v, want substring %q", err, tc.wantErr)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.WaitTimeout != tc.want {
+				t.Errorf("WaitTimeout = %s, want %s", cfg.WaitTimeout, tc.want)
+			}
+		})
+	}
+}
+
 func TestMergeDistroPrecedence(t *testing.T) {
 	file := FileConfig{Distro: "k3s"}
 	for _, tc := range []struct {
