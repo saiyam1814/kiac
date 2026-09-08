@@ -69,6 +69,15 @@ var createClusterCmd = &cobra.Command{
 			createKernel = "full"
 			ui.Infof("--ip-family %s needs the full node kernel; using --kernel full", createCfg.IPFamily)
 		}
+		// Reject a bad --cni before --kernel full can start a download:
+		// a typo should cost a message, not 37MB. Create re-checks.
+		if selectedDistro == "kubeadm" && createCfg.GPUWorkers == 0 {
+			pre := createCfg
+			pre.Kernel = createKernel
+			if err := cluster.ValidateCNI(pre); err != nil {
+				return err
+			}
+		}
 		if createKernel != "" {
 			kpath, err := cluster.ResolveKernel(createKernel)
 			if err != nil {

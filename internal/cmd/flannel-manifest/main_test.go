@@ -104,3 +104,37 @@ func TestCommittedManifestMatchesPatchShape(t *testing.T) {
 		t.Error("committed manifest should already carry the probes, so re-patching must be refused")
 	}
 }
+
+func TestPatchNormalizesCRLF(t *testing.T) {
+	out, err := Patch(strings.ReplaceAll(sample, "\n", "\r\n"), digests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "\r") {
+		t.Error("CRLF survived patching")
+	}
+	if strings.Count(out, "@sha256:") != 3 || strings.Count(out, "readinessProbe:") != 1 {
+		t.Errorf("CRLF input was not fully patched:\n%s", out)
+	}
+}
+
+func TestInputShapes(t *testing.T) {
+	for _, ok := range []string{"v0.28.9", "v1.0.0"} {
+		if !releaseTag.MatchString(ok) {
+			t.Errorf("release tag %q rejected", ok)
+		}
+	}
+	for _, bad := range []string{"", "0.28.9", "v0.28", "v0.28.9/../x", "v0.28.9?x=1", "main"} {
+		if releaseTag.MatchString(bad) {
+			t.Errorf("release tag %q accepted", bad)
+		}
+	}
+	if m := ghcrImage.FindStringSubmatch("ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3"); m == nil || m[1] != "flannel-io/flannel-cni-plugin" || m[2] != "v1.9.1-flannel3" {
+		t.Errorf("legitimate image not parsed: %v", m)
+	}
+	for _, bad := range []string{"docker.io/x/y:v1", "ghcr.io/x/y", "ghcr.io/x/y:v1/../z", "ghcr.io/x/y:v1?token=1", "ghcr.io/../y:v1", "ghcr.io/x/y:v1@sha256:abc"} {
+		if ghcrImage.MatchString(bad) {
+			t.Errorf("image %q accepted", bad)
+		}
+	}
+}

@@ -120,6 +120,8 @@ func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
 		{name: "cni names are lowercase", kernel: "file", flags: []string{"--cni=Flannel"}, want: "unknown --cni"},
 		{name: "calico fails before boot", kernel: "file", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
 		{name: "typo fails before boot", kernel: "file", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
+		{name: "typo fails before the kernel download", kernel: "full", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
+		{name: "calico fails before the kernel download", kernel: "full", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

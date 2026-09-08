@@ -80,7 +80,7 @@ make ci             <span class="c"># exact formatting, generation, race, vet, a
     <tr><th>Path</th><th>What lives there</th></tr>
     <tr><td><code>cmd/</code></td><td>cobra commands; deliberately thin shims over pkg/cluster</td></tr>
     <tr><td><code>pkg/cluster/</code></td><td>cluster lifecycle: create, delete, addons, chaos, diagnostics, kubeconfig, status</td></tr>
-    <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, observability, gateway, k3s kindnet), versions pinned</td></tr>
+    <tr><td><code>pkg/cluster/assets/</code></td><td>embedded manifests (metrics-server, observability, gateway, k3s kindnet, flannel), versions pinned; <code>make flannel-manifest FLANNEL_VERSION=vX.Y.Z</code> regenerates <code>flannel.yaml</code> from the upstream release with image digests and health probes, then bump <code>FlannelVersion</code> in <code>pkg/cluster/flannel.go</code></td></tr>
     <tr><td><code>pkg/runtime/</code></td><td>wrapper around the apple/container CLI</td></tr>
     <tr><td><code>pkg/webui/</code></td><td>the local dashboard: Go handlers + one embedded HTML file</td></tr>
     <tr><td><code>kernel/</code></td><td>the full node kernel: kconfig fragment; built by the kernel-build CI workflow</td></tr>
@@ -93,7 +93,7 @@ make ci             <span class="c"># exact formatting, generation, race, vet, a
   <ul>
     <li>Unit tests for new behavior (<code>make test</code> passes; CI runs it too).</li>
     <li>Run <code>make ci</code> before pushing. Runtime-sensitive changes should also run <code>./test/e2e/run.sh kubeadm</code> or <code>k3s</code> on Apple silicon.</li>
-    <li>Pinned versions for anything new that gets embedded: manifests in <code>pkg/cluster/assets/</code> pin exact image tags, and node images pin digests.</li>
+    <li>Pinned versions for anything new that gets embedded: manifests in <code>pkg/cluster/assets/</code> pin exact image tags (flannel additionally pins <code>@sha256</code> digests, enforced by a test), and node images pin digests.</li>
     <li>Honest UX on failure: optional addons degrade the cluster rather than tearing it down, errors say what to do next. Keep that bar.</li>
     <li>Docs updated when flags or behavior change (this site plus the README).</li>
   </ul>

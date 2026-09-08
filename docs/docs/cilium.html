@@ -79,9 +79,10 @@
     <li><b>WireGuard</b> and <b>kprobes</b>: transparent encryption and the tracing hooks tools like Hubble and Tetragon build on.</li>
   </ul>
   <p>The kernel stays monolithic with zero loadable modules, matching Apple's model, and its version (6.12.28) matches the kernel apple/container 1.0.0 boots by default, minimizing guest ABI drift.</p>
-  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 15MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
+  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 37MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
   <pre><code>kiac create cluster --kernel full                 <span class="c"># full kernel, default kindnet CNI</span>
 kiac create cluster --kernel full --cni cilium    <span class="c"># full kernel + Cilium</span>
+kiac create cluster --kernel full --cni flannel   <span class="c"># full kernel + upstream Flannel, no host CLI</span>
 kiac create cluster --kernel full --cni none      <span class="c"># full kernel, bring your own CNI</span></code></pre>
 
   <h2 id="performance">The performance story</h2>

@@ -572,6 +572,11 @@ func (m *Manager) waitNodeIPv6(node string, timeout time.Duration) (string, erro
 	}
 }
 
+// ValidateCNI is validateCNI for the CLI, which runs it before resolving
+// --kernel so a CNI typo cannot cost a kernel download. cfg.Kernel may
+// be the unresolved flag value there; only its emptiness matters.
+func ValidateCNI(cfg Config) error { return validateCNI(cfg) }
+
 // validateCNI rejects a --cni selection Create cannot honor, before any
 // VM boots: an unknown name, calico (not wired up), or cilium/flannel
 // without their prerequisites. installCNI re-checks the same cases so

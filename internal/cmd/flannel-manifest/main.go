@@ -9,6 +9,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,7 +25,7 @@ func main() {
 	version := flag.String("version", "", "flannel release tag, e.g. v0.28.9")
 	out := flag.String("out", "pkg/cluster/assets/flannel.yaml", "manifest to write")
 	flag.Parse()
-	if *version == "" {
+	if !releaseTag.MatchString(*version) {
 		fmt.Fprintln(os.Stderr, "usage: flannel-manifest -version vX.Y.Z [-out path]")
 		os.Exit(2)
 	}
@@ -61,7 +62,15 @@ func fail(err error) {
 	os.Exit(1)
 }
 
-var imageLine = regexp.MustCompile(`(?m)^(\s*image: )(\S+)$`)
+var (
+	imageLine = regexp.MustCompile(`(?m)^(\s*image: )(\S+)$`)
+	// releaseTag is the only -version shape accepted, so the value can be
+	// spliced into a URL without escaping.
+	releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+	// ghcrImage is the only image reference shape the tool will resolve:
+	// repo and tag characters that are safe in a registry URL path.
+	ghcrImage = regexp.MustCompile(`^ghcr\.io/([a-z0-9][a-z0-9._/-]*):([A-Za-z0-9][A-Za-z0-9._-]*)$`)
+)
 
 // Images lists the distinct image references in a manifest.
 func Images(manifest string) []string {
@@ -80,6 +89,8 @@ func Images(manifest string) []string {
 // into the kube-flannel container. It refuses manifests whose shape it does
 // not recognize rather than emitting a half-patched file.
 func Patch(manifest string, digests map[string]string) (string, error) {
+	// A CRLF asset would make every $-anchored line miss silently.
+	manifest = strings.ReplaceAll(manifest, "\r\n", "\n")
 	for image, digest := range digests {
 		if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
 			return "", fmt.Errorf("digest for %s is not a sha256: %q", image, digest)
@@ -158,14 +169,11 @@ func indexOf(lines []string, want string) int {
 // ghcrDigest resolves a ghcr.io/<repo>:<tag> reference to the digest of
 // its manifest index through the registry API with an anonymous pull token.
 func ghcrDigest(client *http.Client, image string) (string, error) {
-	rest, ok := strings.CutPrefix(image, "ghcr.io/")
-	if !ok {
-		return "", fmt.Errorf("only ghcr.io images are supported")
+	m := ghcrImage.FindStringSubmatch(image)
+	if m == nil {
+		return "", fmt.Errorf("expected ghcr.io/<repo>:<tag> with URL-safe characters")
 	}
-	repo, tag, ok := strings.Cut(rest, ":")
-	if !ok || strings.Contains(tag, "/") {
-		return "", fmt.Errorf("expected ghcr.io/<repo>:<tag>")
-	}
+	repo, tag := m[1], m[2]
 	raw, err := get(client, "https://ghcr.io/token?scope=repository:"+repo+":pull", "")
 	if err != nil {
 		return "", err
@@ -176,7 +184,10 @@ func ghcrDigest(client *http.Client, image string) (string, error) {
 	if err := json.Unmarshal([]byte(raw), &token); err != nil || token.Token == "" {
 		return "", fmt.Errorf("no anonymous pull token for %s", repo)
 	}
-	req, err := http.NewRequest(http.MethodHead, "https://ghcr.io/v2/"+repo+"/manifests/"+tag, nil)
+	// GET the index rather than trusting a HEAD header: the digest is
+	// the hash of these bytes, so compute it and require the registry's
+	// header to agree.
+	req, err := http.NewRequest(http.MethodGet, "https://ghcr.io/v2/"+repo+"/manifests/"+tag, nil)
 	if err != nil {
 		return "", err
 	}
@@ -190,9 +201,13 @@ func ghcrDigest(client *http.Client, image string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("registry answered %s", resp.Status)
 	}
-	digest := resp.Header.Get("Docker-Content-Digest")
-	if !strings.HasPrefix(digest, "sha256:") {
-		return "", fmt.Errorf("registry returned no digest")
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	digest := fmt.Sprintf("sha256:%x", sha256.Sum256(body))
+	if header := resp.Header.Get("Docker-Content-Digest"); header != "" && header != digest {
+		return "", fmt.Errorf("registry digest %s does not match fetched index %s", header, digest)
 	}
 	return digest, nil
 }

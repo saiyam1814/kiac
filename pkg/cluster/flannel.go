@@ -22,8 +22,12 @@ const FlannelVersion = "v0.28.9"
 // node runs as root), and the liveness/readiness probes upstream ships
 // in its Documentation copy but not in the release asset, without which
 // `kubectl rollout status` would mean Running rather than healthy. The
-// pod network is patched at apply time (see flannelManifestWithCIDR),
-// not here, so the embedded bytes stay diffable against upstream.
+// probes keep upstream's healthz listener on 0.0.0.0:8081 (hostNetwork,
+// so on every node IP): it serves only /healthz and /readyz status
+// bodies, and pinning it to loopback would be a second deviation from
+// upstream for no data exposure gained. The pod network is patched at
+// apply time (see flannelManifestWithCIDR), not here, so the embedded
+// bytes stay diffable against upstream.
 //
 //go:embed assets/flannel.yaml
 var flannelManifest string

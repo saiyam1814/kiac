@@ -96,7 +96,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--no-edge-proxy</code></td><td><code>false</code></td><td>skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers</td></tr>
     <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter; Grafana uses a LoadBalancer IP or ClusterIP with <code>--no-lb</code></td></tr>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
-    <tr><td><code>--wait</code></td><td><code>5m</code></td><td>positive timeout for each cluster readiness step, including CNI installation; zero and negative values are rejected. Passed to Cilium as <code>--wait-duration</code></td></tr>
+    <tr><td><code>--wait</code></td><td><code>5m</code></td><td>positive timeout for each cluster readiness step, including CNI installation; zero and negative values are rejected. Passed to Cilium as <code>--wait-duration</code> and used as Flannel's <code>rollout status --timeout</code></td></tr>
   </table>
   <p>Version resolution: a minor like <code>1.34</code> uses kiac's digest-pinned node image (<code>kindest/node</code>, or <code>rancher/k3s</code> with <code>--distro k3s</code>); an exact patch matches the pin when it is the pinned patch, otherwise falls back to the matching upstream tag unpinned. K3s also accepts full releases such as <code>v1.36.4+k3s1</code> and <code>v1.36.4-k3s1</code>. Explicit K3s build revisions are preserved, and a digest pin is reused only when the complete release tag matches.</p>
   <p><code>--kernel</code> is CLI-only. <code>distro</code> and the GPU options are also available as <a href="config-file.html">config file</a> keys.</p>
@@ -155,7 +155,7 @@ kiac start node worker-2 --name staging</code></pre>
   </table>
 
   <h2 id="verify-cluster">kiac verify cluster</h2>
-  <p>Run read-only health checks across the node VMs, required node services, API readiness, Kubernetes nodes and workloads, DNS, storage, metrics, the edge proxy and its redirect rules, LoadBalancer assignments, optional Gateway and observability addons, and reachability from the Mac. Intentionally disabled addons report <code>skip</code>; required failures make the command exit nonzero.</p>
+  <p>Run read-only health checks across the node VMs, required node services, API readiness, Kubernetes nodes and workloads, the pod network DaemonSet (kindnet, Cilium, or Flannel), DNS, storage, metrics, the edge proxy and its redirect rules, LoadBalancer assignments, optional Gateway and observability addons, and reachability from the Mac. Intentionally disabled addons report <code>skip</code>; required failures make the command exit nonzero.</p>
   <pre><code>kiac verify cluster --name dev
 kiac verify cluster --name dev -o json</code></pre>
   <table>
@@ -166,7 +166,7 @@ kiac verify cluster --name dev -o json</code></pre>
   </table>
 
   <h2 id="support-bundle">kiac support bundle</h2>
-  <p>Write a mode-<code>0600</code>, bounded, redacted <code>tar.gz</code> with the verification report, host and Apple container runtime status, safe Kubernetes listings, and node system logs. Collection is read-only and excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. Names, IPs, events, and system logs remain operational data, so review the archive before sharing it.</p>
+  <p>Write a mode-<code>0600</code>, bounded, redacted <code>tar.gz</code> with the verification report, host and Apple container runtime status, safe Kubernetes listings (including the pod-network DaemonSet's pods and container logs as <code>kubernetes/cni-&lt;name&gt;.txt</code> and <code>.log</code>), and node system logs. Collection is read-only and excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. Names, IPs, events, and system logs remain operational data, so review the archive before sharing it.</p>
   <pre><code>kiac support bundle --name dev
 kiac support bundle --name dev --output /tmp/dev-support.tar.gz</code></pre>
   <table>

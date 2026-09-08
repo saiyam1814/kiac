@@ -237,6 +237,7 @@ func (r *VerificationReport) skipKubernetesDataChecks(reason string) {
 		{"kubernetes.nodes", "Kubernetes nodes"},
 		{"kubernetes.pods", "Kubernetes workloads"},
 		{"kubernetes.dns", "cluster DNS"},
+		{"network.cni", "pod network"},
 		{"storage.default-class", "default storage"},
 		{"metrics.api", "metrics API"},
 		{"gateway.api", "Gateway API"},

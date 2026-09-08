@@ -260,3 +260,15 @@ func TestVerifyReportsPodNetworkDaemonSet(t *testing.T) {
 		})
 	}
 }
+
+func TestSkipKubernetesDataChecksCoversEveryDataCheck(t *testing.T) {
+	// When the API is unreachable every Kubernetes-data check must still
+	// appear (as skip), so the JSON check set is stable across states.
+	report := VerificationReport{}
+	report.skipKubernetesDataChecks("control plane stopped")
+	for _, id := range []string{"kubernetes.nodes", "kubernetes.pods", "kubernetes.dns", "network.cni", "storage.default-class", "metrics.api", "gateway.api", "observability.stack"} {
+		if got := verificationStatus(report, id); got != VerificationSkip {
+			t.Errorf("%s = %q, want skip", id, got)
+		}
+	}
+}
