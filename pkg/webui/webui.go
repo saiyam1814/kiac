@@ -458,6 +458,12 @@ func createClusterArgs(req createReq) ([]string, error) {
 		// The backend selects K3s networking; the CLI rejects --cni here.
 		args = append(args, "--distro", "k3s")
 	} else if req.CNI != "" {
+		switch req.CNI {
+		case "kindnet", "cilium", "flannel", "none":
+		default:
+			// Fail here rather than after every VM has booted.
+			return nil, fmt.Errorf("unknown CNI %q (supported: kindnet, cilium, flannel, none)", req.CNI)
+		}
 		args = append(args, "--cni", req.CNI)
 		if req.GPUWorkers == 0 && (req.CNI == "cilium" || req.CNI == "flannel") {
 			// Both need the full kernel on apple/container nodes; 'full'

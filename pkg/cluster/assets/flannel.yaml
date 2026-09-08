@@ -145,7 +145,7 @@ spec:
           value: "5000"
         - name: CONT_WHEN_CACHE_NOT_READY
           value: "false"
-        image: ghcr.io/flannel-io/flannel:v0.28.9
+        image: ghcr.io/flannel-io/flannel:v0.28.9@sha256:708a2c9c1cfbfe529d1dbb249cb7113af117f3ed26b5e3e4c8ee015e10555204
         name: kube-flannel
         resources:
           requests:
@@ -172,7 +172,7 @@ spec:
         - /opt/cni/bin/flannel
         command:
         - cp
-        image: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3
+        image: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel3@sha256:9fccdf677e6e26e76a4aa60da2113bab9852e8317287ba51b2c29778d2351345
         name: install-cni-plugin
         volumeMounts:
         - mountPath: /opt/cni/bin
@@ -183,7 +183,7 @@ spec:
         - /etc/cni/net.d/10-flannel.conflist
         command:
         - cp
-        image: ghcr.io/flannel-io/flannel:v0.28.9
+        image: ghcr.io/flannel-io/flannel:v0.28.9@sha256:708a2c9c1cfbfe529d1dbb249cb7113af117f3ed26b5e3e4c8ee015e10555204
         name: install-cni
         volumeMounts:
         - mountPath: /etc/cni/net.d

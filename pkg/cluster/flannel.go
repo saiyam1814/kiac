@@ -10,14 +10,17 @@ import (
 )
 
 // FlannelVersion is the pinned upstream flannel release embedded in the
-// binary. The manifest is the release's kube-flannel.yml verbatim; bump
-// both together and re-verify the delegate plugin set below.
+// binary. The manifest is the release's kube-flannel.yml with each image
+// tag additionally pinned to its registry digest; bump both together,
+// refresh the digests, and re-verify the delegate plugin set below.
 const FlannelVersion = "v0.28.9"
 
-// flannelManifest is upstream kube-flannel.yml at FlannelVersion. Its
-// pod network is patched at apply time (see flannelManifestWithCIDR),
-// not here, so the embedded bytes stay diffable against the upstream
-// release.
+// flannelManifest is upstream kube-flannel.yml at FlannelVersion. The
+// only local edits are the @sha256 digests on the image references
+// (mutable tags alone would let a retag change what every node runs as
+// root); dropping them yields the upstream release asset byte for byte.
+// The pod network is patched at apply time (see flannelManifestWithCIDR),
+// not here, so the embedded bytes stay diffable against upstream.
 //
 //go:embed assets/flannel.yaml
 var flannelManifest string
@@ -120,11 +123,12 @@ func (m *Manager) waitFlannelReady(cp string, timeout time.Duration) error {
 // waitFlannelRollout is waitFlannelReady with the bounded exec injected,
 // so the timing contract can be tested without a node VM.
 func waitFlannelRollout(cp string, timeout time.Duration, exec execFunc) error {
-	// `kubectl rollout status --timeout=0s` waits forever, the opposite
-	// of what --wait 0 means everywhere else in kiac (return without
-	// blocking). Skip the bounded wait when no positive budget is given;
-	// the final nodes-Ready step still runs. A sub-second budget would
-	// truncate to 0s, so floor it at 1s to keep the fail-fast intent.
+	// `kubectl rollout status --timeout=0s` waits forever. The CLI and
+	// config file reject a non-positive --wait before Create runs, so
+	// this is a guard for direct callers, not a documented mode: skip
+	// the bounded wait rather than block forever; the final nodes-Ready
+	// step still runs. A sub-second budget would truncate to 0s, so
+	// floor it at 1s to keep the fail-fast intent.
 	if timeout <= 0 {
 		return nil
 	}
@@ -132,11 +136,14 @@ func waitFlannelRollout(cp string, timeout time.Duration, exec execFunc) error {
 	if seconds < 1 {
 		seconds = 1
 	}
+	budget := time.Duration(seconds) * time.Second
 	// Three nested bounds, innermost first: --request-timeout caps any
 	// single API call, --timeout caps the rollout wait, and the outer
 	// exec deadline caps the `container exec` itself so a wedged exec
-	// session cannot outlive --wait.
-	_, err := exec(cp, timeout+flannelRolloutGrace, "kubectl", "--kubeconfig", adminConf,
+	// session cannot outlive --wait. The outer bound is derived from the
+	// same floored budget kubectl receives, so the grace is never eaten
+	// by the rounding.
+	_, err := exec(cp, budget+flannelRolloutGrace, "kubectl", "--kubeconfig", adminConf,
 		fmt.Sprintf("--request-timeout=%ds", seconds),
 		"-n", "kube-flannel", "rollout", "status", "daemonset/kube-flannel-ds",
 		fmt.Sprintf("--timeout=%ds", seconds))
@@ -171,7 +178,10 @@ func flannelDiagnostics(cp string, exec execFunc) string {
 		args  []string
 	}{
 		{"pods", 0, []string{"get", "pods", "-o", "wide"}},
-		{"recent events", 20, []string{"get", "events", "--sort-by=.lastTimestamp"}},
+		// creationTimestamp is set on every event; lastTimestamp is null
+		// for events.k8s.io-recorded ones, which would sort first and be
+		// the ones the tail drops.
+		{"recent events", 20, []string{"get", "events", "--sort-by=.metadata.creationTimestamp"}},
 		{"logs", 0, []string{"logs", "-l", "app=flannel", "--all-containers", "--prefix", "--ignore-errors", "--tail=10"}},
 	}
 	deadline := time.Now().Add(flannelDiagnosticBudget)

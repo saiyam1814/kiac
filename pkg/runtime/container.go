@@ -6,6 +6,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -55,10 +56,13 @@ func (c *Client) run(args ...string) (string, error) {
 	return c.runContext(context.Background(), args...)
 }
 
-// pipeWaitDelay bounds how long a bounded command may hold its output
-// pipes open after its deadline killed it. Killing the CLI does not kill
-// a helper child it spawned; without this, Wait would block on the
-// child's copy of the pipe and the deadline would be defeated.
+// pipeWaitDelay bounds how long a bounded command's output pipes may
+// stay open after the command itself is gone. Killing the CLI at its
+// deadline does not kill any descendant that inherited the pipe; without
+// this, Wait would block on that copy and the deadline would be
+// defeated. apple/container's exec spawns no such descendant today, so
+// this is a guard against a future one (and what makes shell fakes in
+// tests honor their deadline).
 const pipeWaitDelay = 500 * time.Millisecond
 
 func (c *Client) runContext(ctx context.Context, args ...string) (string, error) {
@@ -68,8 +72,14 @@ func (c *Client) runContext(ctx context.Context, args ...string) (string, error)
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			err = ctx.Err()
+		case errors.Is(err, exec.ErrWaitDelay):
+			// The command exited successfully; only a descendant kept
+			// the pipe open past pipeWaitDelay. That is not a failure,
+			// and reporting one would fail a healthy readiness probe.
+			return string(out), nil
 		}
 		return string(out), &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}

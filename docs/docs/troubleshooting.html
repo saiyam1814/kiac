@@ -126,16 +126,20 @@ kiac verify cluster --name gpu-lab</code></pre>
   <h2 id="top-unknown">kubectl top shows &lt;unknown&gt;</h2>
   <p>metrics-server needs about 60 seconds after cluster creation for its first scrape. If it never resolves, check the metrics-server pod in <code>kube-system</code>.</p>
 
-  <h2 id="cilium-prereqs">Cilium preflight errors</h2>
-  <p>Both Cilium prerequisites are checked before any VM boots, so these cost seconds, not minutes:</p>
+  <h2 id="cilium-prereqs">Cilium and Flannel preflight errors</h2>
+  <p>CNI prerequisites are checked before any VM boots, so these cost seconds, not minutes:</p>
   <pre><code><span class="o">Error: --cni cilium needs the full node kernel: add --kernel full (or a --kernel path)</span>
-<span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span></code></pre>
-  <p>The fixes are literal: add <code>--kernel full</code>, and <code>brew install cilium-cli</code>. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
+<span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span>
+<span class="o">Error: --cni flannel needs the full node kernel: add --kernel full (or a --kernel path)</span></code></pre>
+  <p>The fixes are literal: add <code>--kernel full</code>, and for Cilium <code>brew install cilium-cli</code>. Flannel needs no host CLI. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
 
-  <h2 id="cni-error">"flannel/calico needs kernel features"</h2>
-  <pre><code><span class="o">Error: flannel needs kernel features the stock node kernel does not enable; use
---cni cilium with --kernel full, or --cni none to bring your own</span></code></pre>
-  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle flannel or Calico manifests. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
+  <h2 id="flannel-not-ready">"flannel did not become ready"</h2>
+  <p>The flannel DaemonSet is given the <code>--wait</code> budget to roll out on every node. On timeout the error carries the kube-flannel pod list, recent namespace events, and the tail of every container's logs (init containers included), so it names the failing pod and reason, for example an image pull that never completed. Fix the cause it names and create again.</p>
+
+  <h2 id="cni-error">"calico needs kernel features"</h2>
+  <pre><code><span class="o">Error: calico needs kernel features the stock node kernel does not enable; use
+--cni cilium or --cni flannel with --kernel full, or --cni none to bring your own</span></code></pre>
+  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle a Calico manifest. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>) and Flannel the supported overlay without a host CLI (<code>--cni flannel --kernel full</code>); on the full kernel you can also install Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
 
   <h2 id="kernel-download">Downloads and the ~/.kiac cache</h2>
   <p><code>--kernel full</code> downloads the published kernel release asset (about 15MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>

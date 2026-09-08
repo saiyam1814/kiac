@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -28,6 +29,15 @@ const (
 // downloads. tar exits non-zero on a missing member, which ExecStdin
 // surfaces as an error.
 func (m *Manager) extractCNIPlugins(node, archive string, members ...string) error {
+	// The member list is spliced into a shell command line inside the
+	// node. Every caller passes compile-time literals today; refuse
+	// anything else so a future config-derived name cannot become a
+	// shell injection.
+	for _, member := range members {
+		if !cniPluginMember.MatchString(member) {
+			return fmt.Errorf("refusing CNI plugin archive member %q: expected ./<name>", member)
+		}
+	}
 	f, err := os.Open(archive)
 	if err != nil {
 		return err
@@ -36,6 +46,10 @@ func (m *Manager) extractCNIPlugins(node, archive string, members ...string) err
 	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
 		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin "+strings.Join(members, " "))
 }
+
+// cniPluginMember is the only shape of archive member extractCNIPlugins
+// will pass to tar: a ./-relative plain binary name.
+var cniPluginMember = regexp.MustCompile(`^\./[a-z0-9][a-z0-9._-]*$`)
 
 // ensureCNIPluginsArchive returns the local path of the verified CNI
 // plugins archive, downloading it on first use.

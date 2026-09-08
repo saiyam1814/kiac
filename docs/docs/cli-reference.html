@@ -66,6 +66,7 @@ kiac create cluster --name dev --workers 2
 kiac create cluster --memory 8G --cpus 4
 kiac create cluster --distro k3s --workers 1
 kiac create cluster --cni cilium --kernel full
+kiac create cluster --cni flannel --kernel full
 kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly
 kiac create cluster --config cluster.yaml</code></pre>
@@ -81,7 +82,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.36 (1.32-1.36 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
     <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
-    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium needs <code>--kernel full</code>; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
+    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, <code>flannel</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium and Flannel need <code>--kernel full</code>; Flannel (upstream v0.28.9 embedded, VXLAN backend) needs no host CLI and is not available on GPU clusters; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
     <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Given, it replaces the runtime's default resolv.conf entirely rather than adding to it (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
     <tr><td><code>--ip-family</code></td><td><code>ipv4</code></td><td><code>ipv4</code>, <code>dual</code>, or <code>ipv6</code>. Non-IPv4 ordinary clusters select the full kernel; GPU clusters currently require IPv4</td></tr>

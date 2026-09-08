@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
@@ -21,10 +22,14 @@ func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
 			continue
 		}
 		image := strings.TrimSpace(strings.TrimPrefix(trimmed, "image:"))
-		if strings.HasPrefix(image, "ghcr.io/flannel-io/flannel:") && !strings.HasSuffix(image, ":"+FlannelVersion) {
+		tag, digest, ok := strings.Cut(image, "@")
+		if !ok || !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+			t.Fatalf("image %q is not digest-pinned; a mutable tag alone would let a retag change what every node runs as root", image)
+		}
+		if strings.HasPrefix(tag, "ghcr.io/flannel-io/flannel:") && !strings.HasSuffix(tag, ":"+FlannelVersion) {
 			t.Fatalf("flannel image %q is not pinned to %s", image, FlannelVersion)
 		}
-		if !strings.Contains(image, ":v") {
+		if !strings.Contains(tag, ":v") {
 			t.Fatalf("image %q is not version-pinned", image)
 		}
 	}
@@ -172,6 +177,9 @@ func TestWaitFlannelReadyBoundsStuckRollout(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v, want the outer exec deadline", err)
 	}
+	// The fake's sleep is a child of sh, so after the deadline kills sh
+	// the orphan holds the pipe until runtime's pipeWaitDelay (500ms)
+	// releases it; the 2s slack covers that plus process spawn.
 	if elapsed < wait || elapsed > wait+flannelRolloutGrace+2*time.Second {
 		t.Fatalf("waitFlannelReady returned after %s, want about %s (+grace %s)", elapsed, wait, flannelRolloutGrace)
 	}
@@ -306,20 +314,79 @@ func TestWaitFlannelReadyBoundsEveryCommand(t *testing.T) {
 }
 
 func TestWaitFlannelReadyFloorsSubSecondBudget(t *testing.T) {
-	var rollout []string
-	exec := func(_ string, _ time.Duration, command ...string) (string, error) {
-		if rollout == nil {
-			rollout = command
-		}
+	var calls []flannelExecCall
+	exec := func(_ string, timeout time.Duration, command ...string) (string, error) {
+		calls = append(calls, flannelExecCall{timeout, command})
 		return "", nil
 	}
 	if err := waitFlannelRollout("cp", 200*time.Millisecond, exec); err != nil {
 		t.Fatal(err)
 	}
-	joined := strings.Join(rollout, " ")
+	if len(calls) != 1 {
+		t.Fatalf("a successful rollout issued %d commands, want only the rollout (no diagnostics)", len(calls))
+	}
+	joined := strings.Join(calls[0].args, " ")
 	if !strings.Contains(joined, "--timeout=1s") || !strings.Contains(joined, "--request-timeout=1s") {
 		t.Fatalf("sub-second --wait must floor kubectl budgets at 1s, got: %s", joined)
 	}
+	// The outer bound must be derived from the floored 1s kubectl gets,
+	// not the raw 200ms, or the grace is eaten by the rounding and the
+	// exec is killed before kubectl's own timer can fire.
+	if want := time.Second + flannelRolloutGrace; calls[0].timeout != want {
+		t.Fatalf("outer exec bound = %s, want %s", calls[0].timeout, want)
+	}
+}
+
+func TestWaitFlannelReadyLargeBudgetFormatting(t *testing.T) {
+	var calls []flannelExecCall
+	exec := func(_ string, timeout time.Duration, command ...string) (string, error) {
+		calls = append(calls, flannelExecCall{timeout, command})
+		return "", nil
+	}
+	if err := waitFlannelRollout("cp", 24*time.Hour, exec); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(calls[0].args, " ")
+	if !strings.Contains(joined, "--timeout=86400s") || !strings.Contains(joined, "--request-timeout=86400s") {
+		t.Fatalf("large --wait formatted wrong: %s", joined)
+	}
+	if calls[0].timeout != 24*time.Hour+flannelRolloutGrace {
+		t.Fatalf("outer exec bound = %s", calls[0].timeout)
+	}
+}
+
+func TestFlannelDiagnosticsSkipsAfterBudgetExhausted(t *testing.T) {
+	// Deterministic version of the budget test: the events call sleeps
+	// its whole (remaining) budget away, so logs must be skipped with the
+	// explicit note and never issued. synctest makes the sleep free.
+	synctest.Test(t, func(t *testing.T) {
+		var issued []string
+		exec := func(_ string, timeout time.Duration, command ...string) (string, error) {
+			joined := strings.Join(command, " ")
+			issued = append(issued, joined)
+			switch {
+			case strings.Contains(joined, "get pods"):
+				return "kube-flannel-ds-abc12   0/1   Init:ImagePullBackOff", nil
+			case strings.Contains(joined, "get events"):
+				time.Sleep(timeout)
+				return "", context.DeadlineExceeded
+			}
+			return "unexpected", nil
+		}
+		diag := flannelDiagnostics("cp", exec)
+		if len(issued) != 2 {
+			t.Fatalf("issued %d commands after the budget was spent, want pods + events only: %v", len(issued), issued)
+		}
+		for _, want := range []string{
+			"pods:\nkube-flannel-ds-abc12   0/1   Init:ImagePullBackOff",
+			"recent events: failed: context deadline exceeded",
+			"logs: skipped, diagnostic budget of " + flannelDiagnosticBudget.String() + " exhausted",
+		} {
+			if !strings.Contains(diag, want) {
+				t.Errorf("diagnostics lack %q:\n%s", want, diag)
+			}
+		}
+	})
 }
 
 func TestLastLines(t *testing.T) {
@@ -328,5 +395,52 @@ func TestLastLines(t *testing.T) {
 	}
 	if got := lastLines("a\nb", 5); got != "a\nb" {
 		t.Fatalf("lastLines short input = %q", got)
+	}
+}
+
+func TestValidateCNIFailsBeforeBoot(t *testing.T) {
+	cases := []struct {
+		cfg  Config
+		want string // "" means accepted
+	}{
+		{Config{}, ""},
+		{Config{CNI: "kindnet"}, ""},
+		{Config{CNI: "none"}, ""},
+		{Config{CNI: "flannel", Kernel: "/k/Image"}, ""},
+		{Config{CNI: "flannel"}, "--kernel full"},
+		{Config{CNI: "cilium"}, "--kernel full"},
+		{Config{CNI: "calico", Kernel: "/k/Image"}, "--cni flannel"},
+		{Config{CNI: "bogus"}, "unknown --cni"},
+		{Config{CNI: "kindnet; rm -rf /"}, "unknown --cni"},
+	}
+	for _, c := range cases {
+		err := validateCNI(c.cfg)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("validateCNI(%+v) = %v, want accepted", c.cfg, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("validateCNI(%+v) = %v, want error containing %q", c.cfg, err, c.want)
+		}
+	}
+}
+
+func TestExtractCNIPluginsRefusesUnexpectedMembers(t *testing.T) {
+	m := NewManager()
+	for _, member := range []string{"bridge", "../bridge", "./bridge; reboot", "./a b", "./$(id)", ""} {
+		err := m.extractCNIPlugins("node", "/nonexistent.tgz", member)
+		if err == nil || !strings.Contains(err.Error(), "refusing CNI plugin archive member") {
+			t.Errorf("member %q: err = %v, want refusal before any exec", member, err)
+		}
+	}
+	if !cniPluginMember.MatchString("./bridge") || !cniPluginMember.MatchString("./host-local") {
+		t.Fatal("legitimate members must pass the guard")
+	}
+	for _, member := range flannelDelegatePlugins {
+		if !cniPluginMember.MatchString(member) {
+			t.Fatalf("flannel delegate %q would be refused by the guard", member)
+		}
 	}
 }
