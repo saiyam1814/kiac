@@ -218,6 +218,10 @@ func (c *supportCollector) collectNodes(rt runtime.NodeBackend, infos []runtime.
 		out, err := rt.Logs(info.Name, timeout)
 		c.addCommand(base+"console.log", "runtime logs "+info.Name, out, err, false)
 
+		edgeProxyLogs := []string{"journalctl", "--no-pager", "-n", "500", "-u", "kiac-edge-proxy"}
+		if distro == "k3s" && info.Backend != runtime.BackendKrunkit {
+			edgeProxyLogs = []string{"sh", "-c", "tail -500 " + edgeProxyLogPath + " 2>/dev/null || true"}
+		}
 		commands := []struct {
 			file string
 			args []string
@@ -225,7 +229,7 @@ func (c *supportCollector) collectNodes(rt runtime.NodeBackend, infos []runtime.
 			{"resources.txt", []string{"sh", "-c", "df -h; printf '\\n'; free -h 2>/dev/null || true"}},
 			{"network.txt", []string{"sh", "-c", "ip -brief address; printf '\\nIPv4 routes:\\n'; ip route; printf '\\nIPv6 routes:\\n'; ip -6 route 2>/dev/null || true"}},
 			{"containers.txt", []string{"sh", "-c", "crictl ps -a 2>/dev/null || ctr -n k8s.io containers list 2>/dev/null || true"}},
-			{"edge-proxy.log", []string{"sh", "-c", "tail -500 " + edgeProxyLogPath + " 2>/dev/null || true"}},
+			{"edge-proxy.log", edgeProxyLogs},
 		}
 		if info.GPU || isGPUNode(info.Name) {
 			commands = append(commands, struct {

@@ -43,6 +43,72 @@ func TestResolveK3sImage(t *testing.T) {
 	}
 }
 
+func TestResolveK3sImageFullRelease(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "v1.36.4+k3s1", want: k3sImages["1.36"]},
+		{in: "v1.36.4-k3s1", want: k3sImages["1.36"]},
+		{in: "1.36.4+k3s1", want: k3sImages["1.36"]},
+		{in: "1.36.4-k3s1", want: k3sImages["1.36"]},
+		{in: " \tv1.36.4+k3s1\n", want: k3sImages["1.36"]},
+		{in: "v1.36.4+k3s2", want: "docker.io/rancher/k3s:v1.36.4-k3s2"},
+		{in: "v1.36.4-k3s2", want: "docker.io/rancher/k3s:v1.36.4-k3s2"},
+		{in: "v1.36.4+k3s10", want: "docker.io/rancher/k3s:v1.36.4-k3s10"},
+		{in: "v1.36.4-k3s10", want: "docker.io/rancher/k3s:v1.36.4-k3s10"},
+		{in: "v1.36.3+k3s1", want: "docker.io/rancher/k3s:v1.36.3-k3s1"},
+		{in: "v1.36.3-k3s2", want: "docker.io/rancher/k3s:v1.36.3-k3s2"},
+		{in: "v1.19.1+k3s2", want: "docker.io/rancher/k3s:v1.19.1-k3s2"},
+		{in: "v1.36.4", want: k3sImages["1.36"]},
+		{in: "v1.36.3", want: "docker.io/rancher/k3s:v1.36.3-k3s1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := ResolveK3sImage(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("ResolveK3sImage(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveK3sImageRejectsMalformedVersions(t *testing.T) {
+	for _, version := range []string{
+		"",
+		"latest",
+		"v1.36+k3s1",
+		"v1.36-k3s1",
+		"v1.36.4+k3s",
+		"v1.36.4-k3s",
+		"v1.36.4+k3sx",
+		"v1.36.4-k3s-1",
+		"v1.36.4-k3s1-k3s1",
+		"v1.36.4+k3s1+k3s2",
+		"v1.36.4+k3s1-k3s1",
+		"v1.36.4-k3s1+extra",
+		"v1.36.4+other1",
+		"v1.36.4-rc1+k3s1",
+		"v1.36.x+k3s1",
+		"v1.x.4-k3s1",
+		"vX.36.4",
+		"1..4",
+		"1.36.",
+		"v1.36.4.1",
+		"v1.36.4-k3s1@sha256:abc",
+		"v1.36.4 -k3s1",
+	} {
+		t.Run(version, func(t *testing.T) {
+			if got, err := ResolveK3sImage(version); err == nil {
+				t.Errorf("ResolveK3sImage(%q) = %q, want an error", version, got)
+			}
+		})
+	}
+}
+
 // Every pinned k3s image must be fully pinned: registry-qualified,
 // digest-pinned, and a real k3s tag.
 func TestK3sImagePins(t *testing.T) {

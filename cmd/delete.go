@@ -18,6 +18,7 @@ var deleteCmd = &cobra.Command{
 var deleteClusterCmd = &cobra.Command{
 	Use:   "cluster",
 	Short: "Delete a cluster and its kubeconfig entries",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
 		if !cluster.ValidName(deleteName) {

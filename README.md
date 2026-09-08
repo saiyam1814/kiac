@@ -291,6 +291,8 @@ One honest caveat is tracked upstream in apple/container's vmnet layer: after `k
 
 Full guides and command reference live on the [docs site](https://saiyam1814.github.io/kiac/).
 
+`create cluster`, `delete cluster`, `get clusters`, and `get nodes` reject extra positional arguments. Select a cluster with `--name` where supported, for example `kiac delete cluster --name dev`, rather than `kiac delete cluster dev`. Creation requires a positive `--wait` duration. K3s also accepts full release versions such as `v1.36.4+k3s1` or `v1.36.4-k3s1`, preserving an explicit K3s build revision.
+
 ### Flags for `create cluster`
 
 | Flag | Default | Description |
@@ -319,7 +321,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--observability` | `false` | install Prometheus + Grafana + node-exporter; Grafana uses a LoadBalancer IP or ClusterIP with `--no-lb` |
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--kernel` is flag-only) |
-| `--wait` | `5m` | timeout for each readiness step, including CNI installation |
+| `--wait` | `5m` | positive timeout for each readiness step, including CNI installation; zero and negative values are rejected |
 
 ## How it works
 
@@ -328,6 +330,8 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 </p>
 
 For ordinary clusters, Kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins workers over the `vmnet` network, and installs the selected CNI and addons. With `--distro k3s`, the VMs run `rancher/k3s` as PID 1 instead. `--kernel full` boots apple/container nodes on a published kernel build with the features overlay and eBPF CNIs need.
+
+On systemd-backed nodes, `kiac resume cluster` repairs stale edge-proxy API credentials without replacing the tunnel token. Healthy proxies with current credentials stay running; interrupted updates remain retryable. Support bundles collect these proxies' journald logs, while ordinary K3s proxies keep their file-based logs.
 
 GPU mode is deliberately opt-in. When `--gpu-workers` is nonzero, Kiac builds the complete cluster on krunkit and vmnet-helper so control-plane, ordinary-worker, and GPU-worker traffic stays on one reliable VM network. Only `-gpu-N` workers expose `/dev/dri` to selected pods and publish `kiac.dev/gpu`, through either a device plugin or Kubernetes DRA. The same cluster manager owns inventory, delete, stop/start, resume, networking, storage, LoadBalancer, Gateway, observability, verify, and support operations across both backends. Neither mode touches the Docker socket, so Kiac coexists with Docker Desktop, Rancher Desktop, kind, and k3d.
 
