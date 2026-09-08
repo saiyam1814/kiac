@@ -24,6 +24,7 @@ var getClustersCmd = &cobra.Command{
 	Use:     "clusters",
 	Aliases: []string{"cluster"},
 	Short:   "List kiac clusters",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		statuses, err := cluster.NewManager().Statuses()
 		if err != nil {
@@ -66,6 +67,7 @@ var getClustersCmd = &cobra.Command{
 var getNodesCmd = &cobra.Command{
 	Use:   "nodes",
 	Short: "List node VMs of a cluster",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		infos, err := cluster.NewManager().Nodes(getNodesName)
 		if err != nil {

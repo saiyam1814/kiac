@@ -134,6 +134,9 @@ func (fc *FileConfig) Merge(cfg *Config, distro, k8sVersion *string, changed fun
 		if err != nil {
 			return fmt.Errorf("invalid wait %q in config file (want a duration like 5m): %w", fc.Wait, err)
 		}
+		if d <= 0 {
+			return fmt.Errorf("invalid wait %q in config file (must be > 0)", fc.Wait)
+		}
 		cfg.WaitTimeout = d
 	}
 	if fc.Addons.Metrics != nil && !changed("no-metrics") {
