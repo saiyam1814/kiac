@@ -454,7 +454,7 @@ func (m *Manager) verifyNodeAddons(report *VerificationReport, infos []runtime.I
 	} else if len(missing) > 0 || len(unhealthy) > 0 {
 		report.add(VerificationFail, "network.edge-proxy", "edge proxy",
 			joinProblems(problem("missing", missing), problem("process/rules unhealthy", unhealthy)),
-			"inspect /var/log/kiac-edge-proxy.log on the affected node")
+			"inspect journalctl -u kiac-edge-proxy on systemd nodes, or /var/log/kiac-edge-proxy.log on ordinary K3s nodes")
 	} else {
 		report.add(VerificationPass, "network.edge-proxy", "edge proxy",
 			fmt.Sprintf("process and redirect rules healthy on %d node(s)", len(installed)), "")

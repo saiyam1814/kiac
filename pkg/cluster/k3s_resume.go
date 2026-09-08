@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -479,8 +481,20 @@ func (m *Manager) ensureK3sSystemdService(node string, restart bool) error {
 func (m *Manager) healEdgeProxySystemd(cp, name, sourceKubeconfig string, nodes []string) error {
 	installed := make([]string, 0, len(nodes))
 	for _, node := range nodes {
-		if _, err := m.rt.Exec(node, "sh", "-c", "test -x "+edgeProxyNodePath+" -a -f "+edgeProxyKubeconfigPath+" -a -f "+edgeProxyTokenPath); err == nil {
+		out, err := m.rt.Exec(node, "sh", "-euc", `if [ -x `+edgeProxyNodePath+` ] && [ -f `+edgeProxyKubeconfigPath+` ] && [ -f `+edgeProxyTokenPath+` ]; then
+  printf 'installed\n'
+else
+  printf 'absent\n'
+fi`)
+		if err != nil {
+			return fmt.Errorf("checking edge proxy installation on %s: %w", node, err)
+		}
+		switch strings.TrimSpace(out) {
+		case "installed":
 			installed = append(installed, node)
+		case "absent":
+		default:
+			return fmt.Errorf("checking edge proxy installation on %s: unexpected response", node)
 		}
 	}
 	if len(installed) == 0 {
@@ -490,17 +504,52 @@ func (m *Manager) healEdgeProxySystemd(cp, name, sourceKubeconfig string, nodes 
 	if err != nil {
 		return err
 	}
+	wantDigest := fmt.Sprintf("%x", sha256.Sum256([]byte(kubeconfig)))
+	restartMarker := edgeProxyKubeconfigPath + ".restart-required"
 	if err := inParallel(len(installed), func(i int) error {
 		node := installed[i]
-		if err := m.rt.ExecStdin(node, strings.NewReader(kubeconfig), "sh", "-euc", `
+		out, err := m.rt.Exec(node, "sh", "-euc", `
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/bin/aux:$PATH"
+IPT="$(command -v iptables-legacy || command -v iptables)"
+digest="$(sha256sum `+edgeProxyKubeconfigPath+`)"
+printf '%s\n' "${digest%% *}"
+if [ ! -f `+restartMarker+` ] &&
+   systemctl is-active --quiet kiac-edge-proxy.service &&
+   "$IPT" -w -t nat -C PREROUTING -j KIAC-EDGE 2>/dev/null &&
+   "$IPT" -w -t nat -C OUTPUT -j KIAC-EDGE-OUTPUT 2>/dev/null; then
+  printf 'healthy\n'
+else
+  printf 'restart\n'
+fi`)
+		if err != nil {
+			return fmt.Errorf("checking edge proxy state on %s: %w", node, err)
+		}
+		fields := strings.Fields(out)
+		if len(fields) != 2 || (fields[1] != "healthy" && fields[1] != "restart") {
+			return fmt.Errorf("checking edge proxy state on %s: unexpected response", node)
+		}
+		digest, err := hex.DecodeString(fields[0])
+		if err != nil || len(digest) != sha256.Size {
+			return fmt.Errorf("checking edge proxy state on %s: invalid digest", node)
+		}
+		changed := !strings.EqualFold(fields[0], wantDigest)
+		if !changed && fields[1] == "healthy" {
+			return nil
+		}
+		if changed {
+			if err := m.rt.ExecStdin(node, strings.NewReader(kubeconfig), "sh", "-euc", `
+umask 077
 tmp="$(mktemp `+edgeProxyKubeconfigPath+`.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
 cat > "$tmp"
 chmod 0600 "$tmp"
+touch `+restartMarker+`
 mv "$tmp" `+edgeProxyKubeconfigPath+`
 `); err != nil {
-			return err
+				return err
+			}
 		}
-		_, err := m.rt.Exec(node, "systemctl", "restart", "kiac-edge-proxy.service")
+		_, err = m.rt.Exec(node, "sh", "-euc", "systemctl restart kiac-edge-proxy.service\nrm -f "+restartMarker)
 		return err
 	}); err != nil {
 		return err
