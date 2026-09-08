@@ -91,11 +91,35 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 	})
 }
 
+// flannelRolloutGrace is how long past --wait the outer container exec
+// may live. kubectl enforces --timeout itself and normally exits first
+// with its own message; the grace only covers its startup (discovery,
+// REST mapping) so a rollout that completes right at the budget is not
+// cut off, while a wedged exec is still bounded instead of hanging.
+const flannelRolloutGrace = time.Second
+
+// flannelDiagnosticBudget bounds the whole post-timeout diagnostic pass
+// (pod list, events, logs). It is separate from and much smaller than
+// the rollout budget: --wait has already been spent by the time it
+// runs, and a wedged API server must not turn a failed rollout into a
+// hang. A var so tests can shrink it.
+var flannelDiagnosticBudget = 10 * time.Second
+
+// execFunc is the shape of runtime.Client.ExecTimeout: a bounded command
+// inside a node, returning combined output even on failure.
+type execFunc func(name string, timeout time.Duration, command ...string) (string, error)
+
 // waitFlannelReady blocks until the kube-flannel DaemonSet is rolled
 // out on every node, honoring the configured wait timeout. On timeout
-// the error carries the pod list and recent logs, so a failure names
-// the crashing pod instead of just "timed out".
+// the error carries the pod list, recent events, and container logs,
+// so a failure names the crashing pod instead of just "timed out".
 func (m *Manager) waitFlannelReady(cp string, timeout time.Duration) error {
+	return waitFlannelRollout(cp, timeout, m.rt.ExecTimeout)
+}
+
+// waitFlannelRollout is waitFlannelReady with the bounded exec injected,
+// so the timing contract can be tested without a node VM.
+func waitFlannelRollout(cp string, timeout time.Duration, exec execFunc) error {
 	// `kubectl rollout status --timeout=0s` waits forever, the opposite
 	// of what --wait 0 means everywhere else in kiac (return without
 	// blocking). Skip the bounded wait when no positive budget is given;
@@ -108,17 +132,77 @@ func (m *Manager) waitFlannelReady(cp string, timeout time.Duration) error {
 	if seconds < 1 {
 		seconds = 1
 	}
-	_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+	// Three nested bounds, innermost first: --request-timeout caps any
+	// single API call, --timeout caps the rollout wait, and the outer
+	// exec deadline caps the `container exec` itself so a wedged exec
+	// session cannot outlive --wait.
+	_, err := exec(cp, timeout+flannelRolloutGrace, "kubectl", "--kubeconfig", adminConf,
+		fmt.Sprintf("--request-timeout=%ds", seconds),
 		"-n", "kube-flannel", "rollout", "status", "daemonset/kube-flannel-ds",
 		fmt.Sprintf("--timeout=%ds", seconds))
 	if err == nil {
 		return nil
 	}
-	diag, diagErr := m.rt.Exec(cp, "sh", "-c",
-		"kubectl --kubeconfig "+adminConf+" -n kube-flannel get pods -o wide; "+
-			"kubectl --kubeconfig "+adminConf+" -n kube-flannel logs daemonset/kube-flannel-ds --tail=20 --prefix 2>/dev/null")
-	if diagErr != nil || strings.TrimSpace(diag) == "" {
+	diag := flannelDiagnostics(cp, exec)
+	if diag == "" {
 		return fmt.Errorf("flannel did not become ready within %s: %w", timeout, err)
 	}
-	return fmt.Errorf("flannel did not become ready within %s: %w\n%s", timeout, err, strings.TrimSpace(diag))
+	return fmt.Errorf("flannel did not become ready within %s: %w\n%s", timeout, err, diag)
+}
+
+// flannelDiagnostics gathers what a failed rollout needs to be diagnosed
+// before create tears the cluster down: the pod list (whose STATUS
+// column names init-container failures such as Init:ImagePullBackOff),
+// recent namespace events (which carry the pull or crash reason), and
+// the tail of every container's logs, init containers included. Each
+// command is bounded separately under one shared budget, and whatever
+// output a command produced is kept even when it fails, so a broken
+// logs request cannot discard a pod listing that already explains the
+// failure.
+func flannelDiagnostics(cp string, exec execFunc) string {
+	kubectl := func(requestTimeout time.Duration, args ...string) []string {
+		return append([]string{"kubectl", "--kubeconfig", adminConf,
+			fmt.Sprintf("--request-timeout=%ds", max(1, int(requestTimeout.Seconds()))),
+			"-n", "kube-flannel"}, args...)
+	}
+	sections := []struct {
+		label string
+		tail  int // trailing lines to keep; 0 keeps everything
+		args  []string
+	}{
+		{"pods", 0, []string{"get", "pods", "-o", "wide"}},
+		{"recent events", 20, []string{"get", "events", "--sort-by=.lastTimestamp"}},
+		{"logs", 0, []string{"logs", "-l", "app=flannel", "--all-containers", "--prefix", "--ignore-errors", "--tail=10"}},
+	}
+	deadline := time.Now().Add(flannelDiagnosticBudget)
+	var out []string
+	for _, section := range sections {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			out = append(out, fmt.Sprintf("%s: skipped, diagnostic budget of %s exhausted", section.label, flannelDiagnosticBudget))
+			continue
+		}
+		text, err := exec(cp, remaining, kubectl(remaining, section.args...)...)
+		text = strings.TrimSpace(text)
+		if section.tail > 0 {
+			text = lastLines(text, section.tail)
+		}
+		switch {
+		case text != "":
+			out = append(out, section.label+":\n"+text)
+		case err != nil:
+			out = append(out, section.label+": "+diagnosticError(err))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// lastLines keeps the trailing n lines of s, so a long listing stays
+// readable inside an error message.
+func lastLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }

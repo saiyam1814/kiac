@@ -1,9 +1,15 @@
 package cluster
 
 import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
 func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
@@ -100,5 +106,227 @@ func TestInstallCNIErrorsNameFlannel(t *testing.T) {
 	}
 	if err := m.installCNI("cp", Config{CNI: "wat"}); err == nil || !strings.Contains(err.Error(), "flannel") {
 		t.Fatalf("unknown-CNI error should list flannel as supported, got: %v", err)
+	}
+}
+
+// fakeFlannelContainer stands in for the `container` CLI. Every call is
+// `exec <node> kubectl ...`, so the script dispatches on the kubectl
+// subcommand; the test controls each branch through environment
+// variables that exec.Command inherits from the test process.
+func fakeFlannelContainer(t *testing.T) *Manager {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "container")
+	script := `#!/bin/sh
+case "$*" in
+  *"rollout status"*)
+    sleep "${KIAC_TEST_ROLLOUT_SLEEP:-0}"
+    [ -n "${KIAC_TEST_ROLLOUT_FAIL:-}" ] && { echo "error: timed out waiting for the condition" >&2; exit 1; }
+    echo "daemon set \"kube-flannel-ds\" successfully rolled out"
+    ;;
+  *"get pods"*)
+    sleep "${KIAC_TEST_PODS_SLEEP:-0}"
+    printf 'NAME                    READY   STATUS                  RESTARTS   AGE   NODE\n'
+    printf 'kube-flannel-ds-abc12   0/1     Init:ImagePullBackOff   0          90s   kiac-x-worker-2\n'
+    ;;
+  *"get events"*)
+    sleep "${KIAC_TEST_EVENTS_SLEEP:-0}"
+    [ -n "${KIAC_TEST_EVENTS_FAIL:-}" ] && exit 1
+    printf 'LAST SEEN   TYPE      REASON   OBJECT                      MESSAGE\n'
+    printf '10s         Warning   Failed   pod/kube-flannel-ds-abc12   Failed to pull image "ghcr.io/flannel-io/flannel-cni-plugin:v1.8.0-flannel1"\n'
+    ;;
+  *" logs "*)
+    sleep "${KIAC_TEST_LOGS_SLEEP:-0}"
+    [ -n "${KIAC_TEST_LOGS_FAIL:-}" ] && { echo "[pod/kube-flannel-ds-abc12/install-cni] partial line before failure"; exit 1; }
+    printf '[pod/kube-flannel-ds-abc12/kube-flannel] E0908 vxlan device already exists\n'
+    ;;
+  *)
+    printf 'unexpected command: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"KIAC_TEST_ROLLOUT_SLEEP", "KIAC_TEST_ROLLOUT_FAIL", "KIAC_TEST_PODS_SLEEP",
+		"KIAC_TEST_EVENTS_SLEEP", "KIAC_TEST_EVENTS_FAIL", "KIAC_TEST_LOGS_SLEEP", "KIAC_TEST_LOGS_FAIL"} {
+		t.Setenv(v, "")
+	}
+	return &Manager{rt: &runtime.Client{Bin: bin}}
+}
+
+func TestWaitFlannelReadyBoundsStuckRollout(t *testing.T) {
+	// kubectl's own --timeout cannot bound a wedged `container exec`.
+	// A rollout that (as far as the host can see) hangs well past --wait
+	// must be killed by the outer deadline and reported as a failure,
+	// not silently waited out and then reported as success.
+	m := fakeFlannelContainer(t)
+	t.Setenv("KIAC_TEST_ROLLOUT_SLEEP", "10")
+	wait := time.Second
+	started := time.Now()
+	err := m.waitFlannelReady("kiac-x-control-plane", wait)
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("waitFlannelReady returned success for a rollout exec stuck well past --wait")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the outer exec deadline", err)
+	}
+	if elapsed < wait || elapsed > wait+flannelRolloutGrace+2*time.Second {
+		t.Fatalf("waitFlannelReady returned after %s, want about %s (+grace %s)", elapsed, wait, flannelRolloutGrace)
+	}
+	for _, want := range []string{"did not become ready within 1s", "Init:ImagePullBackOff", "Failed to pull image", "vxlan device already exists"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
+}
+
+func TestWaitFlannelReadyBoundsDiagnostics(t *testing.T) {
+	// The diagnostic pass has its own small budget: a wedged API server
+	// after a failed rollout must not turn the failure into a hang, and
+	// the pod listing gathered before the budget ran out must survive.
+	saved := flannelDiagnosticBudget
+	flannelDiagnosticBudget = 500 * time.Millisecond
+	defer func() { flannelDiagnosticBudget = saved }()
+
+	m := fakeFlannelContainer(t)
+	t.Setenv("KIAC_TEST_ROLLOUT_FAIL", "1")
+	t.Setenv("KIAC_TEST_EVENTS_SLEEP", "10")
+	t.Setenv("KIAC_TEST_LOGS_SLEEP", "10")
+	started := time.Now()
+	err := m.waitFlannelReady("kiac-x-control-plane", time.Second)
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("waitFlannelReady returned success for a failed rollout")
+	}
+	if elapsed > flannelDiagnosticBudget+2*time.Second {
+		t.Fatalf("diagnostics took %s, want them bounded by %s", elapsed, flannelDiagnosticBudget)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "Init:ImagePullBackOff") {
+		t.Errorf("pod listing gathered before the budget ran out was lost:\n%s", msg)
+	}
+	if !strings.Contains(msg, "events: failed") && !strings.Contains(msg, "events: skipped") {
+		t.Errorf("stuck events request is not reported as bounded:\n%s", msg)
+	}
+	if !strings.Contains(msg, "logs: skipped") && !strings.Contains(msg, "logs: failed") {
+		t.Errorf("logs after an exhausted budget are not reported as skipped:\n%s", msg)
+	}
+	if strings.Contains(msg, "vxlan device already exists") {
+		t.Errorf("logs were fetched after the diagnostic budget was spent:\n%s", msg)
+	}
+}
+
+func TestWaitFlannelReadyPreservesPartialDiagnostics(t *testing.T) {
+	// A successful pod listing followed by a failing logs request used to
+	// discard everything, because the shell chain's status was the last
+	// command's. Each diagnostic now stands on its own: the listing (with
+	// its init-container state) is kept, and whatever a failing command
+	// printed before it died is kept too.
+	m := fakeFlannelContainer(t)
+	t.Setenv("KIAC_TEST_ROLLOUT_FAIL", "1")
+	t.Setenv("KIAC_TEST_EVENTS_FAIL", "1")
+	t.Setenv("KIAC_TEST_LOGS_FAIL", "1")
+	err := m.waitFlannelReady("kiac-x-control-plane", time.Second)
+	if err == nil {
+		t.Fatal("waitFlannelReady returned success for a failed rollout")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"did not become ready within 1s",
+		"Init:ImagePullBackOff",
+		"partial line before failure",
+		"events: failed",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error lacks %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestWaitFlannelReadySucceedsWithoutDiagnostics(t *testing.T) {
+	m := fakeFlannelContainer(t)
+	if err := m.waitFlannelReady("kiac-x-control-plane", time.Second); err != nil {
+		t.Fatalf("waitFlannelReady on a rolled-out DaemonSet = %v, want nil", err)
+	}
+}
+
+type flannelExecCall struct {
+	timeout time.Duration
+	args    []string
+}
+
+func TestWaitFlannelReadyBoundsEveryCommand(t *testing.T) {
+	// Every command the wait issues carries all three bounds: an outer
+	// exec deadline, kubectl's --request-timeout for single API calls,
+	// and (for the rollout) kubectl's own --timeout equal to --wait.
+	var calls []flannelExecCall
+	exec := func(name string, timeout time.Duration, command ...string) (string, error) {
+		calls = append(calls, flannelExecCall{timeout, command})
+		if name != "kiac-x-control-plane" {
+			t.Fatalf("command went to %q", name)
+		}
+		if strings.Contains(strings.Join(command, " "), "rollout status") {
+			return "", errors.New("timed out")
+		}
+		return "", nil
+	}
+	wait := 90 * time.Second
+	if err := waitFlannelRollout("kiac-x-control-plane", wait, exec); err == nil {
+		t.Fatal("want an error for a timed-out rollout")
+	}
+	if len(calls) != 4 {
+		t.Fatalf("got %d commands, want rollout + 3 diagnostics: %+v", len(calls), calls)
+	}
+	rollout := calls[0]
+	if rollout.timeout != wait+flannelRolloutGrace {
+		t.Errorf("rollout exec bound = %s, want --wait %s + grace %s", rollout.timeout, wait, flannelRolloutGrace)
+	}
+	joined := strings.Join(rollout.args, " ")
+	for _, want := range []string{"--request-timeout=90s", "--timeout=90s", "rollout status daemonset/kube-flannel-ds"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("rollout command lacks %q: %s", want, joined)
+		}
+	}
+	for _, c := range calls[1:] {
+		if c.timeout <= 0 || c.timeout > flannelDiagnosticBudget {
+			t.Errorf("diagnostic exec bound = %s, want within (0, %s]", c.timeout, flannelDiagnosticBudget)
+		}
+		if !strings.Contains(strings.Join(c.args, " "), "--request-timeout=") {
+			t.Errorf("diagnostic command has no --request-timeout: %v", c.args)
+		}
+	}
+	logs := strings.Join(calls[3].args, " ")
+	for _, want := range []string{"logs", "--all-containers", "--ignore-errors", "-l app=flannel"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("logs diagnostic lacks %q (init-container logs would be missed): %s", want, logs)
+		}
+	}
+}
+
+func TestWaitFlannelReadyFloorsSubSecondBudget(t *testing.T) {
+	var rollout []string
+	exec := func(_ string, _ time.Duration, command ...string) (string, error) {
+		if rollout == nil {
+			rollout = command
+		}
+		return "", nil
+	}
+	if err := waitFlannelRollout("cp", 200*time.Millisecond, exec); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(rollout, " ")
+	if !strings.Contains(joined, "--timeout=1s") || !strings.Contains(joined, "--request-timeout=1s") {
+		t.Fatalf("sub-second --wait must floor kubectl budgets at 1s, got: %s", joined)
+	}
+}
+
+func TestLastLines(t *testing.T) {
+	if got := lastLines("a\nb\nc", 2); got != "b\nc" {
+		t.Fatalf("lastLines = %q", got)
+	}
+	if got := lastLines("a\nb", 5); got != "a\nb" {
+		t.Fatalf("lastLines short input = %q", got)
 	}
 }

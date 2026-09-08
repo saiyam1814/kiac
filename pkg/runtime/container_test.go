@@ -36,6 +36,24 @@ func TestParseListShapes(t *testing.T) {
 	}
 }
 
+func TestExecTimeoutOutlivesChildHoldingPipe(t *testing.T) {
+	// The deadline kills the CLI process, not a child it spawned. A child
+	// that inherited the output pipe would otherwise keep CombinedOutput
+	// blocked until it exited on its own, silently defeating the bound.
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 5\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err := (&Client{Bin: bin}).ExecTimeout("node", 50*time.Millisecond, "true")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecTimeout error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > pipeWaitDelay+time.Second {
+		t.Fatalf("ExecTimeout took %s with a child holding the pipe, want about %s", elapsed, pipeWaitDelay)
+	}
+}
+
 func TestExecTimeout(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "container")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {

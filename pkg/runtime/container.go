@@ -55,8 +55,17 @@ func (c *Client) run(args ...string) (string, error) {
 	return c.runContext(context.Background(), args...)
 }
 
+// pipeWaitDelay bounds how long a bounded command may hold its output
+// pipes open after its deadline killed it. Killing the CLI does not kill
+// a helper child it spawned; without this, Wait would block on the
+// child's copy of the pipe and the deadline would be defeated.
+const pipeWaitDelay = 500 * time.Millisecond
+
 func (c *Client) runContext(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.Bin, args...)
+	if _, bounded := ctx.Deadline(); bounded {
+		cmd.WaitDelay = pipeWaitDelay
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
