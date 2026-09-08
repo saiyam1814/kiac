@@ -170,6 +170,12 @@ func (m *Manager) Resume(name string, waitTimeout time.Duration) error {
 		return err
 	}
 
+	if err := ui.Step("Healing edge proxy", func() error {
+		return m.healEdgeProxySystemd(cp, name, adminConf, nodes)
+	}); err != nil {
+		return err
+	}
+
 	// Not fatal: a --cni none cluster never reports Ready, and a slow
 	// machine may just need longer; the VMs and the apiserver are up.
 	if err := ui.Step("Waiting for nodes to be Ready", func() error {
