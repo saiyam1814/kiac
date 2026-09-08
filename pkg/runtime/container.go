@@ -257,18 +257,30 @@ func (c *Client) ExecStdin(name string, r io.Reader, command ...string) error {
 // WaitReady polls until containerd inside the node answers, i.e. the VM
 // finished booting systemd and the kubelet's runtime is up.
 func (c *Client) WaitReady(name string, timeout time.Duration) error {
+	return waitReady(name, timeout, c.ExecTimeout)
+}
+
+func waitReady(name string, timeout time.Duration, probe func(string, time.Duration, ...string) (string, error)) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
-	for time.Now().Before(deadline) {
-		out, err := c.Exec(name, "systemctl", "is-active", "containerd")
+	var lastOutput string
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		out, err := probe(name, min(10*time.Second, remaining), "systemctl", "is-active", "containerd")
 		if err == nil && strings.TrimSpace(out) == "active" {
 			return nil
 		}
-		lastErr = err
-		time.Sleep(2 * time.Second)
+		lastOutput, lastErr = out, err
+		time.Sleep(min(2*time.Second, time.Until(deadline)))
 	}
 	if lastErr != nil {
 		return fmt.Errorf("node %s did not become ready: %w", name, lastErr)
+	}
+	if out := strings.TrimSpace(lastOutput); out != "" {
+		return fmt.Errorf("node %s did not become ready in %s: %s", name, timeout, out)
 	}
 	return fmt.Errorf("node %s did not become ready in %s", name, timeout)
 }

@@ -19,6 +19,7 @@ var createCmd = &cobra.Command{
 var createClusterCmd = &cobra.Command{
 	Use:   "cluster",
 	Short: "Create a Kubernetes cluster of lightweight-VM nodes",
+	Args:  cobra.NoArgs,
 	Example: `  kiac create cluster
   kiac create cluster --name dev --workers 2
   kiac create cluster --memory 8G --cpus 4
@@ -41,6 +42,9 @@ var createClusterCmd = &cobra.Command{
 			if err := fc.Merge(&createCfg, &selectedDistro, &selectedK8sVersion, cmd.Flags().Changed); err != nil {
 				return err
 			}
+		}
+		if createCfg.WaitTimeout <= 0 {
+			return fmt.Errorf("--wait must be > 0")
 		}
 		if createCfg.Workers < 0 {
 			return fmt.Errorf("--workers must be >= 0")
