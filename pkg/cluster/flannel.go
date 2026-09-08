@@ -70,7 +70,7 @@ func (m *Manager) installFlannel(cp string, cfg Config) error {
 	return ui.Step(fmt.Sprintf("Installing CNI (flannel %s)", FlannelVersion), func() error {
 		// Resolve the shared archive once before fanning out, so a cold
 		// cache downloads it a single time instead of once per node.
-		archive, err := ensureCNIPluginsArchive()
+		archive, err := resolveCNIPluginsArchive()
 		if err != nil {
 			return err
 		}

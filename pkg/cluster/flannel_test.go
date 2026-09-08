@@ -444,3 +444,154 @@ func TestExtractCNIPluginsRefusesUnexpectedMembers(t *testing.T) {
 		}
 	}
 }
+
+// fakeFlannelInstallContainer stands in for `container` across the whole
+// flannel install: bridge extraction on every node (ExecStdin), the
+// manifest apply (ExecStdin, stdin saved to KIAC_TEST_MANIFEST), and the
+// rollout wait. Every command line is appended to KIAC_TEST_LOG.
+func fakeFlannelInstallContainer(t *testing.T) (*Manager, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	log := filepath.Join(dir, "commands.log")
+	manifest := filepath.Join(dir, "applied.yaml")
+	script := `#!/bin/sh
+echo "$*" >> "$KIAC_TEST_LOG"
+case "$*" in
+  *"tar -xz -C /opt/cni/bin"*)
+    cat > /dev/null
+    if [ -n "${KIAC_TEST_FAIL_NODE:-}" ] && [ "$3" = "${KIAC_TEST_FAIL_NODE}" ]; then
+      echo "tar: ./bridge: Not found in archive" >&2
+      exit 2
+    fi
+    ;;
+  *"apply -f -"*)
+    cat > "$KIAC_TEST_MANIFEST"
+    echo "namespace/kube-flannel created"
+    ;;
+  *"rollout status"*)
+    echo 'daemon set "kube-flannel-ds" successfully rolled out'
+    ;;
+  *)
+    printf 'unexpected command: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIAC_TEST_LOG", log)
+	t.Setenv("KIAC_TEST_MANIFEST", manifest)
+	t.Setenv("KIAC_TEST_FAIL_NODE", "")
+	archive := filepath.Join(dir, "cni-plugins.tgz")
+	if err := os.WriteFile(archive, []byte("not really a tarball"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	saved := resolveCNIPluginsArchive
+	resolveCNIPluginsArchive = func() (string, error) { return archive, nil }
+	t.Cleanup(func() { resolveCNIPluginsArchive = saved })
+	return &Manager{rt: &runtime.Client{Bin: bin}}, log, manifest
+}
+
+func readLogLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+func TestInstallFlannelStreamsBridgeAndAppliesPatchedManifest(t *testing.T) {
+	m, log, manifest := fakeFlannelInstallContainer(t)
+	cfg := Config{Name: "x", Workers: 2, Kernel: "/kernels/Image", WaitTimeout: time.Second}
+	if err := m.installFlannel("kiac-x-control-plane", cfg); err != nil {
+		t.Fatalf("installFlannel: %v", err)
+	}
+	lines := readLogLines(t, log)
+	var tars, applies, rollouts int
+	lastTar, firstApply := -1, -1
+	for i, line := range lines {
+		switch {
+		case strings.Contains(line, "tar -xz -C /opt/cni/bin"):
+			tars++
+			lastTar = i
+			if !strings.HasSuffix(line, "./bridge") {
+				t.Errorf("extraction must stream only the bridge delegate, got: %s", line)
+			}
+		case strings.Contains(line, "apply -f -"):
+			applies++
+			if firstApply < 0 {
+				firstApply = i
+			}
+		case strings.Contains(line, "rollout status daemonset/kube-flannel-ds"):
+			rollouts++
+		}
+	}
+	if tars != 3 {
+		t.Errorf("bridge extracted on %d nodes, want control plane + 2 workers:\n%s", tars, strings.Join(lines, "\n"))
+	}
+	if applies != 1 || rollouts != 1 {
+		t.Errorf("applies = %d, rollouts = %d, want 1 each:\n%s", applies, rollouts, strings.Join(lines, "\n"))
+	}
+	if firstApply < lastTar {
+		t.Errorf("manifest applied before every node had the bridge plugin:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, node := range []string{"kiac-x-control-plane", "kiac-x-worker-1", "kiac-x-worker-2"} {
+		if !strings.Contains(strings.Join(lines, "\n"), "exec -i "+node+" /bin/sh") {
+			t.Errorf("no extraction on %s", node)
+		}
+	}
+	applied, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatalf("applied manifest was not streamed to kubectl: %v", err)
+	}
+	if !strings.Contains(string(applied), `"Network": "`+kubeadmPodCIDRv4+`"`) {
+		t.Error("applied manifest does not carry the kubeadm pod CIDR")
+	}
+	if !strings.Contains(string(applied), "ghcr.io/flannel-io/flannel:"+FlannelVersion+"@sha256:") {
+		t.Error("applied manifest lost the digest-pinned flannel image")
+	}
+}
+
+func TestInstallFlannelNamesFailingNode(t *testing.T) {
+	// A bridge extraction that fails on one worker must name that node
+	// and stop before the manifest is applied, since flannel pods on
+	// that node would otherwise crash with a missing delegate plugin.
+	m, log, manifest := fakeFlannelInstallContainer(t)
+	t.Setenv("KIAC_TEST_FAIL_NODE", "kiac-x-worker-2")
+	cfg := Config{Name: "x", Workers: 2, Kernel: "/kernels/Image", WaitTimeout: time.Second}
+	err := m.installFlannel("kiac-x-control-plane", cfg)
+	if err == nil {
+		t.Fatal("installFlannel succeeded with a node missing the bridge plugin")
+	}
+	for _, want := range []string{"installing bridge CNI plugin on kiac-x-worker-2", "Not found in archive"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q: %v", want, err)
+		}
+	}
+	if _, statErr := os.Stat(manifest); statErr == nil {
+		t.Error("manifest was applied even though a node lacks the bridge plugin")
+	}
+	for _, line := range readLogLines(t, log) {
+		if strings.Contains(line, "rollout status") {
+			t.Error("rollout wait ran after the extraction failed")
+		}
+	}
+}
+
+func TestInstallFlannelFailsWhenArchiveUnavailable(t *testing.T) {
+	// A missing or corrupt plugin archive (cache tampering, offline
+	// first run) fails before any node is touched.
+	m, log, _ := fakeFlannelInstallContainer(t)
+	resolveCNIPluginsArchive = func() (string, error) { return "", errors.New("cni plugins archive: sha256 mismatch") }
+	cfg := Config{Name: "x", Workers: 1, Kernel: "/kernels/Image", WaitTimeout: time.Second}
+	err := m.installFlannel("kiac-x-control-plane", cfg)
+	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("err = %v, want the archive failure", err)
+	}
+	if lines := readLogLines(t, log); len(lines) != 0 {
+		t.Fatalf("nodes were touched before the archive was verified: %v", lines)
+	}
+}

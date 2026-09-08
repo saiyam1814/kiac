@@ -51,6 +51,11 @@ func (m *Manager) extractCNIPlugins(node, archive string, members ...string) err
 // will pass to tar: a ./-relative plain binary name.
 var cniPluginMember = regexp.MustCompile(`^\./[a-z0-9][a-z0-9._-]*$`)
 
+// resolveCNIPluginsArchive is ensureCNIPluginsArchive behind a var so
+// install paths can be exercised against a fake runtime without the
+// download.
+var resolveCNIPluginsArchive = ensureCNIPluginsArchive
+
 // ensureCNIPluginsArchive returns the local path of the verified CNI
 // plugins archive, downloading it on first use.
 func ensureCNIPluginsArchive() (string, error) {

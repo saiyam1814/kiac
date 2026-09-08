@@ -190,7 +190,7 @@ func k3sAgentRunOpts(cfg Config, nodeName string, env []string, dns []string) ru
 // ptp, the plugin kindnet's conflist is built around (and bridge would
 // reintroduce the br_netfilter breakage kindnet exists to avoid).
 func (m *Manager) ensureK3sCNIPlugins(node string) error {
-	archive, err := ensureCNIPluginsArchive()
+	archive, err := resolveCNIPluginsArchive()
 	if err != nil {
 		return err
 	}

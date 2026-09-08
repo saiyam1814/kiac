@@ -134,7 +134,7 @@ kiac verify cluster --name gpu-lab</code></pre>
   <p>The fixes are literal: add <code>--kernel full</code>, and for Cilium <code>brew install cilium-cli</code>. Flannel needs no host CLI. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
 
   <h2 id="flannel-not-ready">"flannel did not become ready"</h2>
-  <p>The flannel DaemonSet is given the <code>--wait</code> budget to roll out on every node. On timeout the error carries the kube-flannel pod list, recent namespace events, and the tail of every container's logs (init containers included), so it names the failing pod and reason, for example an image pull that never completed. Fix the cause it names and create again.</p>
+  <p>The flannel DaemonSet is given the <code>--wait</code> budget to roll out on every node. On timeout the error carries the kube-flannel pod list, recent namespace events, and the tail of every container's logs (init containers included), so it names the failing pod and reason, for example an image pull that never completed. Fix the cause it names and create again. On a running cluster, <code>kiac verify cluster</code> reports the pod network DaemonSet under <i>pod network</i>, and <code>kiac support</code> bundles its pods and logs.</p>
 
   <h2 id="cni-error">"calico needs kernel features"</h2>
   <pre><code><span class="o">Error: calico needs kernel features the stock node kernel does not enable; use

@@ -198,6 +198,17 @@ func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, repo
 		full := "runtime exec " + cp + " kubectl " + strings.Join(command.args, " ")
 		c.addCommand("kubernetes/"+command.file, full, out, err, command.optional)
 	}
+	// The pod network is the usual suspect behind NotReady nodes and
+	// cross-node traffic failures, so its pods and logs (init containers
+	// included, for image pulls and conflist installs) ride along.
+	if cni, _, found, err := m.detectCNI(cp, distro, timeout); err == nil && found {
+		args := []string{"get", "daemonsets,pods", "-n", cni.namespace, "-l", cni.selector, "-o", "wide"}
+		out, err := m.diagnosticKubectl(cp, distro, timeout, args...)
+		c.addCommand("kubernetes/cni-"+cni.name+".txt", "runtime exec "+cp+" kubectl "+strings.Join(args, " "), out, err, true)
+		args = []string{"logs", "-n", cni.namespace, "daemonset/" + cni.daemonSet, "--all-pods=true", "--all-containers=true", "--tail=500"}
+		out, err = m.diagnosticKubectl(cp, distro, timeout, args...)
+		c.addCommand("kubernetes/cni-"+cni.name+".log", "runtime exec "+cp+" kubectl "+strings.Join(args, " "), out, err, true)
+	}
 	if hasGPU {
 		for _, workload := range []string{"daemonset/kiac-gpu-dra", "daemonset/kiac-gpu-device-plugin", "deployment/" + gpuCompatName} {
 			args := []string{"logs", "-n", "kube-system", workload, "--all-pods=true", "--tail=500"}
