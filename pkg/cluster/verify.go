@@ -805,6 +805,9 @@ type kubeNode struct {
 		Annotations       map[string]string `json:"annotations"`
 		Labels            map[string]string `json:"labels"`
 	} `json:"metadata"`
+	Spec struct {
+		Unschedulable bool `json:"unschedulable"`
+	} `json:"spec"`
 	Status struct {
 		Conditions  []kubeCondition   `json:"conditions"`
 		Capacity    map[string]string `json:"capacity"`

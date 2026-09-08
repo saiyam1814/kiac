@@ -3,9 +3,11 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ const (
 	defaultGPUBenchmarkModelURL  = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/52e7645ba7c309695bec7ac98f4f005b139cf465/" + defaultGPUBenchmarkModelFile
 	gpuBenchmarkImage            = "quay.io/slopezpa/fedora-vgpu-llama@sha256:f58a677fd617e5a6d0b7f558fd137d63a57aaac70293956ef09a16ec69e210d4"
 	gpuBenchmarkPod              = "kiac-gpu-bench"
+	gpuBenchmarkRunLabel         = gpuResourceDomain + "/gpu-bench-run"
 )
 
 // GPUBenchmarkOptions controls the comparable host Metal and pod Venus run.
@@ -33,10 +36,16 @@ type GPUBenchmarkOptions struct {
 type GPUBenchmarkMeasurement struct {
 	Backend                 string  `json:"backend"`
 	Device                  string  `json:"device"`
+	BuildCommit             string  `json:"buildCommit,omitempty"`
+	BuildNumber             int     `json:"buildNumber,omitempty"`
+	Threads                 int     `json:"threads,omitempty"`
+	GPULayers               int     `json:"gpuLayers,omitempty"`
 	PromptTokens            int     `json:"promptTokens"`
 	PromptTokensPerSecond   float64 `json:"promptTokensPerSecond"`
+	PromptStdDev            float64 `json:"promptStdDev,omitempty"`
 	GenerateTokens          int     `json:"generateTokens"`
 	GenerateTokensPerSecond float64 `json:"generateTokensPerSecond"`
+	GenerateStdDev          float64 `json:"generateStdDev,omitempty"`
 }
 
 // GPUBenchmarkReport records the exact artifacts and results used by
@@ -52,9 +61,15 @@ type GPUBenchmarkReport struct {
 }
 
 type llamaBenchRow struct {
-	Prompt int     `json:"n_prompt"`
-	Gen    int     `json:"n_gen"`
-	Avg    float64 `json:"avg_ts"`
+	BuildCommit *string `json:"build_commit"`
+	BuildNumber *int    `json:"build_number"`
+	GPUInfo     *string `json:"gpu_info"`
+	Threads     *int    `json:"n_threads"`
+	GPULayers   *int    `json:"n_gpu_layers"`
+	Prompt      int     `json:"n_prompt"`
+	Gen         int     `json:"n_gen"`
+	Avg         float64 `json:"avg_ts"`
+	StdDev      float64 `json:"stddev_ts"`
 }
 
 // RunGPUBenchmark executes the same small, fixed llama-bench workload on the
@@ -129,9 +144,13 @@ func resolveGPUBenchmarkModel(path string) (string, bool, error) {
 }
 
 func runVenusBenchmark(ctx context.Context, cluster, model string) (measurement GPUBenchmarkMeasurement, retErr error) {
-	contextName := "kiac-" + cluster
+	if err := ctx.Err(); err != nil {
+		return measurement, err
+	}
+	runID := strings.ToLower(rand.Text())
+	contextArgs := []string{"--context", "kiac-" + cluster, "--namespace", "default"}
 	runKubectl := func(stdin []byte, args ...string) (string, string, error) {
-		commandArgs := append([]string{"--context", contextName}, args...)
+		commandArgs := append(append([]string{}, contextArgs...), args...)
 		cmd := exec.CommandContext(ctx, "kubectl", commandArgs...)
 		if stdin != nil {
 			cmd.Stdin = bytes.NewReader(stdin)
@@ -146,30 +165,37 @@ func runVenusBenchmark(ctx context.Context, cluster, model string) (measurement 
 		return stdout.String(), stderr.String(), nil
 	}
 
-	if _, _, err := runKubectl(nil, "delete", "pod", gpuBenchmarkPod, "--ignore-not-found", "--wait=true"); err != nil {
-		return measurement, fmt.Errorf("removing an earlier benchmark pod: %w", err)
-	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(cleanupCtx, "kubectl", "--context", contextName, "delete", "pod", gpuBenchmarkPod, "--ignore-not-found", "--wait=false")
-		if output, err := cmd.CombinedOutput(); err != nil && retErr == nil {
-			retErr = fmt.Errorf("cleaning up benchmark pod: %w: %s", err, strings.TrimSpace(string(output)))
+		args := append(append([]string{}, contextArgs...), "delete", "pods", "-l", gpuBenchmarkRunLabel+"="+runID, "--ignore-not-found", "--wait=false")
+		cmd := exec.CommandContext(cleanupCtx, "kubectl", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("cleaning up benchmark run %s: %w: %s", runID, err, strings.TrimSpace(string(output))))
 		}
 	}()
+	lifetime := int64(20 * 60)
+	if deadline, ok := ctx.Deadline(); ok {
+		lifetime = max(1, int64(math.Ceil(time.Until(deadline).Seconds())))
+	}
+	manifest := gpuBenchmarkPodManifest(runID, lifetime)
+	created, _, err := runKubectl([]byte(manifest), "create", "-f", "-", "-o", "jsonpath={.metadata.name}")
+	if err != nil {
+		return measurement, err
+	}
+	pod := strings.TrimSpace(created)
+	if !strings.HasPrefix(pod, gpuBenchmarkPod+"-") || !ValidName(pod) {
+		return measurement, fmt.Errorf("unexpected benchmark pod name %q", pod)
+	}
 
-	manifest := gpuBenchmarkPodManifest()
-	if _, _, err := runKubectl([]byte(manifest), "apply", "-f", "-"); err != nil {
+	if _, _, err := runKubectl(nil, "wait", "--for=condition=Ready", "pod/"+pod, "--timeout=5m"); err != nil {
 		return measurement, err
 	}
-	if _, _, err := runKubectl(nil, "wait", "--for=condition=Ready", "pod/"+gpuBenchmarkPod, "--timeout=5m"); err != nil {
-		return measurement, err
-	}
-	if _, _, err := runKubectl(nil, "cp", model, "default/"+gpuBenchmarkPod+":"+"/models/"+defaultGPUBenchmarkModelFile); err != nil {
+	if _, _, err := runKubectl(nil, "cp", model, "default/"+pod+":/models/"+defaultGPUBenchmarkModelFile); err != nil {
 		return measurement, err
 	}
 
-	args := []string{"exec", gpuBenchmarkPod, "--", "/usr/bin/llama-bench", "-m", "/models/" + defaultGPUBenchmarkModelFile}
+	args := []string{"exec", pod, "--", "/usr/bin/llama-bench", "-m", "/models/" + defaultGPUBenchmarkModelFile}
 	stdout, stderr, err := runKubectl(nil, append(args, benchmarkArguments()...)...)
 	if err != nil {
 		return measurement, err
@@ -200,7 +226,7 @@ func runLlamaBenchmark(ctx context.Context, binary string, prefix []string, back
 }
 
 func benchmarkArguments() []string {
-	return []string{"-p", "128", "-n", "64", "-r", "3", "-ngl", "99", "-o", "json"}
+	return []string{"-p", "128", "-n", "64", "-r", "3", "-t", "4", "-ngl", "99", "-o", "json"}
 }
 
 func parseLlamaBenchmark(backend, device, raw string) (GPUBenchmarkMeasurement, error) {
@@ -209,15 +235,48 @@ func parseLlamaBenchmark(backend, device, raw string) (GPUBenchmarkMeasurement, 
 		return GPUBenchmarkMeasurement{}, fmt.Errorf("parse %s llama-bench output: %w", backend, err)
 	}
 	result := GPUBenchmarkMeasurement{Backend: backend, Device: device}
+	var metadata llamaBenchRow
 	for _, row := range rows {
-		if row.Prompt > 0 && row.Gen == 0 {
+		switch {
+		case row.Prompt > 0 && row.Gen == 0:
+			if result.PromptTokens != 0 {
+				return GPUBenchmarkMeasurement{}, fmt.Errorf("%s llama-bench output contains multiple prompt measurements", backend)
+			}
 			result.PromptTokens = row.Prompt
 			result.PromptTokensPerSecond = row.Avg
-		}
-		if row.Gen > 0 && row.Prompt == 0 {
+			result.PromptStdDev = row.StdDev
+		case row.Gen > 0 && row.Prompt == 0:
+			if result.GenerateTokens != 0 {
+				return GPUBenchmarkMeasurement{}, fmt.Errorf("%s llama-bench output contains multiple generation measurements", backend)
+			}
 			result.GenerateTokens = row.Gen
 			result.GenerateTokensPerSecond = row.Avg
+			result.GenerateStdDev = row.StdDev
+		default:
+			continue
 		}
+		if !mergeBenchmarkField(&metadata.BuildCommit, row.BuildCommit) ||
+			!mergeBenchmarkField(&metadata.BuildNumber, row.BuildNumber) ||
+			!mergeBenchmarkField(&metadata.GPUInfo, row.GPUInfo) ||
+			!mergeBenchmarkField(&metadata.Threads, row.Threads) ||
+			!mergeBenchmarkField(&metadata.GPULayers, row.GPULayers) {
+			return GPUBenchmarkMeasurement{}, fmt.Errorf("%s llama-bench output contains inconsistent build, device, thread, or GPU-layer metadata", backend)
+		}
+	}
+	if metadata.GPUInfo != nil && *metadata.GPUInfo != "" {
+		result.Device = *metadata.GPUInfo
+	}
+	if metadata.BuildCommit != nil {
+		result.BuildCommit = *metadata.BuildCommit
+	}
+	if metadata.BuildNumber != nil {
+		result.BuildNumber = *metadata.BuildNumber
+	}
+	if metadata.Threads != nil {
+		result.Threads = *metadata.Threads
+	}
+	if metadata.GPULayers != nil {
+		result.GPULayers = *metadata.GPULayers
 	}
 	if result.PromptTokensPerSecond <= 0 || result.GenerateTokensPerSecond <= 0 {
 		return GPUBenchmarkMeasurement{}, fmt.Errorf("%s llama-bench output did not contain prompt and generation results", backend)
@@ -225,28 +284,39 @@ func parseLlamaBenchmark(backend, device, raw string) (GPUBenchmarkMeasurement, 
 	return result, nil
 }
 
+func mergeBenchmarkField[T comparable](current **T, next *T) bool {
+	if next == nil {
+		return true
+	}
+	if *current != nil && **current != *next {
+		return false
+	}
+	*current = next
+	return true
+}
+
 func venusDeviceLine(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		if index := strings.Index(line, "Virtio-GPU Venus"); index >= 0 {
-			device := strings.TrimSpace(line[index:])
-			if end := strings.Index(device, " ("); end > 0 {
-				device = device[:end]
-			}
-			return device
+			device, _, _ := strings.Cut(line[index:], " |")
+			return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(device), " (venus)"))
 		}
 	}
 	return "Virtio-GPU Venus"
 }
 
-func gpuBenchmarkPodManifest() string {
+func gpuBenchmarkPodManifest(runID string, lifetime int64) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
-  name: %s
+  generateName: %s-
+  namespace: default
   labels:
     app.kubernetes.io/name: kiac-gpu-bench
     app.kubernetes.io/part-of: kiac
+    %s: %s
 spec:
+  activeDeadlineSeconds: %d
   restartPolicy: Never
   runtimeClassName: nvidia
   nodeSelector:
@@ -260,7 +330,7 @@ spec:
     - name: bench
       image: %s
       imagePullPolicy: IfNotPresent
-      command: [sh, -c, "sleep 1200"]
+      command: [sh, -c, "sleep %d"]
       env:
         - name: XDG_RUNTIME_DIR
           value: /tmp
@@ -284,5 +354,5 @@ spec:
       emptyDir: {}
     - name: tmp
       emptyDir: {}
-`, gpuBenchmarkPod, gpuBenchmarkImage)
+`, gpuBenchmarkPod, gpuBenchmarkRunLabel, runID, lifetime, gpuBenchmarkImage, lifetime)
 }

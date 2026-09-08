@@ -204,6 +204,8 @@ A GPU cluster uses krunkit for its complete VM topology so every node shares one
 
 This is real Apple GPU access through virtio-gpu/Venus and Vulkan, not CUDA compatibility. Krunkit currently exposes Venus to every VM in a GPU cluster, but Kiac publishes schedulable inventory and mounts `/dev/dri` into allocated workloads only for `-gpu-N` workers. Kiac does not advertise `nvidia.com/gpu`, and CUDA, NVML, `nvidia-smi`, Metal, and MLX are unavailable inside Linux pods. Follow the [complete GPU and inference lab](examples/gpu-lab.md) for DRA memory requests, pinned inference workloads, compatibility rewrites, and a native Metal-versus-Venus benchmark.
 
+`kiac gpu bench` uses four CPU threads for both backends and records the reported llama.cpp build IDs, GPU identity, and timing variability. The host binary is not version-pinned: differing build IDs mean the comparison cannot isolate virtualization overhead. Each run owns a temporary, uniquely labelled pod in the `default` namespace; cleanup does not target another run's pod.
+
 ### Run Portainer CE on kiac
 
 This example installs Portainer Community Edition as an optional application inside a kiac Kubernetes cluster. Portainer is not bundled with kiac and adds nothing to normal cluster startup or idle resource use. Community Edition does not require a license key; Portainer Business Edition does.

@@ -1,6 +1,9 @@
 package cluster
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
 	node := kubeNode{}
@@ -8,6 +11,7 @@ func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
 		gpuResourceDomain + "/gpu.present": "true",
 	}
 	node.Status.Allocatable = map[string]string{gpuResourceName: "1"}
+	node.Status.Conditions = []kubeCondition{{Type: "Ready", Status: "True"}}
 	base := GPUNodeStatus{
 		RenderDevice:  true,
 		KubernetesAPI: "venus",
@@ -48,5 +52,33 @@ func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
 	noCapacity.Status.Allocatable = map[string]string{}
 	if gpuNodeSchedulable("device-plugin", base, noCapacity) {
 		t.Fatal("device-plugin node without allocatable capacity was reported schedulable")
+	}
+}
+
+func TestGPUNodeSchedulableRejectsUnavailableNodes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"cordoned", `{"spec":{"unschedulable":true},"status":{"conditions":[{"type":"Ready","status":"True"}]}}`},
+		{"not ready", `{"status":{"conditions":[{"type":"Ready","status":"False"}]}}`},
+		{"unknown readiness", `{"status":{"conditions":[{"type":"Ready","status":"Unknown"}]}}`},
+		{"missing readiness", `{}`},
+		{"deleting", `{"metadata":{"deletionTimestamp":"2026-09-07T10:00:00Z"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var node kubeNode
+			if err := json.Unmarshal([]byte(tc.raw), &node); err != nil {
+				t.Fatal(err)
+			}
+			node.Metadata.Labels = map[string]string{gpuResourceDomain + "/gpu.present": "true"}
+			node.Status.Allocatable = map[string]string{gpuResourceName: "1"}
+			status := GPUNodeStatus{RenderDevice: true, KubernetesAPI: "venus", DriverReady: true, ResourceSlice: true}
+			for _, driver := range []string{"device-plugin", "dra"} {
+				if gpuNodeSchedulable(driver, status, node) {
+					t.Errorf("%s reported a %s node as schedulable", driver, tc.name)
+				}
+			}
+		})
 	}
 }
