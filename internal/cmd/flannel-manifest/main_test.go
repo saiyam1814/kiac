@@ -57,10 +57,10 @@ func TestPatchPinsEveryImageAndAddsProbesOnce(t *testing.T) {
 		t.Error("cni plugin image not pinned")
 	}
 	for _, want := range []string{
-		"        - --kube-subnet-mgr\n        - --healthz-port=8081\n        command:",
-		"        livenessProbe:\n          httpGet:\n            path: /healthz",
+		"        - --kube-subnet-mgr\n        - --healthz-ip=127.0.0.1\n        - --healthz-port=8081\n        command:",
+		"        livenessProbe:\n          httpGet:\n            host: 127.0.0.1\n            path: /healthz",
 		"        name: kube-flannel\n        ports:\n        - containerPort: 8081",
-		"        readinessProbe:\n          httpGet:\n            path: /readyz",
+		"        readinessProbe:\n          httpGet:\n            host: 127.0.0.1\n            path: /readyz",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("patched manifest lacks:\n%s\n---\n%s", want, out)
@@ -92,7 +92,7 @@ func TestCommittedManifestMatchesPatchShape(t *testing.T) {
 	// that drifts from the tool is caught here rather than at bump time.
 	data, err := os.ReadFile("../../../pkg/cluster/assets/flannel.yaml")
 	if err != nil {
-		t.Skip("committed manifest not found from this directory")
+		t.Fatalf("committed manifest not found from this directory: %v", err)
 	}
 	manifest := string(data)
 	for _, image := range Images(manifest) {

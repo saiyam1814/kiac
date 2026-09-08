@@ -1,16 +1,23 @@
 package cluster
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
+	"gopkg.in/yaml.v3"
 )
 
 func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
@@ -458,8 +465,8 @@ func fakeFlannelInstallContainer(t *testing.T) (*Manager, string, string) {
 	script := `#!/bin/sh
 echo "$*" >> "$KIAC_TEST_LOG"
 case "$*" in
-  *"tar -xz -C /opt/cni/bin"*)
-    cat > /dev/null
+  *"tar -x -C /opt/cni/bin"*)
+    cat > "$KIAC_TEST_LOG.$3.tar"
     if [ -n "${KIAC_TEST_FAIL_NODE:-}" ] && [ "$3" = "${KIAC_TEST_FAIL_NODE}" ]; then
       echo "tar: ./bridge: Not found in archive" >&2
       exit 2
@@ -484,10 +491,7 @@ esac
 	t.Setenv("KIAC_TEST_LOG", log)
 	t.Setenv("KIAC_TEST_MANIFEST", manifest)
 	t.Setenv("KIAC_TEST_FAIL_NODE", "")
-	archive := filepath.Join(dir, "cni-plugins.tgz")
-	if err := os.WriteFile(archive, []byte("not really a tarball"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	archive := writeFakeCNIArchive(t, filepath.Join(dir, "cni-plugins.tgz"), "./bridge", "./ptp", "./host-local")
 	saved := resolveCNIPluginsArchive
 	resolveCNIPluginsArchive = func() (string, error) { return archive, nil }
 	t.Cleanup(func() { resolveCNIPluginsArchive = saved })
@@ -514,11 +518,11 @@ func TestInstallFlannelStreamsBridgeAndAppliesPatchedManifest(t *testing.T) {
 	lastTar, firstApply := -1, -1
 	for i, line := range lines {
 		switch {
-		case strings.Contains(line, "tar -xz -C /opt/cni/bin"):
+		case strings.Contains(line, "tar -x -C /opt/cni/bin"):
 			tars++
 			lastTar = i
-			if !strings.HasSuffix(line, "./bridge") {
-				t.Errorf("extraction must stream only the bridge delegate, got: %s", line)
+			if strings.Contains(line, "./") {
+				t.Errorf("member names must not appear on the node's command line: %s", line)
 			}
 		case strings.Contains(line, "apply -f -"):
 			applies++
@@ -541,6 +545,10 @@ func TestInstallFlannelStreamsBridgeAndAppliesPatchedManifest(t *testing.T) {
 	for _, node := range []string{"kiac-x-control-plane", "kiac-x-worker-1", "kiac-x-worker-2"} {
 		if !strings.Contains(strings.Join(lines, "\n"), "exec -i "+node+" /bin/sh") {
 			t.Errorf("no extraction on %s", node)
+		}
+		// Each node received a tar holding only the bridge delegate.
+		if got := tarMemberNames(t, log+"."+node+".tar"); len(got) != 1 || got[0] != "./bridge" {
+			t.Errorf("%s received members %v, want only ./bridge", node, got)
 		}
 	}
 	applied, err := os.ReadFile(manifest)
@@ -601,6 +609,7 @@ func TestFlannelManifestHasHealthProbes(t *testing.T) {
 	// flanneld that is merely Running. The refresh tool adds upstream's
 	// Documentation-copy probes; the wait only means "healthy" with them.
 	for _, want := range []string{
+		"- --healthz-ip=127.0.0.1",
 		"- --healthz-port=8081",
 		"path: /readyz",
 		"path: /healthz",
@@ -612,5 +621,301 @@ func TestFlannelManifestHasHealthProbes(t *testing.T) {
 	}
 	if strings.Count(flannelManifest, "readinessProbe:") != 1 || strings.Count(flannelManifest, "livenessProbe:") != 1 {
 		t.Error("expected exactly one readiness and one liveness probe (the kube-flannel container)")
+	}
+	// Both probes must dial loopback: kubelet otherwise probes the node
+	// IP, which kube-proxy DNATs to any user LoadBalancer Service that
+	// claims port 8081 on that node, killing flanneld every 90s.
+	if strings.Count(flannelManifest, "host: 127.0.0.1") != 2 {
+		t.Error("flannel probes must target 127.0.0.1, not the node IP")
+	}
+}
+
+// writeFakeCNIArchive writes a gzip tar shaped like the upstream CNI
+// plugins release: ./-relative executable members, plus a README so the
+// selection has something to skip.
+func writeFakeCNIArchive(t *testing.T, path string, members ...string) string {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	entries := append([]string{"./README.md"}, members...)
+	for _, name := range entries {
+		body := []byte("binary for " + name)
+		mode := int64(0o755)
+		if strings.HasSuffix(name, ".md") {
+			mode = 0o644
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: mode, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func tarMemberNames(t *testing.T, path string) []string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("no tar was streamed to %s: %v", path, err)
+	}
+	defer f.Close()
+	var names []string
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return names
+		}
+		if err != nil {
+			t.Fatalf("streamed payload is not a tar: %v", err)
+		}
+		if hdr.Mode&0o111 == 0 {
+			t.Errorf("member %s lost its executable bit (mode %o)", hdr.Name, hdr.Mode)
+		}
+		names = append(names, hdr.Name)
+	}
+}
+
+func TestSelectCNIPluginMembers(t *testing.T) {
+	archive := writeFakeCNIArchive(t, filepath.Join(t.TempDir(), "plugins.tgz"), "./bridge", "./ptp", "./host-local", "./portmap", "./bandwidth", "./loopback")
+	payload, err := selectCNIPluginMembers(archive, []string{"./bridge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(bytes.NewReader(payload))
+	hdr, err := tr.Next()
+	if err != nil || hdr.Name != "./bridge" || hdr.Mode != 0o755 {
+		t.Fatalf("first member = %+v, %v; want ./bridge mode 0755", hdr, err)
+	}
+	body, _ := io.ReadAll(tr)
+	if string(body) != "binary for ./bridge" {
+		t.Fatalf("member body = %q", body)
+	}
+	if _, err := tr.Next(); err != io.EOF {
+		t.Fatal("payload carries more than the requested member")
+	}
+
+	// The k3s set selects five members and leaves the README behind.
+	payload, err = selectCNIPluginMembers(archive, []string{"./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	tr = tar.NewReader(bytes.NewReader(payload))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		names = append(names, hdr.Name)
+	}
+	if len(names) != 5 || strings.Contains(strings.Join(names, " "), "README") {
+		t.Fatalf("k3s selection = %v", names)
+	}
+
+	if _, err := selectCNIPluginMembers(archive, []string{"./bridge", "./calico"}); err == nil || !strings.Contains(err.Error(), `no member "./calico"`) {
+		t.Fatalf("missing member must be reported before any node is touched, got: %v", err)
+	}
+	if _, err := selectCNIPluginMembers(filepath.Join(t.TempDir(), "missing.tgz"), []string{"./bridge"}); err == nil {
+		t.Fatal("missing archive must fail")
+	}
+}
+
+// recordingRuntime embeds a nil HostRuntime: any call outside the three
+// methods below panics, so an unexpected runtime call cannot silently
+// succeed. It records what the install streams and how it is bounded.
+type recordingRuntime struct {
+	runtime.HostRuntime
+	mu        sync.Mutex
+	transfers []recordedTransfer // ExecStdinTimeout
+	execs     []recordedTransfer // ExecTimeout
+	unbounded []string           // ExecStdin: the path the install must never take
+}
+
+type recordedTransfer struct {
+	node    string
+	timeout time.Duration
+	command []string
+	members []string // tar members when the payload was a tar
+}
+
+func (r *recordingRuntime) ExecStdinTimeout(node string, timeout time.Duration, in io.Reader, command ...string) error {
+	payload, _ := io.ReadAll(in)
+	var members []string
+	tr := tar.NewReader(bytes.NewReader(payload))
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		members = append(members, hdr.Name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.transfers = append(r.transfers, recordedTransfer{node, timeout, command, members})
+	return nil
+}
+
+func (r *recordingRuntime) ExecStdin(node string, in io.Reader, command ...string) error {
+	_, _ = io.ReadAll(in)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.unbounded = append(r.unbounded, node+": "+strings.Join(command, " "))
+	return nil
+}
+
+func (r *recordingRuntime) ExecTimeout(node string, timeout time.Duration, command ...string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.execs = append(r.execs, recordedTransfer{node: node, timeout: timeout, command: command})
+	return `daemon set "kube-flannel-ds" successfully rolled out`, nil
+}
+
+func stubCNIPluginsArchive(t *testing.T) {
+	t.Helper()
+	archive := writeFakeCNIArchive(t, filepath.Join(t.TempDir(), "plugins.tgz"), "./bridge", "./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth")
+	saved := resolveCNIPluginsArchive
+	resolveCNIPluginsArchive = func() (string, error) { return archive, nil }
+	t.Cleanup(func() { resolveCNIPluginsArchive = saved })
+}
+
+func TestInstallFlannelBoundsEveryTransfer(t *testing.T) {
+	// The install must never take the unbounded exec, every transfer
+	// must carry transferBudget(--wait), and the rollout wait --wait plus
+	// its grace. A regression to ExecStdin or a dropped budget fails here.
+	stubCNIPluginsArchive(t)
+	for _, wait := range []time.Duration{time.Second, 2 * time.Hour} {
+		rt := &recordingRuntime{}
+		m := &Manager{rt: rt}
+		if err := m.installFlannel("kiac-x-control-plane", Config{Name: "x", Workers: 2, Kernel: "/k/Image", WaitTimeout: wait}); err != nil {
+			t.Fatal(err)
+		}
+		if len(rt.unbounded) != 0 {
+			t.Fatalf("install used the unbounded ExecStdin: %v", rt.unbounded)
+		}
+		if len(rt.transfers) != 4 {
+			t.Fatalf("%d transfers, want 3 extractions + 1 apply", len(rt.transfers))
+		}
+		for _, tr := range rt.transfers {
+			if tr.timeout != transferBudget(wait) {
+				t.Errorf("--wait %s: %s bounded by %s, want %s", wait, tr.node, tr.timeout, transferBudget(wait))
+			}
+			if len(tr.members) > 0 && (len(tr.members) != 1 || tr.members[0] != "./bridge") {
+				t.Errorf("%s received members %v, want only ./bridge", tr.node, tr.members)
+			}
+		}
+		if len(rt.execs) != 1 || rt.execs[0].timeout != max(wait, time.Second)+flannelRolloutGrace {
+			t.Errorf("--wait %s: rollout execs = %+v", wait, rt.execs)
+		}
+	}
+}
+
+func TestEnsureK3sCNIPluginsIsBounded(t *testing.T) {
+	stubCNIPluginsArchive(t)
+	for _, wait := range []time.Duration{30 * time.Second, 3 * time.Hour} {
+		rt := &recordingRuntime{}
+		if err := (&Manager{rt: rt}).ensureK3sCNIPlugins("kiac-x-worker-1", wait); err != nil {
+			t.Fatal(err)
+		}
+		if len(rt.unbounded) != 0 || len(rt.transfers) != 1 {
+			t.Fatalf("unbounded=%v transfers=%+v", rt.unbounded, rt.transfers)
+		}
+		tr := rt.transfers[0]
+		if tr.node != "kiac-x-worker-1" || tr.timeout != transferBudget(wait) {
+			t.Errorf("bounded by %s on %s, want %s", tr.timeout, tr.node, transferBudget(wait))
+		}
+		want := []string{"./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth"}
+		if strings.Join(tr.members, " ") != strings.Join(want, " ") {
+			t.Errorf("k3s payload members = %v, want %v", tr.members, want)
+		}
+	}
+}
+
+func TestFlannelProbesAreWiredToFlanneld(t *testing.T) {
+	// The probes only mean something if flanneld listens where kubelet
+	// looks: same port, same loopback address, on the flanneld container
+	// and nowhere else.
+	type probe struct {
+		HTTPGet struct {
+			Host string `yaml:"host"`
+			Path string `yaml:"path"`
+			Port any    `yaml:"port"`
+		} `yaml:"httpGet"`
+	}
+	type container struct {
+		Name  string   `yaml:"name"`
+		Args  []string `yaml:"args"`
+		Ports []struct {
+			Name          string `yaml:"name"`
+			ContainerPort int    `yaml:"containerPort"`
+		} `yaml:"ports"`
+		Readiness *probe `yaml:"readinessProbe"`
+		Liveness  *probe `yaml:"livenessProbe"`
+	}
+	type daemonSet struct {
+		Kind string `yaml:"kind"`
+		Spec struct {
+			Template struct {
+				Spec struct {
+					HostNetwork    bool        `yaml:"hostNetwork"`
+					Containers     []container `yaml:"containers"`
+					InitContainers []container `yaml:"initContainers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(flannelManifest))
+	var ds daemonSet
+	for {
+		var doc daemonSet
+		if err := dec.Decode(&doc); err != nil {
+			t.Fatalf("no DaemonSet in manifest: %v", err)
+		}
+		if doc.Kind == "DaemonSet" {
+			ds = doc
+			break
+		}
+	}
+	spec := ds.Spec.Template.Spec
+	if !spec.HostNetwork || len(spec.Containers) != 1 || spec.Containers[0].Name != "kube-flannel" {
+		t.Fatalf("unexpected DaemonSet shape: hostNetwork=%v containers=%+v", spec.HostNetwork, spec.Containers)
+	}
+	c := spec.Containers[0]
+	args := strings.Join(c.Args, " ")
+	if !strings.Contains(args, "--healthz-ip=127.0.0.1") || !strings.Contains(args, "--healthz-port=8081") {
+		t.Errorf("flanneld args %q do not open the loopback healthz listener the probes dial", args)
+	}
+	if len(c.Ports) != 1 || c.Ports[0].Name != "healthz" || c.Ports[0].ContainerPort != 8081 {
+		t.Errorf("ports = %+v, want one named healthz on 8081", c.Ports)
+	}
+	for name, p := range map[string]*probe{"readiness": c.Readiness, "liveness": c.Liveness} {
+		if p == nil {
+			t.Errorf("%s probe missing", name)
+			continue
+		}
+		if p.HTTPGet.Host != "127.0.0.1" || fmt.Sprint(p.HTTPGet.Port) != "healthz" {
+			t.Errorf("%s probe dials %s:%v, want 127.0.0.1:healthz", name, p.HTTPGet.Host, p.HTTPGet.Port)
+		}
+	}
+	if c.Readiness != nil && c.Readiness.HTTPGet.Path != "/readyz" {
+		t.Errorf("readiness path = %s", c.Readiness.HTTPGet.Path)
+	}
+	for _, init := range spec.InitContainers {
+		if init.Readiness != nil || init.Liveness != nil {
+			t.Errorf("init container %s carries a probe", init.Name)
+		}
 	}
 }

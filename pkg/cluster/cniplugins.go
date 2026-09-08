@@ -1,11 +1,14 @@
 package cluster
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -30,22 +33,79 @@ const (
 // downloads. tar exits non-zero on a missing member, which ExecStdin
 // surfaces as an error.
 func (m *Manager) extractCNIPlugins(node, archive string, timeout time.Duration, members ...string) error {
-	// The member list is spliced into a shell command line inside the
-	// node. Every caller passes compile-time literals today; refuse
-	// anything else so a future config-derived name cannot become a
-	// shell injection.
+	// Member names select entries from the archive and appear in error
+	// text. Every caller passes compile-time literals today; refuse
+	// anything else so a future config-derived name cannot smuggle a
+	// path or option through.
 	for _, member := range members {
 		if !cniPluginMember.MatchString(member) {
 			return fmt.Errorf("refusing CNI plugin archive member %q: expected ./<name>", member)
 		}
 	}
-	f, err := os.Open(archive)
+	payload, err := selectCNIPluginMembers(archive, members)
 	if err != nil {
 		return err
 	}
+	// Only the selected binaries cross into the node, as a plain tar the
+	// node unpacks without a member list on its command line.
+	return m.rt.ExecStdinTimeout(node, transferBudget(timeout), bytes.NewReader(payload), "/bin/sh", "-c",
+		"mkdir -p /opt/cni/bin && tar -x -C /opt/cni/bin")
+}
+
+// selectCNIPluginMembers re-packs just members from the verified gzip
+// archive into an uncompressed tar. Every node then receives the few
+// megabytes it needs instead of the whole 50MB archive, and a member
+// missing from the archive fails here, before any node is touched.
+func selectCNIPluginMembers(archive string, members []string) ([]byte, error) {
+	f, err := os.Open(archive)
+	if err != nil {
+		return nil, err
+	}
 	defer f.Close()
-	return m.rt.ExecStdinTimeout(node, transferBudget(timeout), f, "/bin/sh", "-c",
-		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin "+strings.Join(members, " "))
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("reading CNI plugins archive %s: %w", archive, err)
+	}
+	defer gz.Close()
+	want := map[string]bool{}
+	for _, member := range members {
+		want[member] = true
+	}
+	found := map[string]bool{}
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading CNI plugins archive %s: %w", archive, err)
+		}
+		if !want[hdr.Name] {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			return nil, fmt.Errorf("CNI plugins archive member %q is not a regular file", hdr.Name)
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: hdr.Name, Mode: hdr.Mode, Size: hdr.Size, ModTime: hdr.ModTime, Typeflag: tar.TypeReg}); err != nil {
+			return nil, err
+		}
+		if _, err := io.Copy(tw, tr); err != nil {
+			return nil, fmt.Errorf("reading CNI plugins archive member %q: %w", hdr.Name, err)
+		}
+		found[hdr.Name] = true
+	}
+	for _, member := range members {
+		if !found[member] {
+			return nil, fmt.Errorf("CNI plugins archive %s has no member %q", archive, member)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // transferBudget bounds a data transfer into a node (archive extraction,

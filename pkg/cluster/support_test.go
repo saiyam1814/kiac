@@ -187,7 +187,7 @@ func TestSupportCollectsPodNetworkLogs(t *testing.T) {
 case "$*" in
   *"get daemonset kube-flannel-ds -n kube-flannel"*) printf '{"status":{"desiredNumberScheduled":3,"numberReady":3}}\n' ;;
   *"get daemonsets,pods -n kube-flannel -l app=flannel"*) printf 'FLANNEL_PODS\n' ;;
-  *"logs -n kube-flannel daemonset/kube-flannel-ds --all-pods=true --all-containers=true"*) printf 'FLANNEL_LOG\n' ;;
+  *"logs -n kube-flannel -l app=flannel --all-containers --prefix --ignore-errors"*) printf 'FLANNEL_LOG\n' ;;
 esac
 `
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
@@ -196,7 +196,7 @@ esac
 	report := VerificationReport{}
 	report.add(VerificationPass, "kubernetes.api", "Kubernetes API", "ok", "")
 	collector := &supportCollector{}
-	collector.collectKubernetes(&Manager{rt: &runtime.Client{Bin: bin}}, "kiac-dev-control-plane", "kubeadm", report, time.Second, false)
+	collector.collectKubernetes(&Manager{rt: &runtime.Client{Bin: bin}}, "kiac-dev-control-plane", "kubeadm", report, 10*time.Second, false)
 	got := map[string]string{}
 	for _, file := range collector.files {
 		got[file.name] = string(file.data)

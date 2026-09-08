@@ -2,8 +2,8 @@
 // an upstream flannel release. It downloads the release's kube-flannel.yml,
 // pins every image reference to its registry digest, and adds the
 // liveness/readiness probes upstream ships in its Documentation copy but
-// not in the release asset, so a version bump reproduces kiac's two local
-// edits instead of hand-applying them.
+// not in the release asset (bound to loopback, see Patch), so a version
+// bump reproduces kiac's two local edits instead of hand-applying them.
 //
 //	make flannel-manifest FLANNEL_VERSION=v0.28.9
 package main
@@ -123,11 +123,16 @@ func Patch(manifest string, digests map[string]string) (string, error) {
 	for i, line := range lines {
 		switch i {
 		case argAt:
-			out = append(out, line, "        - --healthz-port=8081")
+			// Loopback only: the pod is hostNetwork, and kiac-lb hands
+			// LoadBalancer Services node IPs, which kube-proxy DNATs even
+			// for locally originated traffic. A user Service on 8081 would
+			// otherwise capture kubelet's probes and restart flanneld.
+			out = append(out, line, "        - --healthz-ip=127.0.0.1", "        - --healthz-port=8081")
 		case nameAt:
 			out = append(out,
 				"        livenessProbe:",
 				"          httpGet:",
+				"            host: 127.0.0.1",
 				"            path: /healthz",
 				"            port: healthz",
 				"          initialDelaySeconds: 10",
@@ -139,6 +144,7 @@ func Patch(manifest string, digests map[string]string) (string, error) {
 				"          protocol: TCP",
 				"        readinessProbe:",
 				"          httpGet:",
+				"            host: 127.0.0.1",
 				"            path: /readyz",
 				"            port: healthz",
 				"          initialDelaySeconds: 5",

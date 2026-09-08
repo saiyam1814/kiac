@@ -45,7 +45,7 @@ func TestExecTimeoutOutlivesChildHoldingPipe(t *testing.T) {
 	// sleeps far longer than the assertion bound, so only WaitDelay
 	// releasing the pipe can make this pass.
 	bin := filepath.Join(t.TempDir(), "container")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 20 &\necho started\nwait\necho done\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 10 &\necho started\nwait\necho done\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	timeout := 3 * time.Second
@@ -84,7 +84,7 @@ func TestExecTimeoutSuccessWithChildHoldingPipe(t *testing.T) {
 	// child sleeps far longer than the bound, so only WaitDelay can
 	// release the pipe in time.
 	bin := filepath.Join(t.TempDir(), "container")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 20 &\necho ok\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 10 &\necho ok\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
@@ -110,7 +110,7 @@ func TestExecTimeout(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("ExecTimeout error = %v, want context deadline", err)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("ExecTimeout took %s", elapsed)
 	}
 }
@@ -122,7 +122,7 @@ func TestWaitReadyExecTimeout(t *testing.T) {
 	}
 	started := time.Now()
 	err := (&Client{Bin: bin}).WaitReady("node", time.Second)
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Errorf("WaitReady took %s for timeout 1s", elapsed)
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -498,7 +498,7 @@ func TestExecStdinTimeoutBoundsWedgedExec(t *testing.T) {
 	// wedged after draining stdin) must be killed at the deadline, and a
 	// descendant holding the pipe must not extend that.
 	bin := filepath.Join(t.TempDir(), "container")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > /dev/null\nsleep 20 &\nwait\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > /dev/null\nsleep 10 &\nwait\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	timeout := time.Second

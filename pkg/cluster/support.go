@@ -205,7 +205,10 @@ func (c *supportCollector) collectKubernetes(m *Manager, cp, distro string, repo
 		args := []string{"get", "daemonsets,pods", "-n", cni.namespace, "-l", cni.selector, "-o", "wide"}
 		out, err := m.diagnosticKubectl(cp, distro, timeout, args...)
 		c.addCommand("kubernetes/cni-"+cni.name+".txt", "runtime exec "+cp+" kubectl "+strings.Join(args, " "), out, err, true)
-		args = []string{"logs", "-n", cni.namespace, "daemonset/" + cni.daemonSet, "--all-pods=true", "--all-containers=true", "--tail=500"}
+		// The label form works on every kubectl kiac can meet (an unpinned
+		// --k8s-version or --image may predate --all-pods); --all-containers
+		// includes init containers.
+		args = []string{"logs", "-n", cni.namespace, "-l", cni.selector, "--all-containers", "--prefix", "--ignore-errors", "--tail=500"}
 		out, err = m.diagnosticKubectl(cp, distro, timeout, args...)
 		c.addCommand("kubernetes/cni-"+cni.name+".log", "runtime exec "+cp+" kubectl "+strings.Join(args, " "), out, err, true)
 	}

@@ -10,7 +10,8 @@ import (
 	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
-const fakeVerificationTimeout = 2 * time.Second
+// Fakes answer instantly; the budget only has to outlast a loaded runner.
+const fakeVerificationTimeout = 10 * time.Second
 
 func TestVerifyHealthyClusterData(t *testing.T) {
 	m := fakeVerificationManager(t)
