@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>k3s distro · kiac docs</title>
-<meta name="description" content="kiac create cluster --distro k3s: rancher/k3s as PID 1 per VM, what k3s bundles, why kiac swaps flannel for kindnet, and the footprint numbers.">
+<meta name="description" content="kiac create cluster --distro k3s: lightweight apple/container nodes or real Apple GPU VMs, bundled components, backend-specific networking, and footprint numbers.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a class="on" href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -55,36 +56,36 @@
 <main>
   <div class="kicker">Distros &amp; kernels</div>
   <h1>k3s distro</h1>
-  <p class="lede">The same one-VM-per-node clusters, built on <code>rancher/k3s</code> instead of kubeadm: a single binary as PID 1 in every VM, an sqlite datastore, and a 2-node cluster ready in well under a minute.</p>
+  <p class="lede">The same one-VM-per-node clusters, built with K3s instead of kubeadm: a compact server and agent topology, an sqlite datastore, and an ordinary 2-node cluster ready in well under a minute.</p>
 
   <pre><code>kiac create cluster --distro k3s --name dev --workers 1</code></pre>
 
   <h2 id="how">How it differs from the kubeadm path</h2>
-  <p>The default distro boots <code>kindest/node</code> images (systemd, containerd, kubeadm) and initializes the cluster with <code>kubeadm init</code>/<code>join</code>. With <code>--distro k3s</code>, each VM boots a pinned <code>rancher/k3s</code> image and runs the k3s binary directly as PID 1: no systemd in the VM, no separate etcd, no kubeadm. The server keeps its state in sqlite, workers join as k3s agents over the standard <code>K3S_URL</code>/<code>K3S_TOKEN</code> mechanism, and the kubeconfig merges into <code>~/.kube/config</code> as <code>kiac-&lt;name&gt;</code>, exactly like the kubeadm path.</p>
+  <p>The default distro boots <code>kindest/node</code> images (systemd, containerd, kubeadm) and initializes the cluster with <code>kubeadm init</code>/<code>join</code>. An ordinary <code>--distro k3s</code> cluster boots a pinned <code>rancher/k3s</code> image and runs the K3s binary directly as PID 1. A GPU K3s cluster instead boots Kiac's verified Fedora disk on krunkit and runs K3s as a systemd service so the VM can retain its GPU and networking state. Both variants use one sqlite-backed server, join workers as agents over the standard <code>K3S_URL</code>/<code>K3S_TOKEN</code> mechanism, and merge the kubeconfig into <code>~/.kube/config</code> as <code>kiac-&lt;name&gt;</code>.</p>
   <p>Kubernetes versions use the same flag but follow k3s's release stream: minors 1.32 through 1.36 map to digest-pinned <code>rancher/k3s</code> images (1.36 default). Kubeadm can move to a newer minor before k3s publishes its matching image:</p>
   <pre><code>kiac create cluster --distro k3s --k8s-version 1.34</code></pre>
 
   <h2 id="bundled">What k3s bundles, and what kiac does with it</h2>
-  <p>k3s ships its own batteries, so on this path kiac keeps the pieces that behave well inside Apple Container VMs and swaps out the pieces that do not:</p>
+  <p>K3s ships its own batteries, so Kiac keeps the pieces that fit each VM backend and swaps out the pieces that do not:</p>
   <table>
     <tr><th>Piece</th><th>On the k3s path</th><th>Opt out</th></tr>
     <tr><td>Storage</td><td>k3s's bundled local-path provisioner (default StorageClass)</td><td><code>--no-storage</code></td></tr>
     <tr><td>Metrics</td><td>k3s's bundled metrics-server; <code>kubectl top nodes</code> works natively</td><td><code>--no-metrics</code></td></tr>
     <tr><td>LoadBalancer</td><td>kiac-lb, the same tiny controller used by the kubeadm path; k3s's bundled servicelb is disabled because it advertises every node IP, including nodes that would forward large uploads across vmnet</td><td><code>--no-lb</code></td></tr>
     <tr><td>Ingress</td><td>k3s's bundled Traefik is <b>disabled</b>: it would fight the <code>--gateway</code> addon's Traefik for ports 80 and 443</td><td>always off</td></tr>
-    <tr><td>Network policy</td><td>k3s's network-policy controller is disabled; it only works against the flannel bridge kiac removes (see below)</td><td>always off</td></tr>
+    <tr><td>Network policy</td><td>Ordinary clusters disable K3s's controller with Flannel and use kindnet, which does not enforce policy. GPU clusters keep Flannel and K3s's embedded kube-router policy controller, so standard <code>NetworkPolicy</code> is enforced.</td><td>ordinary: always off; GPU: K3s default</td></tr>
   </table>
   <p>The optional addons work with the same flags as everywhere else: <code>--observability</code> installs Prometheus and Grafana, <code>--gateway</code> installs the Gateway API CRDs plus Traefik with the ready-to-use <code>kiac</code> Gateway. kiac-lb assigns their LoadBalancer IPs, kiac labels a primary node (<code>kiac.io/lb-primary</code>) the addon pods pin to, and the default edge proxy handles large external uploads through NodePorts and LoadBalancers.</p>
 
-  <h2 id="kindnet">Why kindnet replaces flannel</h2>
-  <p>k3s normally brings flannel as its CNI. kiac starts the server with <code>--flannel-backend=none</code> and applies <b>kindnet</b> instead, for a kernel reason:</p>
+  <h2 id="kindnet">CNI by backend</h2>
+  <p>K3s normally brings Flannel as its CNI. On ordinary apple/container clusters Kiac starts the server with <code>--flannel-backend=none</code> and applies <b>kindnet</b> instead, for a kernel reason:</p>
   <ul>
     <li>Apple's stock node kernel has no VXLAN, so flannel's default backend cannot form an overlay in the first place.</li>
     <li>Even flannel's host-gw backend wires pods onto a <code>cni0</code> bridge, and the kernel also lacks <code>br_netfilter</code>. On a bridge without it, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and every same-node service call times out.</li>
     <li>kindnet uses a routed PTP (veth pair) topology instead of a bridge, so all pod traffic stays visible to iptables. It is the same CNI the kubeadm path uses, configured for k3s's default <code>10.42.0.0/16</code> pod CIDR.</li>
   </ul>
   <p>kindnet's config references the upstream <code>ptp</code> CNI plugin, which k3s's own multicall binary does not implement. kiac downloads the official containernetworking plugins release (v1.7.1, sha256-verified, cached once under <code>~/.kiac/</code>) and streams the needed binaries into every node VM.</p>
-  <p>Because the CNI is fixed on this path, <code>--cni</code> is a kubeadm-only flag; passing it with <code>--distro k3s</code> is an error.</p>
+  <p>A GPU K3s cluster runs Fedora's full kernel on krunkit, including VXLAN and <code>br_netfilter</code>, so it keeps K3s's bundled Flannel and kube-router network-policy controller. Standard ingress and egress <code>NetworkPolicy</code> resources are therefore enforced on this path. Because Kiac selects the safe CNI for each K3s backend, <code>--cni</code> is still a kubeadm-only flag; passing it with <code>--distro k3s</code> is an error.</p>
 
   <h2 id="footprint">Footprint</h2>
   <p>Measured on Apple silicon with the default sizing (4 vCPUs per node, 4G control plane, 2G workers):</p>
@@ -92,7 +93,7 @@
     <li>A 2-node k3s cluster (server + 1 agent) is Ready in roughly <b>22 to 54 seconds</b>, image pull excluded.</li>
     <li>Host memory for the whole 2-node cluster sits around <b>3.7GB RSS</b> idle.</li>
   </ul>
-  <p>That makes <code>--distro k3s</code> the fastest way to a disposable cluster, while the kubeadm path stays the closer match for clusters you operate with kubeadm in production.</p>
+  <p>That makes an ordinary <code>--distro k3s</code> cluster the fastest disposable path. GPU mode has a slower first create because it prepares a persistent Fedora disk and provisions the GPU stack; later stop/start operations reuse that disk.</p>
 
   <h2 id="limits">Honest trade-offs</h2>
   <ul>

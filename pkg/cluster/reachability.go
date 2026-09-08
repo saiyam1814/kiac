@@ -56,3 +56,14 @@ func warnAPIUnreachable(cp, name, ip string) {
 	ui.Hintf("container system stop && container system start")
 	ui.Hintf("kiac resume cluster --name %s", name)
 }
+
+// warnGPUAPIUnreachable avoids prescribing an apple/container vmnet reset for
+// a krunkit cluster. There is no public raw SSH command in Kiac, so verify and
+// the bounded support bundle are the safe diagnostic entry points.
+func warnGPUAPIUnreachable(name, ip string) {
+	ui.Warnf("Your Mac cannot reach the API server at %s:6443, though it is healthy inside the VM.", ip)
+	ui.Warnf("The krunkit/vmnet-helper cluster was left running; apple/container is not involved in this network path.")
+	ui.Infof("inspect the internal API and VM services with:")
+	ui.Hintf("kiac verify cluster --name %s", name)
+	ui.Hintf("kiac support bundle --name %s", name)
+}

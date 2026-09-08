@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -78,9 +79,12 @@
 kiac create cluster --k8s-version 1.34       <span class="c"># pick a Kubernetes minor (kubeadm 1.32-1.37 pinned)</span>
 kiac create cluster --distro k3s --workers 1 <span class="c"># k3s nodes, ready in under a minute; see k3s distro</span>
 kiac create cluster --cni cilium --kernel full <span class="c"># Cilium on the full kernel; see the Cilium page</span>
+kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra <span class="c"># real Apple GPU; see the GPU page</span>
 kiac create cluster --observability --gateway <span class="c"># everything on; see the addon pages</span>
 kiac create cluster --config cluster.yaml    <span class="c"># declarative; see Config file</span></code></pre>
   <p>A failed create cleans up its half-built node VMs automatically, so your machine never ends up with orphans.</p>
+  <div class="note"><b>GPU mode has a separate preflight</b>
+  Install the optional krunkit/Venus dependencies and run <code>kiac gpu doctor</code> before using <code>--gpu-workers</code>. Ordinary clusters keep the faster apple/container path. The <a href="gpu.html">Apple GPU guide</a> explains the topology and the Vulkan-not-CUDA contract.</div>
 
   <h2 id="kubeconfig">3. The kubeconfig</h2>
   <p>On create, kiac merges the cluster's credentials into your kubeconfig (<code>~/.kube/config</code>, or <code>$KUBECONFIG</code> when it points at a single file) and switches the current context:</p>

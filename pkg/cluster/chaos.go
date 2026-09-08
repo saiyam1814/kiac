@@ -54,16 +54,27 @@ func (m *Manager) StartNode(name, node string) error {
 			running = true
 		}
 	}
-	if !running && distroFromNodes(infos) == "k3s" {
-		stopped := 0
-		for _, info := range infos {
-			if !strings.EqualFold(info.Status, "running") {
-				stopped++
+	if !running {
+		krunkit, backendErr := krunkitOnlyCluster(infos)
+		if backendErr != nil {
+			return backendErr
+		}
+		stopped := countStoppedNodes(infos)
+		if stopped > 1 && (krunkit || distroFromNodes(infos) == "k3s") {
+			kind := "k3s"
+			if krunkit {
+				kind = "krunkit-backed"
 			}
+			return fmt.Errorf("%s cluster %q has %d stopped nodes; recover the topology together with: kiac resume cluster --name %s", kind, name, stopped, name)
 		}
-		if stopped > 1 {
-			return fmt.Errorf("k3s cluster %q has %d stopped nodes; recover the topology together with: kiac resume cluster --name %s", name, stopped, name)
+		if krunkit {
+			// krunkit nodes pin kubelet and control-plane endpoints to their
+			// vmnet address. Full resume reconciles those references and the
+			// selected GPU resource driver after the VM starts.
+			return m.Resume(name, 5*time.Minute)
 		}
+	}
+	if !running && distroFromNodes(infos) == "k3s" {
 		// A k3s node's new vmnet address can stale agent endpoints and
 		// hostNetwork Pod metadata. The resume path starts the one stopped
 		// VM and reconciles those cluster-level references before returning.
@@ -80,6 +91,16 @@ func (m *Manager) StartNode(name, node string) error {
 	ui.Hintf("watch it rejoin: kubectl get nodes -w")
 	ui.Hintf("LoadBalancer IPs re-point automatically if the node came back with a new address")
 	return nil
+}
+
+func countStoppedNodes(infos []runtime.Info) int {
+	stopped := 0
+	for _, info := range infos {
+		if !strings.EqualFold(info.Status, "running") {
+			stopped++
+		}
+	}
+	return stopped
 }
 
 // findNode lists the cluster's node containers and resolves node
@@ -103,8 +124,8 @@ func (m *Manager) findNode(name, node string) ([]runtime.Info, string, error) {
 	return infos, target, nil
 }
 
-// resolveNode accepts the short node name ("worker-1", "control-plane")
-// or the full container name ("kiac-dev-worker-1") and returns the
+// resolveNode accepts a short node name ("worker-1", "gpu-1",
+// "control-plane") or the full VM name and returns the
 // container name, listing the valid choices when nothing matches.
 func resolveNode(infos []runtime.Info, name, node string) (string, error) {
 	full := node

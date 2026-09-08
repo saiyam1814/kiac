@@ -1,0 +1,11 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-upload-server-ingress
+  namespace: kiac-e2e
+spec:
+  podSelector:
+    matchLabels:
+      app: upload-server
+  policyTypes:
+    - Ingress

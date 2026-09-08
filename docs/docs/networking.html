@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -58,7 +59,7 @@
   <p class="lede">Every node VM gets its own IP your Mac can reach. That one fact drives most of kiac's networking design, from the CNI choice to how LoadBalancers work.</p>
 
   <h2 id="vmnet">vmnet and node IPs</h2>
-  <p>apple/container attaches each lightweight VM to macOS's <code>vmnet</code> network. Each node VM therefore gets its own IP address (typically in the <code>192.168.64.0/24</code> range) that is directly routable from your Mac:</p>
+  <p>Ordinary clusters use apple/container's macOS <code>vmnet</code> integration. GPU clusters use krunkit with vmnet-helper instead. In both modes each node VM gets its own host-reachable IP address (typically from a <code>192.168.x.0/24</code> subnet):</p>
   <pre><code>kubectl get nodes -o wide
 <span class="o">NAME                     STATUS   ROLES           VERSION   INTERNAL-IP
 kiac-dev-control-plane   Ready    control-plane   v1.37.0   192.168.64.2
@@ -77,7 +78,7 @@ kiac-dev-worker-2        Ready    &lt;none&gt;          v1.37.0   192.168.64.4</
   <p>One more vmnet fact shapes performance: <b>frames addressed to a VM's own IP are delivered fast; packets forwarded between VMs are not.</b> Traffic that has to be routed or NATed from one node VM to another crosses vmnet's forwarded path, which is dramatically slower for bulk transfers.</p>
   <p>kiac works with that grain everywhere:</p>
   <ul>
-    <li><b>Routed CNIs</b> (kindnet) send cross-node pod traffic as pod-addressed packets, which vmnet must forward. Fine for control traffic and most dev work; slow for bulk cross-node transfers.</li>
+    <li><b>Routed CNIs</b> (kindnet) send cross-node pod traffic as pod-addressed packets, which vmnet must forward. This applies to ordinary kubeadm and K3s clusters and is fine for control traffic and most dev work; slow for bulk cross-node transfers.</li>
     <li><b>Addon placement</b>: kiac labels one node <code>kiac.io/lb-primary</code> and pins the bundled Grafana and Traefik pods there, and kiac-lb prefers assigning a Service the IP of a node that hosts one of its ready endpoints. Traffic entering a node is then delivered to a local pod instead of being NATed across the slow path.</li>
     <li><b>Cilium's overlay avoids it entirely</b>: with <code>--cni cilium --kernel full</code>, cross-node pod traffic is vxlan-encapsulated in node-IP-addressed packets, which ride the fast path (~285MB/s pod-to-pod cross-node, ~1GB/s Mac-to-pod measured). See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
   </ul>
@@ -93,7 +94,7 @@ kiac-dev-worker-2        Ready    &lt;none&gt;          v1.37.0   192.168.64.4</
   <pre><code>kiac create cluster --cni kindnet                <span class="c"># default</span>
 kiac create cluster --cni cilium --kernel full   <span class="c"># Cilium on the full kernel; see the Cilium page</span>
 kiac create cluster --cni none                   <span class="c"># bring your own; nodes stay NotReady until you install one</span></code></pre>
-  <p>kindnet even runs on <a href="k3s.html">--distro k3s</a>: kiac disables k3s's bundled flannel outright, because flannel bridges pods onto <code>cni0</code> and, on a kernel without <code>br_netfilter</code>, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and times out. kindnet's routed topology has no bridge, so the problem never exists. (<code>--cni</code> itself is a kubeadm-path flag; the k3s path always gets kindnet.)</p>
+  <p>kindnet also runs on ordinary <a href="k3s.html">--distro k3s</a> clusters: kiac disables K3s's bundled Flannel because Flannel bridges pods onto <code>cni0</code> and, on Apple's kernel without <code>br_netfilter</code>, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and times out. kindnet's routed topology has no bridge, so the problem never exists. GPU K3s clusters run Fedora's capable kernel and keep bundled Flannel. <code>--cni</code> remains a kubeadm-only flag in both backend modes.</p>
   <p>Asking for <code>--cni flannel</code> or <code>calico</code> still fails fast with an explanation rather than half-installing something that cannot start. To run them anyway, boot the full kernel and bring your own manifests: <code>--kernel full --cni none</code>.</p>
   <div class="warn"><b>Honest trade-off</b>
   On the stock kernel, kindnet gives you real cross-node pod networking, not a policy engine: NetworkPolicy is not enforced, and bulk cross-node throughput rides vmnet's slow forwarded path. Both limits lift with <a href="cilium.html">--cni cilium --kernel full</a>.</div>
@@ -112,7 +113,7 @@ kiac create cluster --cni none                   <span class="c"># bring your ow
 kubectl get svc web    <span class="c"># EXTERNAL-IP is one of your worker node IPs, assigned in ~2s</span>
 
 <span class="c"># the controller's logs, from inside the control-plane VM</span>
-container exec kiac-dev-control-plane journalctl -u kiac-lb</code></pre>
+kiac exec node kiac-dev-control-plane -- journalctl -u kiac-lb</code></pre>
   <p>On <a href="k3s.html">--distro k3s</a>, kiac disables k3s's bundled servicelb and uses the same kiac-lb controller. ServiceLB advertises every node IP, but vmnet large uploads only stay reliable when traffic enters a node that can terminate locally, so kiac-lb publishes one endpoint-local node IP instead.</p>
   <p>kiac also installs <b>kiac-edge-proxy</b> by default on every node. It is a tiny embedded node process that redirects externally-entering TCP for NodePorts and LoadBalancer service ports into a built-in original-destination TCP proxy, watches Services and EndpointSlices, then connects to a ready endpoint. If the endpoint is on another node, the first proxy hands the stream to that node's proxy so the final pod connection is local to the endpoint node. That avoids apple/container vmnet's TSO stall on large uploads from sibling VMs. Disable it only with <code>--no-edge-proxy</code>.</p>
   <p>Skip the LoadBalancer controller with <code>--no-lb</code> if you prefer NodePorts only. Note that <a href="gateway-api.html">--gateway</a> requires the LoadBalancer.</p>

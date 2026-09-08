@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiac-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upload-server
+  namespace: kiac-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: upload-server
+  template:
+    metadata:
+      labels:
+        app: upload-server
+    spec:
+      nodeSelector:
+        kiac.dev/gpu.present: "true"
+      tolerations:
+        - key: kiac.dev/gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: server
+          image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+          imagePullPolicy: IfNotPresent
+          command: [sh, -c, "sleep 1200"]
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: upload-sender
+  namespace: kiac-e2e
+spec:
+  restartPolicy: Never
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kiac.dev/gpu.present
+                operator: DoesNotExist
+  containers:
+    - name: sender
+      image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      imagePullPolicy: IfNotPresent
+      command: [sh, -c, "sleep 1200"]
+      resources:
+        requests:
+          cpu: 5m
+          memory: 8Mi
+        limits:
+          memory: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upload-server
+  namespace: kiac-e2e
+spec:
+  type: LoadBalancer
+  selector:
+    app: upload-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

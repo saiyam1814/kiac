@@ -1,0 +1,112 @@
+# Runs a real TinyLlama server on the Apple GPU and exposes it through Kiac's
+# LoadBalancer. The model revision, model SHA-256, and linux/arm64 Vulkan image
+# digest are fixed for a reproducible lab.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kiac-gpu-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tinyllama
+  namespace: kiac-gpu-demo
+  labels:
+    app.kubernetes.io/name: tinyllama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tinyllama
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tinyllama
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        kiac.dev/gpu.present: "true"
+      tolerations:
+        - key: kiac.dev/gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      initContainers:
+        - name: model-download
+          image: quay.io/slopezpa/fedora-vgpu-llama@sha256:f58a677fd617e5a6d0b7f558fd137d63a57aaac70293956ef09a16ec69e210d4
+          imagePullPolicy: IfNotPresent
+          command: [/bin/bash, -euo, pipefail, -c]
+          args:
+            - |
+              model=/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+              curl --fail --location --retry 4 --output "${model}.part" \
+                https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/52e7645ba7c309695bec7ac98f4f005b139cf465/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+              echo '9fecc3b3cd76bba89d504f29b616eedf7da85b96540e490ca5824d3f7d2776a0  '"${model}.part" | sha256sum --check -
+              mv "${model}.part" "${model}"
+          volumeMounts:
+            - name: model
+              mountPath: /models
+      containers:
+        - name: llama-server
+          image: quay.io/slopezpa/fedora-vgpu-llama@sha256:f58a677fd617e5a6d0b7f558fd137d63a57aaac70293956ef09a16ec69e210d4
+          imagePullPolicy: IfNotPresent
+          command: [/usr/bin/llama-server]
+          args:
+            - --model
+            - /models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+            - --ctx-size
+            - "2048"
+            - --n-gpu-layers
+            - "99"
+          env:
+            - name: XDG_RUNTIME_DIR
+              value: /tmp
+            - name: GGML_VK_VISIBLE_DEVICES
+              value: "0"
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+              kiac.dev/gpu: "1"
+            limits:
+              memory: 4Gi
+              kiac.dev/gpu: "1"
+          volumeMounts:
+            - name: model
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: model
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tinyllama
+  namespace: kiac-gpu-demo
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: tinyllama
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

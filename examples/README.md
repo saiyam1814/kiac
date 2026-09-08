@@ -25,6 +25,9 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [statefulset.yaml](statefulset.yaml) | StatefulSet with `volumeClaimTemplates` on the bundled local-path default StorageClass; PVCs bind, data survives pod restarts. |
 | [httproute.yaml](httproute.yaml) | Hostname routing with Gateway API: an echo app plus an HTTPRoute attached to the default Gateway from `--gateway`; needs a cluster created with `--gateway`. |
 | [observability-scrape.yaml](observability-scrape.yaml) | Two pod annotations get your app's metrics into the bundled Prometheus and Grafana; needs a cluster created with `--observability`. |
+| [gpu-vulkan.yaml](gpu-vulkan.yaml) | A digest-pinned Vulkan probe that fails unless a `kiac.dev/gpu` pod sees the real Apple GPU through Venus. |
+| [gpu-dra-memory.yaml](gpu-dra-memory.yaml) | An explicit 8 GiB DRA capacity claim plus a pod that receives `/dev/dri`; needs a DRA GPU cluster. |
+| [gpu-inference.yaml](gpu-inference.yaml) | A real, SHA-verified TinyLlama server using Venus, exposed through a Kiac LoadBalancer. |
 
 ## Guides and config files
 
@@ -39,8 +42,10 @@ kubectl apply -f https://raw.githubusercontent.com/saiyam1814/kiac/main/examples
 | [k8gb-lab.md](k8gb-lab.md) | Real DNS-based failover across two kiac clusters: lightweight edge DNS, delegated regional CoreDNS, HTTP traffic validation, failover, and failback. |
 | [portainer-lab.md](portainer-lab.md) | Portainer CE on a pinned Kubernetes 1.34 cluster: persistent data, a real LoadBalancer address, protected admin credentials, and authenticated API verification. |
 | [rancher-lab.md](rancher-lab.md) | Rancher Manager on a dedicated Kubernetes 1.34 cluster: Gateway API, local TLS, protected credentials, authenticated API verification, and owned cleanup. |
+| [gpu-lab.md](gpu-lab.md) | Real Apple GPU lab: krunkit prerequisites, K3s/kubeadm clusters, Vulkan proof, Metal-versus-Venus inference benchmark, DRA memory, and TinyLlama serving. |
 | [cluster.yaml](cluster.yaml) | Minimal `--config` file for `kiac create cluster`. |
 | [cluster-full.yaml](cluster-full.yaml) | `--config` file with every knob set and commented, all addons on including observability and gateway. |
+| [gpu-cluster.yaml](gpu-cluster.yaml) | Declarative K3s 1.36 cluster with one ordinary worker, one real GPU worker, and the DRA driver. |
 
 ## Notes
 

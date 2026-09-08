@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kiac-gpu-dra
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kiac-gpu-dra
+    app.kubernetes.io/part-of: kiac
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kiac-gpu-dra
+  labels:
+    app.kubernetes.io/name: kiac-gpu-dra
+    app.kubernetes.io/part-of: kiac
+rules:
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get, list, watch]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims/status]
+    verbs: [update]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims/driver]
+    resourceNames: [gpu.kiac.dev]
+    verbs: ["associated-node:update", "associated-node:patch"]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kiac-gpu-dra
+  labels:
+    app.kubernetes.io/name: kiac-gpu-dra
+    app.kubernetes.io/part-of: kiac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kiac-gpu-dra
+subjects:
+  - kind: ServiceAccount
+    name: kiac-gpu-dra
+    namespace: kube-system
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: gpu.kiac.dev
+  labels:
+    app.kubernetes.io/name: kiac-gpu-dra
+    app.kubernetes.io/part-of: kiac
+spec:
+  selectors:
+    - cel:
+        expression: "device.driver == 'gpu.kiac.dev'"
+  extendedResourceName: kiac.dev/gpu
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kiac-gpu-dra
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kiac-gpu-dra
+    app.kubernetes.io/part-of: kiac
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kiac-gpu-dra
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kiac-gpu-dra
+        app.kubernetes.io/part-of: kiac
+    spec:
+      serviceAccountName: kiac-gpu-dra
+      priorityClassName: system-node-critical
+      nodeSelector:
+        kiac.dev/gpu.present: "true"
+      tolerations:
+        - key: kiac.dev/gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: agent
+          image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+          imagePullPolicy: IfNotPresent
+          command: [/opt/kiac/kiac-gpu-agent]
+          args:
+            - --node-name=$(NODE_NAME)
+            - --pod-uid=$(POD_UID)
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: agent
+              mountPath: /opt/kiac/kiac-gpu-agent
+              readOnly: true
+            - name: plugins-registry
+              mountPath: /var/lib/kubelet/plugins_registry
+            - name: plugins
+              mountPath: /var/lib/kubelet/plugins
+            - name: cdi
+              mountPath: /etc/cdi
+            - name: dri
+              mountPath: /dev/dri
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: agent
+          hostPath:
+            path: /usr/local/libexec/kiac/kiac-gpu-agent
+            type: File
+        - name: plugins-registry
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+        - name: plugins
+          hostPath:
+            path: /var/lib/kubelet/plugins
+            type: Directory
+        - name: cdi
+          hostPath:
+            path: /etc/cdi
+            type: DirectoryOrCreate
+        - name: dri
+          hostPath:
+            path: /dev/dri
+            type: Directory
+        - name: tmp
+          emptyDir: {}

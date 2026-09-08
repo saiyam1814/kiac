@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -92,7 +93,7 @@ kubectl get pvc data    <span class="c"># Pending until a pod uses it (WaitForFi
   --mount type=bind,source=/Users/me/data,target=/data</code></pre>
   <p>The data path has two required layers:</p>
   <pre><code>macOS path
-  -&gt; Apple Container bind mount into each node VM
+  -&gt; VM backend bind mount into each node VM
     -&gt; Kubernetes hostPath
       -&gt; pod volumeMount</code></pre>
   <pre><code>volumes:
@@ -106,11 +107,11 @@ containers:
       - name: source
         mountPath: /workspace</code></pre>
   <ul>
-    <li>KIAC uses ordinary <code>container run</code>, not <code>container machine</code>, so the host's <code>/Users</code> directory is not shared automatically.</li>
+    <li>Ordinary clusters use <code>container run</code>, not <code>container machine</code>; GPU clusters use krunkit's virtio-fs mounts. Neither backend shares the host's <code>/Users</code> directory automatically.</li>
     <li>Every configured directory is mounted independently into the control plane/server and every worker/agent. A pod's <code>hostPath</code> is the target path inside whichever node schedules it.</li>
-    <li>Bind mounts expose host data to node VMs. Any workload allowed to use a writable <code>hostPath</code>, subject to filesystem permissions and admission policy, may modify host files; prefer <code>readonly</code> for source trees.</li>
+    <li>Bind mounts expose host data to node VMs. Any workload allowed to use a writable <code>hostPath</code>, subject to filesystem permissions and admission policy, may modify host files; prefer <code>readonly</code> for source trees. In GPU mode read-only is enforced by the guest mount, not as a host-side krunkit security boundary.</li>
     <li>Concurrent writes from multiple nodes can be unsafe, especially for databases. Use node-local PVC storage or a suitable shared storage system instead.</li>
-    <li>Apple Container keeps mounts on the existing node container across stop/start and <code>kiac resume cluster</code>. The host source must still exist when the node starts.</li>
+    <li>Both backends persist mount definitions across stop/start and <code>kiac resume cluster</code>. The host source must still exist when the node starts.</li>
     <li>Deleting a cluster removes its node VMs, not bind-mounted host data. Local-path PVC data is separate: it remains node-local and is deleted with its node VM.</li>
   </ul>
 

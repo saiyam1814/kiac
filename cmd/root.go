@@ -15,8 +15,9 @@ var rootCmd = &cobra.Command{
 	Use:   "kiac",
 	Short: "Kubernetes in Apple Containers",
 	Long: `kiac runs Kubernetes clusters where every node is its own lightweight
-virtual machine, powered by Apple's open-source container runtime
-(apple/container) on Apple silicon.
+virtual machine on Apple silicon. Ordinary clusters use Apple's open-source
+container runtime; opt-in GPU clusters use krunkit to expose the Apple GPU
+through virtio-gpu and Venus.
 
 Think kind, but each node boots in its own lightweight VM with hardware-grade
 isolation, direct node networking from your Mac, and metrics-server
@@ -35,5 +36,5 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.AddCommand(createCmd, deleteCmd, getCmd, loadCmd, doctorCmd, verifyCmd, supportCmd, versionCmd)
+	rootCmd.AddCommand(createCmd, deleteCmd, getCmd, loadCmd, doctorCmd, gpuCmd, verifyCmd, supportCmd, versionCmd)
 }

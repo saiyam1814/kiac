@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Integration labs - kiac docs</title>
-<meta name="description" content="Tested, repeatable labs for running Portainer CE, Rancher Manager, k8gb, Gateway API, observability, and OpenChoreo on kiac clusters.">
+<meta name="description" content="Tested, repeatable labs for Apple GPU inference, Portainer CE, Rancher Manager, k8gb, Gateway API, observability, and OpenChoreo on kiac clusters.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -86,6 +87,16 @@
 ./examples/rancher.sh cleanup</code></pre>
   <div class="lab-actions"><a href="rancher.html">Run Rancher on kiac</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/rancher.sh">Installation script</a></div>
   <p>The script uses a dedicated cluster because Rancher creates cluster-wide controllers, roles, webhooks, custom resources, and system namespaces. Cleanup deletes that owned cluster instead of attempting a partial uninstall from an unrelated environment.</p>
+
+  <h2 id="gpu">Real Apple GPU and inference</h2>
+  <p>Create a multi-node krunkit-backed cluster, prove that Vulkan names the real Venus device, allocate GPU memory through Kubernetes DRA, run a pinned TinyLlama inference server behind a LoadBalancer, and compare its llama.cpp throughput with native Metal. The lab also exercises namespace-scoped compatibility for legacy <code>nvidia.com/gpu</code> manifests without claiming CUDA support.</p>
+  <div class="warn"><b>Alpha and explicitly not CUDA</b>
+  The pod API is Mesa Venus/Vulkan. CUDA, NVML, <code>nvidia-smi</code>, Metal, and MLX are unavailable inside the Linux guest.</div>
+  <pre><code>kiac gpu doctor
+kiac create cluster --config examples/gpu-cluster.yaml
+kubectl apply -f examples/gpu-vulkan.yaml
+kiac gpu bench --name gpu-lab</code></pre>
+  <div class="lab-actions"><a href="gpu.html">Apple GPU architecture</a><a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md">Complete GPU lab</a></div>
 
   <h2 id="addons">Gateway API and observability</h2>
   <p>These labs exercise kiac's built-in addons through their user-facing endpoints:</p>

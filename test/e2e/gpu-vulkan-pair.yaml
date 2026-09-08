@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-vulkan-a
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kiac-gpu-vulkan-pair
+spec:
+  restartPolicy: Never
+  runtimeClassName: nvidia
+  nodeSelector:
+    kiac.dev/gpu.present: "true"
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  containers:
+    - name: probe
+      image: quay.io/slopezpa/fedora-vgpu@sha256:d1fd35583d1c72bc7380bb977d5d51e70d70c77a2279a0412c2e6ac462f61f16
+      imagePullPolicy: IfNotPresent
+      command: [/bin/bash, -euo, pipefail, -c]
+      args:
+        - vulkaninfo --summary 2>&1 | tee /tmp/vulkaninfo; grep -q 'deviceName.*Virtio-GPU Venus' /tmp/vulkaninfo
+      env:
+        - name: XDG_RUNTIME_DIR
+          value: /tmp
+      resources:
+        requests:
+          kiac.dev/gpu: "1"
+        limits:
+          kiac.dev/gpu: "1"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-vulkan-b
+  namespace: default
+  labels:
+    app.kubernetes.io/name: kiac-gpu-vulkan-pair
+spec:
+  restartPolicy: Never
+  runtimeClassName: nvidia
+  nodeSelector:
+    kiac.dev/gpu.present: "true"
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  containers:
+    - name: probe
+      image: quay.io/slopezpa/fedora-vgpu@sha256:d1fd35583d1c72bc7380bb977d5d51e70d70c77a2279a0412c2e6ac462f61f16
+      imagePullPolicy: IfNotPresent
+      command: [/bin/bash, -euo, pipefail, -c]
+      args:
+        - vulkaninfo --summary 2>&1 | tee /tmp/vulkaninfo; grep -q 'deviceName.*Virtio-GPU Venus' /tmp/vulkaninfo
+      env:
+        - name: XDG_RUNTIME_DIR
+          value: /tmp
+      resources:
+        requests:
+          kiac.dev/gpu: "1"
+        limits:
+          kiac.dev/gpu: "1"

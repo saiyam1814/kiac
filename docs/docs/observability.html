@@ -32,6 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a class="on" href="observability.html">Observability</a>
@@ -70,11 +71,14 @@
     <tr><td>node-exporter</td><td>v1.9.1</td><td>DaemonSet; per-node CPU, memory, disk, network</td></tr>
   </table>
   <p>Nothing in the stack needs kernel features beyond Apple's minimal node kernel; the exporters are <code>/proc</code> and <code>/sys</code> readers, no eBPF, no modules.</p>
-  <p>At the end of create, kiac prints the URL:</p>
+  <p>With the default LoadBalancer enabled, kiac prints the URL at the end of create:</p>
   <pre><code><span class="o">Grafana: http://192.168.64.3:3000 (anonymous admin, local-only)</span></code></pre>
   <p>Find it again any time:</p>
   <pre><code>kubectl get svc grafana -n kiac-observability
 <span class="c"># open http://&lt;EXTERNAL-IP&gt;:3000</span></code></pre>
+  <p>With <code>--no-lb</code>, kiac keeps Grafana as a ClusterIP Service and prints the local access command instead:</p>
+  <pre><code>kubectl -n kiac-observability port-forward service/grafana 3000:3000
+<span class="c"># open http://localhost:3000</span></code></pre>
 
   <div class="warn"><b>Anonymous admin, on purpose</b>
   Grafana runs with anonymous Admin access and basic auth disabled. kiac clusters are local-only dev tools reachable just from your Mac, so a login screen would only get in the way. Do not reuse these manifests anywhere routable.</div>
@@ -125,7 +129,7 @@ spec:
 
   <h2 id="details">Operational details</h2>
   <ul>
-    <li>The stack expects the built-in LoadBalancer (kiac-lb on both kubeadm and k3s). With <code>--no-lb</code> the Grafana Service never gets an EXTERNAL-IP and the install step fails (the cluster itself keeps working).</li>
+    <li>With the built-in LoadBalancer, Grafana gets a host-reachable node IP. With <code>--no-lb</code>, Grafana stays ClusterIP-only and is available through <code>kubectl port-forward</code>.</li>
     <li>Grafana shares its node IP with the Traefik gateway when both addons are on: kiac-lb shares an IP whenever port sets are disjoint, and 3000 vs 80/443 do not overlap, so one worker IP is enough for both.</li>
     <li>The Grafana pod is pinned to the <code>kiac.io/lb-primary</code> node, so the printed URL always delivers traffic to the pod locally instead of crossing vmnet's slow forwarded path. See <a href="networking.html#fast-slow">Networking</a>.</li>
     <li>Storage is emptyDir with 6h retention: metrics restart from zero when the Prometheus pod does. Right-sized for a laptop, not for keeping history.</li>

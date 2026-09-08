@@ -28,6 +28,18 @@ func (m *Manager) installObservability(cp string, cfg Config) error {
 	}); err != nil {
 		return err
 	}
+	if cfg.NoLB {
+		if err := ui.Step("Keeping Grafana internal (--no-lb)", func() error {
+			_, err := m.rt.Exec(cp, "kubectl", "--kubeconfig", adminConf,
+				"patch", "service", "grafana", "-n", obsNamespace, "--type=merge", "-p", `{"spec":{"type":"ClusterIP"}}`)
+			return err
+		}); err != nil {
+			return err
+		}
+		ui.Infof("Grafana: http://grafana.%s.svc:3000 (cluster-internal)", obsNamespace)
+		ui.Hintf("kubectl -n %s port-forward service/grafana 3000:3000", obsNamespace)
+		return nil
+	}
 
 	var grafanaIP string
 	if err := ui.Step("Waiting for Grafana LoadBalancer IP", func() error {

@@ -71,6 +71,21 @@ func TestMergeAndRemoveKubeconfig(t *testing.T) {
 	}
 }
 
+func TestRemoveKubeconfigAcceptsEmptyDocuments(t *testing.T) {
+	for _, content := range []string{"", "\n", "null\n"} {
+		t.Run(strings.TrimSpace(content), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config")
+			t.Setenv("KUBECONFIG", path)
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := removeKubeconfig("failed-create"); err != nil {
+				t.Fatalf("remove from %q: %v", content, err)
+			}
+		})
+	}
+}
+
 func TestServiceAccountKubeconfigDropsAdminCredentials(t *testing.T) {
 	got, err := serviceAccountKubeconfig("dev", sampleAdminConf, "192.168.64.2", "restricted-token")
 	if err != nil {

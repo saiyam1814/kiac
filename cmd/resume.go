@@ -19,12 +19,13 @@ var resumeCmd = &cobra.Command{
 	Short: "Boot a stopped cluster's VMs and heal it after a host reboot",
 	Long: `Boot a stopped cluster's VMs and heal it after a host reboot.
 
-A reboot (or 'container system stop') halts every node VM, and vmnet
-hands out fresh IPs on the next boot. resume restarts the VMs and heals
-the distro-specific state: kubeadm certificates and configs, or k3s
-agent endpoints and node-addressed pods. It also refreshes the host
-kubeconfig and networking helpers, then waits for current Ready nodes.
-Safe to re-run; a running cluster is a no-op.`,
+A reboot (or 'container system stop' for ordinary clusters) halts node VMs,
+and their VM network may hand out fresh IPs on the next boot. resume restarts
+apple/container or krunkit VMs and heals distro-specific state: kubeadm
+certificates and configs, or k3s agent endpoints and node-addressed pods. It
+also reconciles GPU resources and built-in addons when present, refreshes the
+host kubeconfig and networking helpers, then waits for current Ready nodes.
+Safe to re-run.`,
 	Example: `  kiac resume cluster --name dev`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

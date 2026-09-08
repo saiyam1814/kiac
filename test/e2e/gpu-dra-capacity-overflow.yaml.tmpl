@@ -1,0 +1,37 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: kiac-gpu-capacity-overflow
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.kiac.dev
+          capacity:
+            requests:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-capacity-overflow
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: __NODE__
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  resourceClaims:
+    - name: gpu
+      resourceClaimName: kiac-gpu-capacity-overflow
+  containers:
+    - name: hold
+      image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      command: [sh, -c, "sleep 600"]
+      resources:
+        claims:
+          - name: gpu

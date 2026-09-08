@@ -3,433 +3,892 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>kiac - Kubernetes in Apple Containers</title>
-<meta name="description" content="Local Kubernetes clusters where every node is its own lightweight virtual machine. Cilium and eBPF on a Mac, k3s in about 30 seconds, clusters that survive reboots. Native on Apple silicon, powered by apple/container.">
+<title>kiac - Real Kubernetes and Apple GPU clusters on your Mac</title>
+<meta name="description" content="Create multi-node Kubernetes clusters on Apple silicon where every node is its own lightweight VM. Run kubeadm, k3s, Cilium, Gateway API, observability, and real Apple GPU workloads through Venus and Kubernetes DRA.">
+<meta name="theme-color" content="#f5f7fa">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://saiyam1814.github.io/kiac/">
 <meta property="og:title" content="kiac - Kubernetes in Apple Containers">
-<meta property="og:description" content="Every node is its own lightweight VM. Cilium and eBPF on a Mac, k3s in ~30s, clusters that survive reboots. Storage, metrics, and LoadBalancer included.">
-<meta property="og:image" content="assets/banner.png">
+<meta property="og:description" content="Real VM-per-node Kubernetes on Apple silicon, now with opt-in Apple GPU workers through Vulkan, Venus, and Kubernetes DRA.">
+<meta property="og:image" content="https://saiyam1814.github.io/kiac/assets/og-v071.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="kiac - Kubernetes in Apple Containers">
+<meta name="twitter:description" content="Real VM-per-node Kubernetes on Apple silicon, now with opt-in Apple GPU workers through Vulkan, Venus, and Kubernetes DRA.">
+<meta name="twitter:image" content="https://saiyam1814.github.io/kiac/assets/og-v071.jpg">
+<link rel="canonical" href="https://saiyam1814.github.io/kiac/">
 <link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg">
 <style>
   :root {
-    --accent: #326CE5;
-    --accent-hover: #4F83EA;
-    --accent-tint: #E0EAFB;
-    --ink: #050B24;
-    --mid: #828592;
-    --subtle: #B4B6BD;
-    --divider: #E6E7E9;
-    --bg-soft: #EDEFF3;
-    --code-blue: #7EB8FF;
-    --radius: 18px;
+    --ink: #0c172a;
+    --ink-soft: #334155;
+    --muted: #667085;
+    --line: #dce2ea;
+    --line-strong: #c5ceda;
+    --paper: #f5f7fa;
+    --white: #ffffff;
+    --blue: #2867e8;
+    --blue-dark: #174fbf;
+    --blue-soft: #e8efff;
+    --green: #0d8a70;
+    --green-soft: #e4f5ef;
+    --coral: #df5b4d;
+    --amber: #c9840b;
+    --night: #101827;
+    --night-soft: #182338;
+    --code: #0b1220;
+    --radius: 8px;
+    --shadow: 0 18px 54px rgba(12, 23, 42, 0.12);
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+    margin: 0;
     color: var(--ink);
-    background: #fff;
+    background: var(--white);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
-    line-height: 1.5;
   }
-  nav {
-    position: sticky; top: 0; z-index: 50;
-    backdrop-filter: saturate(180%) blur(20px);
-    -webkit-backdrop-filter: saturate(180%) blur(20px);
-    background: rgba(255,255,255,0.72);
-    border-bottom: 1px solid var(--divider);
+  body, button { letter-spacing: 0; }
+  img { max-width: 100%; height: auto; }
+  a { color: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  :focus-visible { outline: 3px solid rgba(40, 103, 232, 0.4); outline-offset: 3px; }
+  code, pre {
+    font-family: "SFMono-Regular", "SF Mono", "Roboto Mono", ui-monospace, monospace;
+    letter-spacing: 0;
   }
-  .nav-inner {
-    max-width: 980px; margin: 0 auto; padding: 12px 22px;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 19px; text-decoration: none; color: var(--ink); letter-spacing: -0.01em; }
-  .brand img { width: 26px; height: 26px; display: block; }
-  .nav-links { display: flex; gap: 26px; align-items: center; }
-  .nav-links a { text-decoration: none; color: var(--mid); font-size: 14px; transition: color .2s; }
-  .nav-links a:hover { color: var(--ink); }
-  .nav-links a.gh {
-    color: #fff; background: var(--ink); padding: 7px 16px; border-radius: 99px; font-weight: 600;
-  }
-  .nav-links a.gh:hover { background: #1a2140; }
-
-  .hero { max-width: 980px; margin: 0 auto; padding: 88px 22px 56px; text-align: center; }
-  .pill {
-    display: inline-block; font-size: 13px; font-weight: 600; color: var(--accent);
-    background: var(--accent-tint); border-radius: 99px; padding: 6px 14px; margin-bottom: 24px;
+  .skip {
+    position: fixed;
+    left: 16px;
+    top: -64px;
+    z-index: 100;
+    padding: 10px 14px;
+    border-radius: 6px;
+    color: var(--white);
+    background: var(--ink);
     text-decoration: none;
   }
-  h1 {
-    font-size: clamp(44px, 8vw, 76px); line-height: 1.04; letter-spacing: -0.02em; font-weight: 800;
-  }
-  h1 .grad {
-    background: linear-gradient(92deg, var(--accent), #54A3FF 60%, #8FC2FF);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-  }
-  .sub {
-    margin: 26px auto 0; max-width: 640px; font-size: 21px; color: var(--mid); font-weight: 400;
-  }
-  .cta-row { margin-top: 38px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-  .btn {
-    text-decoration: none; font-weight: 600; font-size: 16px; padding: 13px 26px; border-radius: 99px; transition: all .2s;
-  }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
-  .btn-ghost { color: var(--ink); border: 1px solid var(--divider); }
-  .btn-ghost:hover { border-color: var(--subtle); }
+  .skip:focus { top: 14px; }
 
-  .install {
-    margin: 44px auto 0; max-width: 560px; display: flex; align-items: center; gap: 10px;
-    background: var(--bg-soft); border-radius: 14px; padding: 14px 18px;
-    font-family: "SF Mono", "Roboto Mono", ui-monospace, monospace; font-size: 14.5px;
+  .site-nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    min-height: 64px;
+    border-bottom: 1px solid rgba(197, 206, 218, 0.8);
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
   }
-  .install code { flex: 1; text-align: left; color: var(--ink); overflow-x: auto; white-space: nowrap; }
-  .install .dollar { color: var(--accent); user-select: none; }
-  .copy {
-    border: none; background: #fff; border-radius: 9px; padding: 7px 12px; cursor: pointer;
-    font-size: 12.5px; font-weight: 600; color: var(--mid); box-shadow: 0 1px 3px rgba(5,11,36,.08);
+  .nav-inner {
+    width: min(1180px, calc(100% - 40px));
+    min-height: 64px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 28px;
   }
-  .copy:hover { color: var(--ink); }
-  .install-note { margin: 12px auto 0; font-size: 13px; color: var(--subtle); }
-  .install-note code { background: var(--bg-soft); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    font-size: 19px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+  .brand img { width: 28px; height: 28px; display: block; }
+  .nav-links {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .nav-links a {
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .nav-links a:hover { color: var(--ink); }
+  .nav-links .nav-cta {
+    padding: 8px 14px;
+    border-radius: 6px;
+    color: var(--white);
+    background: var(--ink);
+  }
+  .nav-links .nav-cta:hover { color: var(--white); background: var(--blue-dark); }
+  .menu-button {
+    display: none;
+    margin-left: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--ink);
+    background: var(--white);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
 
-  .videowrap { max-width: 880px; margin: 64px auto 0; }
-  .videowrap video, .videowrap img {
-    width: 100%; border-radius: var(--radius); display: block;
-    box-shadow: 0 30px 80px -28px rgba(5,11,36,.30); border: 1px solid var(--divider);
+  .hero {
+    position: relative;
+    min-height: min(780px, calc(100svh - 112px));
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+    isolation: isolate;
   }
+  .hero-art {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    z-index: -2;
+  }
+  .hero-inner {
+    width: min(1180px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: 72px 0 82px;
+  }
+  .release-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 22px;
+    color: var(--blue-dark);
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+  .release-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 5px rgba(13, 138, 112, 0.12);
+  }
+  h1, h2, h3, p { margin-top: 0; }
+  .hero h1 {
+    max-width: 680px;
+    margin-bottom: 12px;
+    font-size: 84px;
+    line-height: 0.95;
+    font-weight: 850;
+    letter-spacing: 0;
+  }
+  .hero-headline {
+    max-width: 650px;
+    margin-bottom: 20px;
+    font-size: 32px;
+    line-height: 1.16;
+    font-weight: 760;
+  }
+  .hero-copy {
+    max-width: 610px;
+    margin-bottom: 30px;
+    color: var(--ink-soft);
+    font-size: 18px;
+  }
+  .hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 10px 18px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 750;
+    text-decoration: none;
+    transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease;
+  }
+  .button:hover { transform: translateY(-1px); }
+  .button-primary { color: var(--white); background: var(--blue); }
+  .button-primary:hover { background: var(--blue-dark); }
+  .button-secondary { border-color: var(--line-strong); color: var(--ink); background: rgba(255, 255, 255, 0.72); }
+  .button-secondary:hover { border-color: var(--ink-soft); background: var(--white); }
+  .install-command {
+    width: min(600px, 100%);
+    margin-top: 24px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 12px 11px 16px;
+    border: 1px solid rgba(197, 206, 218, 0.9);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.86);
+    box-shadow: 0 10px 34px rgba(12, 23, 42, 0.08);
+  }
+  .install-command code {
+    overflow-x: auto;
+    color: var(--ink);
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .prompt { color: var(--blue); }
+  .copy-button {
+    min-width: 62px;
+    min-height: 34px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--ink-soft);
+    background: var(--white);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  .copy-button:hover { border-color: var(--blue); color: var(--blue-dark); }
 
+  .proof-strip { background: var(--night); color: var(--white); }
+  .proof-grid {
+    width: min(1180px, calc(100% - 40px));
+    min-height: 96px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .proof-item {
+    padding: 22px 24px;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+  }
+  .proof-item:last-child { border-right: 1px solid rgba(255, 255, 255, 0.12); }
+  .proof-item strong { display: block; margin-bottom: 2px; font-size: 20px; }
+  .proof-item span { color: #abb8cb; font-size: 13px; }
+  .proof-item a { color: #dbe7ff; text-decoration: none; }
+  .proof-item a:hover { text-decoration: underline; }
+
+  .band { padding: 104px 0; }
+  .band-soft { background: var(--paper); }
+  .band-night { color: var(--white); background: var(--night); }
+  .inner { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+  .section-head { max-width: 770px; margin-bottom: 46px; }
+  .eyebrow {
+    margin-bottom: 10px;
+    color: var(--blue);
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .band-night .eyebrow { color: #7fb0ff; }
+  .section-head h2, .architecture-copy h2, .install-copy h2 {
+    margin-bottom: 16px;
+    font-size: 44px;
+    line-height: 1.08;
+    font-weight: 820;
+    letter-spacing: 0;
+  }
+  .section-head p, .architecture-copy p, .install-copy p {
+    margin-bottom: 0;
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .band-night .section-head p, .band-night .install-copy p { color: #b9c5d6; }
+
+  .gpu-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(440px, 1.08fr);
+    gap: 64px;
+    align-items: start;
+  }
+  .gpu-layout > *, .terminal { min-width: 0; }
+  .gpu-layout .section-head { margin-bottom: 28px; }
+  .truth-note {
+    max-width: 650px;
+    margin: 24px 0 30px;
+    padding: 15px 17px;
+    border-left: 3px solid var(--coral);
+    color: #c8d2e2;
+    background: var(--night-soft);
+    font-size: 14px;
+  }
+  .truth-note strong { color: var(--white); }
+  .text-links { display: flex; flex-wrap: wrap; gap: 20px; }
+  .text-link {
+    color: #8bb8ff;
+    font-weight: 750;
+    text-decoration: none;
+  }
+  .text-link:hover { text-decoration: underline; }
   .terminal {
-    max-width: 760px; margin: 28px auto 0; border-radius: var(--radius); overflow: hidden;
-    box-shadow: 0 30px 80px -20px rgba(5,11,36,.35); text-align: left;
-    background: #0d1226;
+    overflow: hidden;
+    border: 1px solid #2a3850;
+    border-radius: var(--radius);
+    background: var(--code);
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
   }
-  .term-bar { display: flex; gap: 7px; padding: 13px 16px; background: #161c36; }
-  .dot { width: 12px; height: 12px; border-radius: 50%; }
-  .dot:nth-child(1){background:#ff5f57}.dot:nth-child(2){background:#febc2e}.dot:nth-child(3){background:#28c840}
-  .term-body {
-    padding: 22px 24px 26px; font-family: "SF Mono", "Roboto Mono", ui-monospace, monospace;
-    font-size: 13.5px; line-height: 1.75; color: #c9cede; min-height: 330px;
+  .terminal-bar {
+    min-height: 42px;
+    padding: 11px 16px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-bottom: 1px solid #26334a;
+    color: #8fa0b9;
+    background: #131d2f;
+    font: 12px/1 "SFMono-Regular", "SF Mono", ui-monospace, monospace;
   }
-  .term-body .p { color: var(--code-blue); }
-  .term-body .ok { color: #34d399; }
-  .term-body .d { color: #5d6486; }
-  .term-body .o { color: var(--accent); }
-  .term-body .b { color: #fff; font-weight: 600; }
+  .terminal-bar .spacer { flex: 1; }
+  .window-dot { width: 9px; height: 9px; border-radius: 50%; background: #53627a; }
+  .terminal pre {
+    margin: 0;
+    min-height: 420px;
+    padding: 24px;
+    overflow-x: auto;
+    color: #c8d4e5;
+    font-size: 13px;
+    line-height: 1.72;
+  }
+  .terminal .cmd { color: #ffffff; }
+  .terminal .ok { color: #52d8ad; }
+  .terminal .key { color: #88b9ff; }
+  .terminal .value { color: #f3c36a; }
+  .gpu-path {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 68px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-top: 1px solid #334058;
+    border-bottom: 1px solid #334058;
+  }
+  .gpu-step { min-height: 126px; padding: 22px 18px; border-left: 1px solid #334058; }
+  .gpu-step:last-child { border-right: 1px solid #334058; }
+  .gpu-step span { display: block; color: #7f90a9; font-size: 12px; font-weight: 750; text-transform: uppercase; }
+  .gpu-step strong { display: block; margin-top: 8px; font-size: 16px; }
+  .gpu-step p { margin: 5px 0 0; color: #aebbd0; font-size: 13px; }
 
-  section { max-width: 980px; margin: 0 auto; padding: 90px 22px 0; }
-  .kicker { color: var(--accent); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .08em; }
-  h2 { font-size: clamp(30px, 4.5vw, 44px); letter-spacing: -0.015em; margin-top: 10px; font-weight: 800; }
-  .lede { color: var(--mid); font-size: 18px; max-width: 660px; margin-top: 14px; }
-
-  .diagram { width: 100%; margin-top: 40px; border-radius: var(--radius); border: 1px solid var(--divider); display: block; }
-
-  .flavors { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
-  .flavor {
-    border: 1px solid var(--divider); border-radius: var(--radius); padding: 26px;
-    display: flex; flex-direction: column;
-    transition: transform .25s ease, box-shadow .25s ease;
+  .engine-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .engine-grid, .engine { min-width: 0; }
+  .engine {
+    min-height: 332px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--white);
   }
-  .flavor:hover { transform: translateY(-3px); box-shadow: 0 18px 44px -24px rgba(5,11,36,.25); }
-  .flavor .stat { font-size: 25px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent); }
-  .flavor h3 { font-size: 18px; margin: 6px 0 8px; font-weight: 700; }
-  .flavor p { color: var(--mid); font-size: 14.5px; flex: 1; }
-  .flavor .cmd {
-    margin-top: 18px; display: flex; align-items: center; gap: 8px;
-    background: var(--bg-soft); border-radius: 11px; padding: 10px 12px;
-    font-family: "SF Mono", "Roboto Mono", ui-monospace, monospace; font-size: 12.5px;
+  .engine-accent { border-top: 4px solid var(--blue); }
+  .engine-fast { border-top: 4px solid var(--green); }
+  .engine-ebpf { border-top: 4px solid var(--amber); }
+  .engine-label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+  .engine h3 { margin: 16px 0 10px; font-size: 24px; }
+  .engine p { color: var(--muted); font-size: 15px; }
+  .engine code {
+    margin-top: auto;
+    padding-top: 20px;
+    overflow-x: auto;
+    color: var(--blue-dark);
+    font-size: 12px;
+    white-space: nowrap;
   }
-  .flavor .cmd code { flex: 1; overflow-x: auto; white-space: nowrap; color: var(--ink); }
-  .flavor .fine { margin-top: 10px; flex: 0; font-size: 12px; color: var(--subtle); }
-  .flavor .fine code { background: var(--bg-soft); padding: 1px 6px; border-radius: 5px; font-size: 11.5px; }
+  .engine-note {
+    margin-top: 24px;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--line);
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+  .engine-note strong { color: var(--green); }
 
-  .numbers {
-    margin-top: 56px; background: var(--bg-soft); border-radius: var(--radius);
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px; padding: 28px 22px; text-align: center;
+  .capability-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
+  .capability {
+    min-height: 210px;
+    padding: 28px 0 30px;
+    border-top: 1px solid var(--line);
   }
-  .numbers .n b { display: block; font-size: 25px; font-weight: 800; letter-spacing: -0.01em; }
-  .numbers .n span { font-size: 13px; color: var(--mid); }
+  .capability-index { color: var(--coral); font-size: 12px; font-weight: 850; }
+  .capability h3 { margin: 10px 0 8px; font-size: 22px; }
+  .capability p { margin-bottom: 18px; color: var(--muted); font-size: 15px; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  .tag {
+    padding: 4px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--ink-soft);
+    background: var(--paper);
+    font: 11px/1.4 "SFMono-Regular", "SF Mono", ui-monospace, monospace;
+  }
 
-  .why-points { margin-top: 30px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-  .why-points .pt { padding: 4px 0; }
-  .why-points .pt b { display: block; font-size: 16px; margin-bottom: 4px; }
-  .why-points .pt p { color: var(--mid); font-size: 15px; }
+  .architecture-layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 0.72fr) minmax(0, 1.28fr);
+    gap: 58px;
+    align-items: center;
+  }
+  .architecture-copy .eyebrow { margin-bottom: 10px; }
+  .architecture-points { margin-top: 28px; display: grid; gap: 18px; }
+  .architecture-point { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 14px; }
+  .architecture-point b {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: 50%;
+    color: var(--blue-dark);
+    font-size: 12px;
+  }
+  .architecture-point strong { display: block; margin-bottom: 3px; }
+  .architecture-point span { color: var(--muted); font-size: 14px; }
+  .architecture-image {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--white);
+  }
 
-  .ecosystem-band {
-    display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 42px; align-items: center;
-    border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider);
-    padding-top: 34px; padding-bottom: 34px;
+  .lab-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .lab {
+    min-height: 188px;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--white);
+    text-decoration: none;
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
   }
-  .ecosystem-band img { width: 150px; max-height: 138px; object-fit: contain; justify-self: center; }
-  .ecosystem-copy h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: 0; }
-  .ecosystem-copy p { color: var(--mid); max-width: 670px; }
-  .text-link { display: inline-block; margin-top: 12px; color: var(--accent); font-weight: 700; text-decoration: none; }
+  .lab:hover { transform: translateY(-2px); border-color: var(--blue); box-shadow: 0 12px 30px rgba(12, 23, 42, 0.08); }
+  .lab-type { color: var(--blue-dark); font-size: 11px; font-weight: 850; text-transform: uppercase; }
+  .lab h3 { margin: 13px 0 7px; font-size: 19px; }
+  .lab p { color: var(--muted); font-size: 14px; }
+  .lab-cta { margin-top: auto; color: var(--blue-dark); font-size: 13px; font-weight: 750; }
 
-  .lab-showcase {
-    display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
-    gap: 48px; align-items: start; margin-top: 40px;
+  .install-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+    gap: 70px;
+    align-items: start;
   }
-  .lab-showcase + .lab-showcase { border-top: 1px solid var(--divider); padding-top: 42px; margin-top: 54px; }
-  .product-lockup { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-  .product-lockup img { width: 42px; height: 52px; object-fit: contain; }
-  .product-lockup img.wide-logo { width: 128px; height: 48px; }
-  .product-lockup strong { display: block; font-size: 20px; letter-spacing: 0; }
-  .product-lockup span { display: block; color: var(--mid); font-size: 14px; }
-  .lab-copy p { color: var(--mid); font-size: 15px; }
-  .lab-copy .license { color: var(--ink); font-weight: 700; margin-bottom: 10px; }
-  .lab-command {
-    margin-top: 18px; padding: 16px 18px; overflow-x: auto;
-    background: #0d1226; color: #c9cede; border-radius: 14px;
-    font: 13px/1.7 "SF Mono", "Roboto Mono", ui-monospace, monospace;
+  .install-layout, .install-copy, .install-stack, .install-block { min-width: 0; }
+  .install-stack { display: grid; gap: 12px; }
+  .install-block {
+    padding: 20px;
+    border: 1px solid #344159;
+    border-radius: var(--radius);
+    background: var(--night-soft);
   }
-  .lab-proof { border-bottom: 1px solid var(--divider); }
-  .lab-proof div { border-top: 1px solid var(--divider); padding: 13px 0; }
-  .lab-proof b { display: block; font-size: 14px; }
-  .lab-proof span { color: var(--mid); font-size: 13.5px; }
-  .lab-links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px; }
-  .lab-links a { color: var(--accent); font-weight: 700; text-decoration: none; }
+  .install-block span { display: block; margin-bottom: 9px; color: #8fa0b9; font-size: 12px; font-weight: 750; text-transform: uppercase; }
+  .install-block code { display: block; overflow-x: auto; color: #f7f9fc; font-size: 13px; white-space: nowrap; }
+  .requirements { margin: 24px 0 0; padding: 0; list-style: none; }
+  .requirements li { padding: 8px 0; border-bottom: 1px solid #303d53; color: #b9c5d6; font-size: 14px; }
+  .requirements strong { color: var(--white); }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
-  .card {
-    background: var(--bg-soft); border-radius: var(--radius); padding: 28px;
-    transition: transform .25s ease;
+  .supply {
+    padding: 28px 0;
+    border-bottom: 1px solid var(--line);
+    background: var(--white);
   }
-  .card:hover { transform: translateY(-3px); }
-  .card .emoji { font-size: 28px; }
-  .card h3 { font-size: 18px; margin: 14px 0 8px; font-weight: 700; }
-  .card p { color: var(--mid); font-size: 15px; }
-  .card code { font-family: "SF Mono","Roboto Mono",ui-monospace,monospace; font-size: 13px; color: var(--ink); background: #fff; padding: 1px 6px; border-radius: 6px; }
+  .supply-inner {
+    width: min(1180px, calc(100% - 40px));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+    gap: 44px;
+    align-items: center;
+  }
+  .supply h2 { margin-bottom: 0; font-size: 22px; }
+  .supply-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .supply-list span { color: var(--muted); font-size: 13px; }
+  .supply-list strong { display: block; color: var(--ink); font-size: 14px; }
 
-  footer {
-    margin-top: 110px; border-top: 1px solid var(--divider); padding: 44px 22px 60px;
-    text-align: center; color: var(--mid); font-size: 14px;
+  footer { padding: 42px 0 54px; background: var(--white); }
+  .footer-inner {
+    width: min(1180px, calc(100% - 40px));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 30px;
+    align-items: end;
   }
-  footer a { color: var(--ink); text-decoration: none; font-weight: 600; }
+  .footer-brand { margin-bottom: 8px; font-size: 20px; font-weight: 850; }
+  footer p { margin-bottom: 0; color: var(--muted); font-size: 13px; }
+  .footer-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 20px; }
+  .footer-links a { color: var(--ink-soft); font-size: 13px; font-weight: 700; text-decoration: none; }
+  .footer-links a:hover { color: var(--blue-dark); }
+
+  @media (max-width: 960px) {
+    .nav-links { gap: 16px; }
+    .nav-links a:nth-child(2), .nav-links a:nth-child(3) { display: none; }
+    .hero h1 { font-size: 68px; }
+    .hero-headline { font-size: 28px; max-width: 540px; }
+    .gpu-layout, .architecture-layout, .install-layout { grid-template-columns: 1fr; gap: 40px; }
+    .engine-grid, .lab-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .gpu-path { grid-template-columns: repeat(5, minmax(150px, 1fr)); overflow-x: auto; }
+    .terminal { max-width: 720px; }
+    .supply-inner { grid-template-columns: 1fr; gap: 20px; }
+  }
+
   @media (max-width: 720px) {
-    .ecosystem-band, .lab-showcase { grid-template-columns: 1fr; gap: 24px; }
-    .ecosystem-band img { justify-self: start; width: 118px; max-height: 108px; }
+    .nav-inner { width: min(100% - 28px, 1180px); flex-wrap: wrap; gap: 0; }
+    .menu-button { display: inline-flex; }
+    .nav-links {
+      display: none;
+      width: 100%;
+      padding: 10px 0 16px;
+      align-items: stretch;
+      flex-direction: column;
+      gap: 0;
+    }
+    .nav-links.open { display: flex; }
+    .nav-links a, .nav-links a:nth-child(2), .nav-links a:nth-child(3) { display: block; padding: 9px 4px; }
+    .nav-links .nav-cta { margin-top: 6px; padding: 10px 12px; text-align: center; }
+    .hero {
+      min-height: calc(100svh - 108px);
+      align-items: flex-start;
+    }
+    .hero-art { object-position: 61% center; opacity: 0.42; }
+    .hero-inner { width: min(100% - 32px, 1180px); padding: 54px 0 64px; }
+    .hero h1 { font-size: 54px; }
+    .hero-headline { font-size: 25px; max-width: 520px; }
+    .hero-copy { font-size: 16px; }
+    .install-command { margin-top: 20px; }
+    .proof-grid { width: min(100% - 32px, 1180px); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .proof-item { padding: 18px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+    .proof-item:nth-child(2) { border-right: 1px solid rgba(255, 255, 255, 0.12); }
+    .band { padding: 78px 0; }
+    .inner { width: min(100% - 32px, 1180px); }
+    .section-head h2, .architecture-copy h2, .install-copy h2 { font-size: 34px; }
+    .section-head p, .architecture-copy p, .install-copy p { font-size: 16px; }
+    .gpu-layout { display: block; }
+    .terminal { margin-top: 38px; }
+    .terminal pre { min-height: 0; padding: 18px; font-size: 11px; }
+    .engine-grid, .capability-grid, .lab-grid { grid-template-columns: 1fr; }
+    .engine { min-height: 286px; }
+    .capability { min-height: 0; }
+    .architecture-layout { display: flex; flex-direction: column; }
+    .architecture-image { order: -1; }
+    .supply-inner { width: min(100% - 32px, 1180px); }
+    .supply-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .footer-inner { width: min(100% - 32px, 1180px); grid-template-columns: 1fr; align-items: start; }
+    .footer-links { justify-content: flex-start; }
   }
-  @media (max-width: 600px) { .nav-links a:not(.gh) { display: none; } }
+
+  @media (max-width: 430px) {
+    .hero h1 { font-size: 46px; }
+    .hero-headline { font-size: 22px; }
+    .hero-actions { align-items: stretch; flex-direction: column; }
+    .button { width: 100%; }
+    .install-command { grid-template-columns: minmax(0, 1fr); }
+    .copy-button { width: 100%; }
+    .proof-grid { grid-template-columns: 1fr 1fr; }
+    .proof-item strong { font-size: 17px; }
+    .supply-list { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition-duration: 0.01ms !important; }
+  }
 </style>
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 
-<nav>
+<nav class="site-nav" aria-label="Primary navigation">
   <div class="nav-inner">
-    <a class="brand" href="#"><img src="assets/logo-mark.svg" alt="kiac"> kiac</a>
-    <div class="nav-links">
-      <a href="#why">Why</a>
-      <a href="#features">Features</a>
-      <a href="#install">Install</a>
+    <a class="brand" href="#top" aria-label="kiac home"><img src="assets/logo-mark.svg" alt="">kiac</a>
+    <button class="menu-button" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+    <div class="nav-links" id="nav-links">
+      <a href="#gpu">GPU alpha</a>
+      <a href="#engines">Engines</a>
+      <a href="#capabilities">Capabilities</a>
       <a href="#labs">Labs</a>
       <a href="docs/index.html">Docs</a>
-      <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+      <a class="nav-cta" href="https://github.com/saiyam1814/kiac">View on GitHub</a>
     </div>
   </div>
 </nav>
 
-<div class="hero">
-  <a class="pill" href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">Listed in the CNCF Landscape · Built on apple/container</a>
-  <h1>Kubernetes.<br><span class="grad">Every node, its own VM.</span></h1>
-  <p class="sub">Local clusters on Apple silicon where each node boots in its own lightweight virtual machine. Run Cilium and eBPF on a Mac. Get a k3s cluster in about 30 seconds. Keep your clusters across reboots. Storage, metrics, and LoadBalancer included.</p>
-  <div class="cta-row">
-    <a class="btn btn-primary" href="#install">Get started</a>
-    <a class="btn btn-ghost" href="docs/index.html">Read the docs</a>
-  </div>
-  <div class="install">
-    <code><span class="dollar">$</span> brew install --cask saiyam1814/tap/kiac</code>
-    <button class="copy" onclick="navigator.clipboard.writeText('brew install --cask saiyam1814/tap/kiac');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
-  </div>
-  <p class="install-note">Prefer Go? <code>go install github.com/saiyam1814/kiac@latest</code></p>
-
-  <div class="videowrap">
-    <video autoplay loop muted playsinline poster="assets/banner.png">
-      <source src="assets/kiac-demo.mp4" type="video/mp4">
-      <img src="assets/banner.png" alt="kiac demo">
-    </video>
-  </div>
-
-  <div class="terminal">
-    <div class="term-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-    <div class="term-body" id="term"></div>
-  </div>
-</div>
-
-<section class="ecosystem-band" id="landscape">
-  <img src="assets/logo-stacked.svg" alt="kiac full wordmark">
-  <div class="ecosystem-copy">
-    <div class="kicker">Cloud native ecosystem</div>
-    <h2>Now listed in the CNCF Landscape.</h2>
-    <p>Find kiac under Platform / Certified Kubernetes - Installer. The hosted Landscape logo includes the full <strong>kiac</strong> wordmark shown here; its text is simply easy to miss in the compact search thumbnail.</p>
-    <p>A Landscape listing records ecosystem inclusion. kiac is not currently a CNCF-hosted project and this listing does not imply CNCF endorsement.</p>
-    <a class="text-link" href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">View the live Landscape entry</a>
-  </div>
-</section>
-
-<section id="flavors">
-  <div class="kicker">Pick your flavor</div>
-  <h2>One binary, three ways to a cluster.</h2>
-  <p class="lede">The same VM-per-node foundation underneath. Choose the control plane and network stack that fits the job, then paste one line.</p>
-  <div class="flavors">
-    <div class="flavor">
-      <div class="stat">~1 min, full stack</div>
-      <h3>kubeadm · the default</h3>
-      <p>Real kubeadm on three nodes, usable on first boot: kindnet CNI, a default StorageClass, metrics-server, and kiac-lb handing out LoadBalancer IPs.</p>
-      <div class="cmd"><code>kiac create cluster --workers 2</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --workers 2');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
+<header class="hero" id="top">
+  <img class="hero-art" src="assets/hero-gpu-v071.webp" width="2400" height="1350" alt="Four lightweight virtual-machine nodes connected on an Apple silicon style chip, including one GPU worker" fetchpriority="high">
+  <div class="hero-inner">
+    <a class="release-link" href="https://github.com/saiyam1814/kiac/releases/tag/v0.7.1"><span class="release-dot" aria-hidden="true"></span>v0.7.1 is available</a>
+    <h1>kiac</h1>
+    <p class="hero-headline">Real Kubernetes nodes. Now with real Apple GPU access.</p>
+    <p class="hero-copy">Build multi-node clusters on Apple silicon where every node is its own lightweight VM. Choose kubeadm, k3s, or Cilium, then add opt-in GPU workers through krunkit, Venus, Vulkan, and Kubernetes DRA.</p>
+    <div class="hero-actions">
+      <a class="button button-primary" href="#install">Create your first cluster</a>
+      <a class="button button-secondary" href="docs/gpu.html">Explore Apple GPU nodes</a>
     </div>
-    <div class="flavor">
-      <div class="stat">~30s · 3.7GB</div>
-      <h3>k3s · the featherweight</h3>
-      <p>rancher/k3s runs as PID 1 in every VM with a sqlite datastore. A 2-node cluster in about 30 seconds, around 3.7GB of host memory for the whole thing.</p>
-      <div class="cmd"><code>kiac create cluster --distro k3s --workers 1</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --distro k3s --workers 1');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
-    </div>
-    <div class="flavor">
-      <div class="stat">eBPF · 1GB/s</div>
-      <h3>Cilium · the heavyweight</h3>
-      <p>Boots nodes on a published, sha-pinned full kernel and drives the official Cilium installer. eBPF datapath, ~285MB/s cross-node pod traffic, ~1GB/s Mac-to-pod.</p>
-      <div class="cmd"><code>kiac create cluster --cni cilium --kernel full</code><button class="copy" onclick="navigator.clipboard.writeText('kiac create cluster --cni cilium --kernel full');this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)">Copy</button></div>
-      <p class="fine">Prereq: <code>brew install cilium-cli</code></p>
+    <div class="install-command">
+      <code><span class="prompt">$</span> brew install --cask saiyam1814/tap/kiac</code>
+      <button class="copy-button" type="button" data-copy="brew install --cask saiyam1814/tap/kiac" aria-label="Copy Homebrew install command">Copy</button>
     </div>
   </div>
+</header>
 
-  <div class="numbers">
-    <div class="n"><b>2s</b><span>LoadBalancer IPs assigned</span></div>
-    <div class="n"><b>~30s</b><span>k3s cluster up</span></div>
-    <div class="n"><b>1m37s</b><span>full Cilium stack</span></div>
-    <div class="n"><b>46s</b><span>resume after reboot</span></div>
-    <div class="n"><b>1GB/s</b><span>Mac-to-pod throughput</span></div>
-  </div>
-</section>
+<main id="main">
+  <section class="proof-strip" aria-label="Project highlights">
+    <div class="proof-grid">
+      <div class="proof-item"><strong>Kubernetes 1.37</strong><span>Latest pinned kubeadm release</span></div>
+      <div class="proof-item"><strong>2 VM backends</strong><span>apple/container and krunkit</span></div>
+      <div class="proof-item"><strong>DRA + device plugin</strong><span>Honest <code>kiac.dev/gpu</code> scheduling</span></div>
+      <div class="proof-item"><strong><a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a></strong><span>Listed in the cloud native ecosystem</span></div>
+    </div>
+  </section>
 
-<section id="why">
-  <div class="kicker">Why Apple containers</div>
-  <h2>Each container is its own VM.</h2>
-  <p class="lede">When Apple shipped <code>container</code> 1.0, the interesting part was underneath: every container boots a separate, minimal Linux VM on Apple's Virtualization framework. That is exactly the boundary a Kubernetes node wants.</p>
-  <img class="diagram" src="assets/apple-container-anatomy.png" alt="How one Apple container works">
-  <div class="why-points">
-    <div class="pt"><b>The image is the disk</b><p>The OCI image becomes an EXT4 root block device. No overlay mount on a shared host kernel.</p></div>
-    <div class="pt"><b>A dedicated kernel</b><p>Each container gets its own minimal, optimized Linux kernel, booting in about a second.</p></div>
-    <div class="pt"><b>vminitd is PID 1</b><p>A tiny Swift init launches your process, driven by the host over a gRPC API on vsock.</p></div>
-    <div class="pt"><b>Direct networking</b><p>virtio devices, no BIOS, and its own IP your Mac can reach. No port-forwarding.</p></div>
-  </div>
-</section>
+  <section class="band band-night" id="gpu">
+    <div class="inner">
+      <div class="gpu-layout">
+        <div>
+          <div class="section-head">
+            <p class="eyebrow">New in v0.7.1 &middot; Alpha</p>
+            <h2>Your Mac GPU, scheduled by Kubernetes.</h2>
+            <p>Kiac creates dedicated krunkit workers, maps the Apple GPU through virtio-gpu, and exposes a verified Venus/Vulkan device only to workloads that request it.</p>
+          </div>
+          <div class="truth-note"><strong>Real GPU, precise contract.</strong> This is Vulkan on Apple silicon, not CUDA emulation. Kiac publishes <code>kiac.dev/gpu</code>, supports the <code>gpu.kiac.dev</code> DRA driver, and never pretends that <code>nvidia.com/gpu</code> capacity exists.</div>
+          <div class="text-links">
+            <a class="text-link" href="docs/gpu.html">Read the GPU architecture &rarr;</a>
+            <a class="text-link" href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md">Run the complete GPU lab &rarr;</a>
+          </div>
+        </div>
+        <div class="terminal" aria-label="GPU cluster creation and Vulkan verification output">
+          <div class="terminal-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span><span class="spacer"></span>gpu-lab</div>
+          <pre><span class="cmd">$ kiac gpu doctor</span>
+<span class="ok">OK</span>  Apple silicon host
+<span class="ok">OK</span>  krunkit 1.3.2+
+<span class="ok">OK</span>  vmnet-helper 0.13.0+
+<span class="ok">OK</span>  Venus-capable renderer
 
-<section id="isolation">
-  <div class="kicker">Real isolation</div>
-  <h2>The boundary is the hypervisor.</h2>
-  <p class="lede">Run "nodes" as Docker containers and they share one kernel, separated only by namespaces, a software boundary. With kiac the boundary between nodes is the hypervisor, the same one that separates virtual machines.</p>
-  <img class="diagram" src="assets/isolation.png" alt="Where the isolation boundary sits">
-  <div class="why-points">
-    <div class="pt"><b>Contained blast radius</b><p>A container escape that reaches a shared kernel reaches every node. A VM per node contains it to one.</p></div>
-    <div class="pt"><b>Independent failure domains</b><p>One kernel panic or runaway sysctl stays inside the VM that caused it, not the whole cluster.</p></div>
-    <div class="pt"><b>Real node failure</b><p>Stop a node VM and the control plane sees NotReady, evicts, and reschedules. Actually testable.</p></div>
-    <div class="pt"><b>Per-node kernel reality</b><p>Own /proc, /sys, modules, and sysctls. Node-level behavior is real, not simulated.</p></div>
-  </div>
-</section>
+<span class="cmd">$ kiac create cluster --name gpu-lab \
+    --distro k3s --workers 1 --gpu-workers 1 \
+    --gpu-resource-driver dra</span>
 
-<section id="features">
-  <div class="kicker">Batteries included</div>
-  <h2>Usable the moment it is up.</h2>
-  <p class="lede">A default StorageClass, metrics-server, and node IPs your Mac can reach directly come standard on every cluster. Then it keeps going.</p>
-  <div class="grid">
-    <div class="card"><div class="emoji">⚖️</div><h3>LoadBalancer included</h3><p>kiac-lb ships by default: a tiny controller inside the control-plane VM assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds. The edge proxy keeps large external uploads flowing.</p></div>
-    <div class="card"><div class="emoji">📈</div><h3>Observability built in</h3><p><code>--observability</code> installs Prometheus and Grafana on a real LoadBalancer IP, dashboards already provisioned. Works on kubeadm, k3s, and Cilium clusters.</p></div>
-    <div class="card"><div class="emoji">🚪</div><h3>Gateway API built in</h3><p><code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway, so an HTTPRoute just works.</p></div>
-    <div class="card"><div class="emoji">🔁</div><h3>Survives reboots</h3><p><code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals the control-plane IP everywhere: cert, kubeconfigs, kube-proxy. Idempotent.</p></div>
-    <div class="card"><div class="emoji">💥</div><h3>Node chaos you can trust</h3><p><code>kiac stop node</code> halts a real node VM: NotReady, eviction, rescheduling. <code>kiac start node</code> boots it back in.</p></div>
-    <div class="card"><div class="emoji">⚡</div><h3>k3s in seconds</h3><p><code>--distro k3s</code> runs rancher/k3s as PID 1 in every VM: sqlite datastore, a 2-node cluster in about 30 seconds, about 3.7GB of host memory total.</p></div>
-    <div class="card"><div class="emoji">🐝</div><h3>Cilium on a real kernel</h3><p><code>--cni cilium --kernel full</code> boots nodes on a published, sha-pinned kernel (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. ~285MB/s cross-node, ~1GB/s Mac-to-pod.</p></div>
-    <div class="card"><div class="emoji">📄</div><h3>Declarative clusters</h3><p><code>kiac create cluster --config cluster.yaml</code> describes the whole cluster in one file; explicit flags override it.</p></div>
-    <div class="card"><div class="emoji">🖥️</div><h3>A console when you want one</h3><p><code>kiac ui</code> opens a local dashboard: cluster cards, live resource bars, node stop/start buttons, a per-cluster kubectl console, Grafana and Gateway links.</p></div>
-    <div class="card"><div class="emoji">🍎</div><h3>Native stack</h3><p>One Swift runtime from Apple, one Go binary from us. No Docker Desktop, no Lima, no QEMU in between.</p></div>
-  </div>
-</section>
+<span class="ok">Cluster "gpu-lab" is ready.</span>
 
-<section id="labs">
-  <div class="kicker">Optional applications</div>
-  <h2>Run the integration, then prove it works.</h2>
-  <p class="lede">Run applications on kiac with repeatable setup, real user-facing checks, and cleanup. These examples stay outside the kiac binary, so normal clusters pay no startup or idle-resource cost.</p>
-  <div class="lab-showcase">
-    <div class="lab-copy">
-      <div class="product-lockup">
-        <img src="assets/portainer-mark.svg" alt="">
-        <div><strong>Portainer Community Edition</strong><span>Optional Kubernetes management UI</span></div>
+<span class="cmd">$ kubectl logs kiac-gpu-vulkan</span>
+<span class="key">deviceName</span> = <span class="value">Virtio-GPU Venus (Apple M1 Max)</span>
+<span class="key">driverName</span> = <span class="value">venus</span>
+<span class="ok">KIAC_REAL_APPLE_GPU_OK</span></pre>
+        </div>
       </div>
-      <p class="license">No license key required.</p>
-      <p>This example installs Portainer CE 2.39.5 inside a kiac cluster, creates persistent storage and a real LoadBalancer endpoint, protects the generated admin password, and registers the kiac cluster in Portainer.</p>
-      <pre class="lab-command">./examples/portainer.sh up
-./examples/portainer.sh verify
-./examples/portainer.sh cleanup</pre>
-      <div class="lab-links"><a href="docs/portainer.html">Run Portainer on kiac</a><a href="docs/labs.html">All integration labs</a></div>
-    </div>
-    <div class="lab-proof">
-      <div><b>Authenticated, not assumed</b><span>The verifier obtains a JWT from the live Portainer API.</span></div>
-      <div><b>Kubernetes environment healthy</b><span>Portainer reports the local Type 5 environment available.</span></div>
-      <div><b>Management path exercised</b><span>The Kubernetes API proxy returns the cluster's NodeList.</span></div>
-      <div><b>Fresh release baseline</b><span><code>up</code>, a separate <code>verify</code>, and <code>cleanup</code> passed on kiac v0.5.0.</span></div>
-    </div>
-  </div>
-  <div class="lab-showcase">
-    <div class="lab-copy">
-      <div class="product-lockup">
-        <img class="wide-logo" src="assets/rancher-logo.svg" alt="Rancher">
-        <div><strong>Rancher Manager</strong><span>Optional Kubernetes management platform</span></div>
-      </div>
-      <p class="license">Open source. No license key required.</p>
-      <p>This example installs Rancher 2.14.3 on a dedicated Kubernetes 1.34 cluster, terminates local TLS through kiac's Gateway API, and keeps its bootstrap credential and lifecycle explicit.</p>
-      <pre class="lab-command">./examples/rancher.sh up
-./examples/rancher.sh verify
-./examples/rancher.sh cleanup</pre>
-      <div class="lab-links"><a href="docs/rancher.html">Run Rancher on kiac</a><a href="docs/labs.html">All integration labs</a></div>
-    </div>
-    <div class="lab-proof">
-      <div><b>Gateway path exercised</b><span>HTTPS reaches Rancher's dashboard through accepted Gateway API routes.</span></div>
-      <div><b>Authenticated, not assumed</b><span>The verifier signs in and confirms the pinned server version.</span></div>
-      <div><b>Local cluster active</b><span>Rancher's API reports the management cluster active and returns its node.</span></div>
-      <div><b>Dedicated ownership</b><span>Cleanup removes the entire isolated cluster and protected local state.</span></div>
-    </div>
-  </div>
-</section>
 
-<section id="install">
-  <div class="kicker">Install</div>
-  <h2>Three commands to a cluster.</h2>
-  <div class="grid">
-    <div class="card"><h3>1 · Install the runtime</h3><p>Grab <a href="https://github.com/apple/container/releases" style="color:var(--accent);font-weight:600;text-decoration:none">apple/container 1.0</a> (signed pkg from Apple). Requires an Apple silicon Mac; macOS 26+ for multi-node.</p></div>
-    <div class="card"><h3>2 · Install kiac</h3><p><code>brew install --cask saiyam1814/tap/kiac</code><br><br>Then check your setup: <code>kiac doctor</code></p></div>
-    <div class="card"><h3>3 · Create</h3><p><code>kiac create cluster --workers 2</code><br><br>Kubernetes 1.32-1.37, then <code>kubectl get nodes</code> and you are flying.</p></div>
-  </div>
-  <p style="margin-top:26px;color:var(--mid)">From there the <a href="docs/index.html" style="color:var(--accent);font-weight:600;text-decoration:none">documentation</a> covers networking, the k3s distro, Cilium and custom kernels, reboots and resume, observability, Gateway API, node chaos, the dashboard, and every CLI flag.</p>
-</section>
+      <div class="gpu-path" aria-label="Apple GPU workload path">
+        <div class="gpu-step"><span>01 &middot; Host</span><strong>Apple silicon</strong><p>Unified GPU hardware</p></div>
+        <div class="gpu-step"><span>02 &middot; VM</span><strong>krunkit</strong><p>Dedicated Linux node</p></div>
+        <div class="gpu-step"><span>03 &middot; Device</span><strong>virtio-gpu</strong><p>Paravirtual transport</p></div>
+        <div class="gpu-step"><span>04 &middot; API</span><strong>Venus / Vulkan</strong><p>Real render path</p></div>
+        <div class="gpu-step"><span>05 &middot; Scheduler</span><strong>DRA or plugin</strong><p>Allocated pod access</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-soft" id="engines">
+    <div class="inner">
+      <div class="section-head">
+        <p class="eyebrow">One binary, deliberate choices</p>
+        <h2>Use the cluster engine the work deserves.</h2>
+        <p>Ordinary clusters stay on the fast apple/container path. The krunkit stack is loaded only when a cluster asks for GPU workers.</p>
+      </div>
+      <div class="engine-grid">
+        <article class="engine engine-accent">
+          <span class="engine-label">Default &middot; Kubernetes 1.37</span>
+          <h3>kubeadm</h3>
+          <p>Production-shaped Kubernetes on real VM nodes, with kindnet, storage, metrics, and LoadBalancer support installed on first boot.</p>
+          <code>kiac create cluster --workers 2</code>
+        </article>
+        <article class="engine engine-fast">
+          <span class="engine-label">Fast path &middot; Kubernetes 1.36</span>
+          <h3>k3s</h3>
+          <p>A compact multi-node cluster with rancher/k3s as PID 1 in every VM. Ideal for fast local loops without giving up node boundaries.</p>
+          <code>kiac create cluster --distro k3s --workers 1</code>
+        </article>
+        <article class="engine engine-ebpf">
+          <span class="engine-label">eBPF datapath</span>
+          <h3>Cilium</h3>
+          <p>Boot the published sha-pinned full kernel, then install the official Cilium datapath for eBPF, VXLAN, and network policy work.</p>
+          <code>kiac create cluster --cni cilium --kernel full</code>
+        </article>
+      </div>
+      <p class="engine-note"><strong>No tax on the default path.</strong> GPU dependencies, processes, disk images, and memory are absent from ordinary apple/container clusters.</p>
+    </div>
+  </section>
+
+  <section class="band" id="capabilities">
+    <div class="inner">
+      <div class="section-head">
+        <p class="eyebrow">A complete local platform</p>
+        <h2>Build the workflow, not just the control plane.</h2>
+        <p>The defaults cover the first five minutes. Optional flags take you through traffic, telemetry, failure testing, and recovery using the same lifecycle.</p>
+      </div>
+      <div class="capability-grid">
+        <article class="capability">
+          <span class="capability-index">01</span>
+          <h3>Traffic that behaves like traffic</h3>
+          <p>Node IPs are directly reachable from macOS. kiac-lb assigns LoadBalancer addresses, the edge proxy handles large uploads, and Gateway API routes are ready when requested.</p>
+          <div class="tag-row"><span class="tag">LoadBalancer</span><span class="tag">Gateway API</span><span class="tag">HTTPRoute</span><span class="tag">dual-stack</span></div>
+        </article>
+        <article class="capability">
+          <span class="capability-index">02</span>
+          <h3>Platform signals included</h3>
+          <p>Metrics and a default StorageClass ship with every cluster. Add Prometheus, Grafana, and provisioned dashboards with a single flag.</p>
+          <div class="tag-row"><span class="tag">kubectl top</span><span class="tag">PVC</span><span class="tag">Prometheus</span><span class="tag">Grafana</span></div>
+        </article>
+        <article class="capability">
+          <span class="capability-index">03</span>
+          <h3>Real day-two behavior</h3>
+          <p>Stop a node VM, watch Kubernetes react, then bring it back. Resume clusters after a Mac reboot and let kiac repair changed addresses across the control plane.</p>
+          <div class="tag-row"><span class="tag">stop / start</span><span class="tag">NotReady</span><span class="tag">reschedule</span><span class="tag">resume</span></div>
+        </article>
+        <article class="capability">
+          <span class="capability-index">04</span>
+          <h3>Operable by people and automation</h3>
+          <p>Use declarative cluster files, the local web console, read-only verification with stable JSON, and bounded redacted support bundles.</p>
+          <div class="tag-row"><span class="tag">cluster.yaml</span><span class="tag">kiac ui</span><span class="tag">verify</span><span class="tag">support bundle</span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-soft" id="architecture">
+    <div class="inner architecture-layout">
+      <div class="architecture-copy">
+        <p class="eyebrow">Why it feels real</p>
+        <h2>Each node is a machine.</h2>
+        <p>An Apple container boots its own lightweight Linux VM. That gives every Kubernetes node an independent kernel, cgroups, IP, and failure boundary.</p>
+        <div class="architecture-points">
+          <div class="architecture-point"><b>01</b><div><strong>Hypervisor isolation</strong><span>Nodes do not share one hidden Linux kernel.</span></div></div>
+          <div class="architecture-point"><b>02</b><div><strong>Independent failure domains</strong><span>A stopped worker becomes genuinely NotReady.</span></div></div>
+          <div class="architecture-point"><b>03</b><div><strong>Native host stack</strong><span>Apple runtime for everyday nodes, krunkit only for GPU clusters.</span></div></div>
+        </div>
+      </div>
+      <img class="architecture-image" src="assets/apple-container-anatomy.png" width="3733" height="2080" loading="lazy" alt="Diagram explaining how an Apple container becomes a lightweight virtual machine with its own kernel, root filesystem, and IP">
+    </div>
+  </section>
+
+  <section class="band" id="labs">
+    <div class="inner">
+      <div class="section-head">
+        <p class="eyebrow">Reproducible labs</p>
+        <h2>Run it, verify it, clean it up.</h2>
+        <p>The examples exercise real user paths and include explicit verification. Optional applications remain outside the kiac binary, so unused integrations add no startup cost.</p>
+      </div>
+      <div class="lab-grid">
+        <a class="lab" href="docs/gpu.html"><span class="lab-type">Compute</span><h3>Apple GPU and inference</h3><p>Vulkan proof, DRA memory, TinyLlama inference, compatibility mode, and native Metal comparison.</p><span class="lab-cta">Open GPU lab &rarr;</span></a>
+        <a class="lab" href="docs/gateway-api.html"><span class="lab-type">Networking</span><h3>Gateway API</h3><p>Create a GatewayClass, Gateway, HTTPRoute, backend Service, and verify the routed response.</p><span class="lab-cta">Open Gateway lab &rarr;</span></a>
+        <a class="lab" href="docs/observability.html"><span class="lab-type">Telemetry</span><h3>Observability</h3><p>Install Prometheus and Grafana, inspect provisioned dashboards, and validate scrape targets.</p><span class="lab-cta">Open observability lab &rarr;</span></a>
+        <a class="lab" href="docs/portainer.html"><span class="lab-type">Management</span><h3>Portainer CE on kiac</h3><p>Install the license-free Community Edition, register the cluster, and prove API access.</p><span class="lab-cta">Run Portainer &rarr;</span></a>
+        <a class="lab" href="docs/rancher.html"><span class="lab-type">Management</span><h3>Rancher on kiac</h3><p>Deploy open-source Rancher through Gateway API and verify its authenticated cluster view.</p><span class="lab-cta">Run Rancher &rarr;</span></a>
+        <a class="lab" href="docs/labs.html"><span class="lab-type">Ecosystem</span><h3>More integrations</h3><p>Practice k8gb failover, OpenChoreo, node failure, reboot recovery, stateful workloads, and Cilium.</p><span class="lab-cta">Browse every lab &rarr;</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="band band-night" id="install">
+    <div class="inner install-layout">
+      <div class="install-copy">
+        <p class="eyebrow">Start building</p>
+        <h2>From zero to a real cluster.</h2>
+        <p>Install the runtime, install one Go binary, and choose your topology. Kiac keeps its dependencies explicit and checks them before create.</p>
+        <ul class="requirements">
+          <li><strong>Host:</strong> Apple silicon Mac</li>
+          <li><strong>Everyday clusters:</strong> apple/container 1.2.1+ and kubectl</li>
+          <li><strong>Multi-node:</strong> macOS 26+</li>
+          <li><strong>GPU alpha:</strong> krunkit 1.3.2+ and vmnet-helper 0.13.0+</li>
+        </ul>
+      </div>
+      <div class="install-stack">
+        <div class="install-block"><span>01 &middot; Install kiac</span><code>brew install --cask saiyam1814/tap/kiac</code></div>
+        <div class="install-block"><span>02 &middot; Check the host</span><code>kiac doctor</code></div>
+        <div class="install-block"><span>03 &middot; Create a daily cluster</span><code>kiac create cluster --name dev --workers 2</code></div>
+        <div class="install-block"><span>GPU alpha &middot; Check optional dependencies</span><code>kiac gpu doctor</code></div>
+        <div class="install-block"><span>GPU alpha &middot; Create a DRA cluster</span><code>kiac create cluster --name gpu --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra</code></div>
+        <div class="hero-actions">
+          <a class="button button-primary" href="docs/getting-started.html">Follow the getting started guide</a>
+          <a class="button button-secondary" href="docs/cli-reference.html">CLI reference</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="supply" aria-labelledby="supply-title">
+    <div class="supply-inner">
+      <h2 id="supply-title">A release you can verify.</h2>
+      <div class="supply-list">
+        <span><strong>Immutable</strong>GitHub release</span>
+        <span><strong>SHA-256</strong>Checksums</span>
+        <span><strong>SPDX</strong>SBOM</span>
+        <span><strong>Signed</strong>Build provenance</span>
+      </div>
+    </div>
+  </section>
+</main>
 
 <footer>
-  <p><strong>kiac</strong> - Kubernetes in Apple Containers · <a href="docs/index.html">Docs</a> · <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a> · MIT License</p>
-  <p style="margin-top:10px">Built by <a href="https://github.com/saiyam1814">Saiyam Pathak</a> on apple/container and the kindest/node image.</p>
+  <div class="footer-inner">
+    <div>
+      <div class="footer-brand">kiac</div>
+      <p>Kubernetes in Apple Containers. Built by <a href="https://github.com/saiyam1814">Saiyam Pathak</a>. MIT licensed.</p>
+      <p>Listed in the CNCF Landscape; kiac is not currently a CNCF-hosted project.</p>
+    </div>
+    <div class="footer-links">
+      <a href="docs/index.html">Documentation</a>
+      <a href="https://github.com/saiyam1814/kiac/releases/tag/v0.7.1">v0.7.1 release</a>
+      <a href="https://github.com/saiyam1814/kiac">GitHub</a>
+      <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a>
+    </div>
+  </div>
 </footer>
 
 <script>
-const lines = [
-  ['', '<span class="d">$</span> <span class="b">kiac create cluster --name dev --workers 2</span>'],
-  [400, '<span class="o">⬢ kiac</span> <span class="d">· Kubernetes in Apple Containers</span>'],
-  [600, ' <span class="ok">✓</span> Preflight checks <span class="d">(0.3s)</span>'],
-  [900, ' <span class="ok">✓</span> Pulling node image kindest/node:v1.37.0 <span class="d">(4.6s)</span>'],
-  [1500, ' <span class="ok">✓</span> Booting 3 node VM(s) <span class="d">(6.8s)</span>'],
-  [2600, ' <span class="ok">✓</span> Initializing Kubernetes control plane <span class="d">(24.3s)</span>'],
-  [3200, ' <span class="ok">✓</span> Joining 2 worker(s) <span class="d">(9.1s)</span>'],
-  [3600, ' <span class="ok">✓</span> Installing CNI (kindnet) <span class="d">(0.4s)</span>'],
-  [3900, ' <span class="ok">✓</span> Installing addons (storage, metrics-server) <span class="d">(0.8s)</span>'],
-  [4300, ' <span class="ok">✓</span> Installing LoadBalancer (kiac-lb) <span class="d">(0.4s)</span>'],
-  [4800, ' <span class="ok">✓</span> Installing edge proxy (large upload fix) <span class="d">(0.8s)</span>'],
-  [4700, ' <span class="ok">✓</span> Waiting for nodes to be Ready <span class="d">(9.7s)</span>'],
-  [5000, ' <span class="ok">✓</span> Writing kubeconfig <span class="d">(0.2s)</span>'],
-  [5400, ''],
-  [5400, '<span class="b">Cluster "dev" is ready in 58s. Every node is its own lightweight VM.</span>'],
-  [5800, '  <span class="p">kubectl get nodes</span>'],
-  [6000, '  <span class="p">kubectl top nodes</span>']
-];
-const term = document.getElementById('term');
-let html = '';
-lines.forEach(([t, l]) => setTimeout(() => { html += l + '\n'; term.innerHTML = html; }, t));
+  const menuButton = document.querySelector('.menu-button');
+  const navLinks = document.querySelector('.nav-links');
+
+  menuButton.addEventListener('click', () => {
+    const isOpen = navLinks.classList.toggle('open');
+    menuButton.setAttribute('aria-expanded', String(isOpen));
+  });
+
+  navLinks.addEventListener('click', (event) => {
+    if (event.target.closest('a')) {
+      navLinks.classList.remove('open');
+      menuButton.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  const copyText = async (value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      return copied;
+    }
+  };
+
+  document.querySelectorAll('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const copied = await copyText(button.dataset.copy);
+      button.textContent = copied ? 'Copied' : 'Copy failed';
+      window.setTimeout(() => { button.textContent = 'Copy'; }, 1400);
+    });
+  });
 </script>
 </body>
 </html>

@@ -14,6 +14,7 @@ func TestResolveNode(t *testing.T) {
 		{Name: "kiac-dev-control-plane"},
 		{Name: "kiac-dev-worker-1"},
 		{Name: "kiac-dev-worker-2"},
+		{Name: "kiac-dev-gpu-1"},
 	}
 	cases := []struct {
 		name    string
@@ -25,7 +26,8 @@ func TestResolveNode(t *testing.T) {
 		{name: "short worker", cluster: "dev", node: "worker-1", want: "kiac-dev-worker-1"},
 		{name: "short control plane", cluster: "dev", node: "control-plane", want: "kiac-dev-control-plane"},
 		{name: "full container name", cluster: "dev", node: "kiac-dev-worker-2", want: "kiac-dev-worker-2"},
-		{name: "unknown node lists choices", cluster: "dev", node: "worker-9", wantErr: "control-plane, worker-1, worker-2"},
+		{name: "short GPU worker", cluster: "dev", node: "gpu-1", want: "kiac-dev-gpu-1"},
+		{name: "unknown node lists choices", cluster: "dev", node: "worker-9", wantErr: "control-plane, worker-1, worker-2, gpu-1"},
 		{name: "full name from another cluster", cluster: "dev", node: "kiac-prod-worker-1", wantErr: `no node "kiac-prod-worker-1"`},
 	}
 	for _, c := range cases {
@@ -66,5 +68,16 @@ esac
 	err := (&Manager{rt: &runtime.Client{Bin: bin}}).StartNode("dev", "worker-1")
 	if err == nil || !strings.Contains(err.Error(), "has 2 stopped nodes") || !strings.Contains(err.Error(), "kiac resume cluster --name dev") {
 		t.Fatalf("StartNode error = %v, want explicit whole-cluster resume guidance", err)
+	}
+}
+
+func TestCountStoppedNodes(t *testing.T) {
+	infos := []runtime.Info{
+		{Name: "kiac-dev-control-plane", Status: "running"},
+		{Name: "kiac-dev-worker-1", Status: "stopped"},
+		{Name: "kiac-dev-gpu-1", Status: "crashed"},
+	}
+	if got := countStoppedNodes(infos); got != 2 {
+		t.Fatalf("countStoppedNodes() = %d, want 2", got)
 	}
 }
