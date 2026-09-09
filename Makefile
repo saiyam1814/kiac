@@ -7,9 +7,8 @@ GPU_AGENT_BIN := bin/kiac-gpu-agent-linux-arm64
 GPU_AGENT_ASSET := pkg/cluster/assets/kiac-gpu-agent-linux-arm64.gz
 GPU_AGENT_LDFLAGS := -s -w -buildid=
 ASSET_GZIP := go run ./internal/cmd/asset-gzip
-FLANNEL_VERSION ?= v0.28.9
 
-.PHONY: build edge-proxy-asset edge-proxy-check gpu-agent-asset gpu-agent-check gpu-agent-test gpu-agent-tidy-check install test test-race lint fmt-check tidy-check ci runtime-smoke clean flannel-manifest
+.PHONY: build edge-proxy-asset edge-proxy-check gpu-agent-asset gpu-agent-check gpu-agent-test gpu-agent-tidy-check install test test-race lint fmt-check tidy-check ci runtime-smoke clean
 
 build: edge-proxy-asset gpu-agent-asset
 	go build -ldflags "$(LDFLAGS)" -o bin/kiac .
@@ -74,11 +73,6 @@ tidy-check:
 
 ci: fmt-check tidy-check gpu-agent-tidy-check edge-proxy-check gpu-agent-check gpu-agent-test lint test-race
 	go build ./...
-
-# Regenerate the embedded flannel manifest from an upstream release, with
-# image digests and health probes applied; then bump FlannelVersion.
-flannel-manifest:
-	go run ./internal/cmd/flannel-manifest -version $(FLANNEL_VERSION)
 
 runtime-smoke: build
 	./test/e2e/run.sh "$${PROFILE:-quick}"

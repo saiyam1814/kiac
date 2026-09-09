@@ -10,25 +10,19 @@ import (
 )
 
 // FlannelVersion is the pinned upstream flannel release embedded in the
-// binary. Bump it together with the manifest: `make flannel-manifest
-// FLANNEL_VERSION=vX.Y.Z` regenerates assets/flannel.yaml with digests
-// and probes, then re-verify the delegate plugin set below.
+// binary. To bump it, replace assets/flannel.yaml with the release's
+// kube-flannel.yml verbatim and update this constant together, then
+// re-verify the delegate plugin set below:
+//
+//	curl -fsSL https://github.com/flannel-io/flannel/releases/download/vX.Y.Z/kube-flannel.yml \
+//	  -o pkg/cluster/assets/flannel.yaml
 const FlannelVersion = "v0.28.9"
 
-// flannelManifest is upstream kube-flannel.yml at FlannelVersion with
-// two local edits, both applied by internal/cmd/flannel-manifest so a
-// version bump reproduces them: the @sha256 digests on the image
-// references (mutable tags alone would let a retag change what every
-// node runs as root), and the liveness/readiness probes upstream ships
-// in its Documentation copy but not in the release asset, without which
-// `kubectl rollout status` would mean Running rather than healthy. The
-// healthz listener is bound to loopback and both probes dial 127.0.0.1,
-// unlike upstream's 0.0.0.0: the pod is hostNetwork, kiac-lb hands
-// LoadBalancer Services node IPs, and kube-proxy DNATs even locally
-// originated traffic to them, so a user Service on port 8081 would
-// otherwise capture kubelet's probes and restart flanneld. The pod
-// network is patched at apply time (see flannelManifestWithCIDR), not
-// here, so the embedded bytes stay diffable against upstream.
+// flannelManifest is upstream kube-flannel.yml at FlannelVersion,
+// embedded verbatim so it stays byte-for-byte diffable against the
+// upstream release asset. The only value kiac changes is the pod
+// network, patched at apply time from Config (see flannelManifestWithCIDR),
+// never in these bytes.
 //
 //go:embed assets/flannel.yaml
 var flannelManifest string

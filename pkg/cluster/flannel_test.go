@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
-	"gopkg.in/yaml.v3"
 )
 
 func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
@@ -29,14 +27,10 @@ func TestFlannelManifestIsPinnedUpstream(t *testing.T) {
 			continue
 		}
 		image := strings.TrimSpace(strings.TrimPrefix(trimmed, "image:"))
-		tag, digest, ok := strings.Cut(image, "@")
-		if !ok || !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
-			t.Fatalf("image %q is not digest-pinned; a mutable tag alone would let a retag change what every node runs as root", image)
-		}
-		if strings.HasPrefix(tag, "ghcr.io/flannel-io/flannel:") && !strings.HasSuffix(tag, ":"+FlannelVersion) {
+		if strings.HasPrefix(image, "ghcr.io/flannel-io/flannel:") && !strings.HasSuffix(image, ":"+FlannelVersion) {
 			t.Fatalf("flannel image %q is not pinned to %s", image, FlannelVersion)
 		}
-		if !strings.Contains(tag, ":v") {
+		if !strings.Contains(image, ":v") {
 			t.Fatalf("image %q is not version-pinned", image)
 		}
 	}
@@ -558,8 +552,8 @@ func TestInstallFlannelStreamsBridgeAndAppliesPatchedManifest(t *testing.T) {
 	if !strings.Contains(string(applied), `"Network": "`+kubeadmPodCIDRv4+`"`) {
 		t.Error("applied manifest does not carry the kubeadm pod CIDR")
 	}
-	if !strings.Contains(string(applied), "ghcr.io/flannel-io/flannel:"+FlannelVersion+"@sha256:") {
-		t.Error("applied manifest lost the digest-pinned flannel image")
+	if !strings.Contains(string(applied), "ghcr.io/flannel-io/flannel:"+FlannelVersion) {
+		t.Error("applied manifest lost the pinned flannel image")
 	}
 }
 
@@ -604,35 +598,6 @@ func TestInstallFlannelFailsWhenArchiveUnavailable(t *testing.T) {
 	}
 }
 
-func TestFlannelManifestHasHealthProbes(t *testing.T) {
-	// The release asset ships no probes, so a rollout would count a
-	// flanneld that is merely Running. The refresh tool adds upstream's
-	// Documentation-copy probes; the wait only means "healthy" with them.
-	for _, want := range []string{
-		"- --healthz-ip=127.0.0.1",
-		"- --healthz-port=8081",
-		"path: /readyz",
-		"path: /healthz",
-		"containerPort: 8081",
-	} {
-		if !strings.Contains(flannelManifest, want) {
-			t.Errorf("flannel manifest lacks %q; regenerate it with make flannel-manifest", want)
-		}
-	}
-	if strings.Count(flannelManifest, "readinessProbe:") != 1 || strings.Count(flannelManifest, "livenessProbe:") != 1 {
-		t.Error("expected exactly one readiness and one liveness probe (the kube-flannel container)")
-	}
-	// Both probes must dial loopback: kubelet otherwise probes the node
-	// IP, which kube-proxy DNATs to any user LoadBalancer Service that
-	// claims port 8081 on that node, killing flanneld every 90s.
-	if strings.Count(flannelManifest, "host: 127.0.0.1") != 2 {
-		t.Error("flannel probes must target 127.0.0.1, not the node IP")
-	}
-}
-
-// writeFakeCNIArchive writes a gzip tar shaped like the upstream CNI
-// plugins release: ./-relative executable members, plus a README so the
-// selection has something to skip.
 func writeFakeCNIArchive(t *testing.T, path string, members ...string) string {
 	t.Helper()
 	f, err := os.Create(path)
@@ -840,82 +805,6 @@ func TestEnsureK3sCNIPluginsIsBounded(t *testing.T) {
 		want := []string{"./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth"}
 		if strings.Join(tr.members, " ") != strings.Join(want, " ") {
 			t.Errorf("k3s payload members = %v, want %v", tr.members, want)
-		}
-	}
-}
-
-func TestFlannelProbesAreWiredToFlanneld(t *testing.T) {
-	// The probes only mean something if flanneld listens where kubelet
-	// looks: same port, same loopback address, on the flanneld container
-	// and nowhere else.
-	type probe struct {
-		HTTPGet struct {
-			Host string `yaml:"host"`
-			Path string `yaml:"path"`
-			Port any    `yaml:"port"`
-		} `yaml:"httpGet"`
-	}
-	type container struct {
-		Name  string   `yaml:"name"`
-		Args  []string `yaml:"args"`
-		Ports []struct {
-			Name          string `yaml:"name"`
-			ContainerPort int    `yaml:"containerPort"`
-		} `yaml:"ports"`
-		Readiness *probe `yaml:"readinessProbe"`
-		Liveness  *probe `yaml:"livenessProbe"`
-	}
-	type daemonSet struct {
-		Kind string `yaml:"kind"`
-		Spec struct {
-			Template struct {
-				Spec struct {
-					HostNetwork    bool        `yaml:"hostNetwork"`
-					Containers     []container `yaml:"containers"`
-					InitContainers []container `yaml:"initContainers"`
-				} `yaml:"spec"`
-			} `yaml:"template"`
-		} `yaml:"spec"`
-	}
-	dec := yaml.NewDecoder(strings.NewReader(flannelManifest))
-	var ds daemonSet
-	for {
-		var doc daemonSet
-		if err := dec.Decode(&doc); err != nil {
-			t.Fatalf("no DaemonSet in manifest: %v", err)
-		}
-		if doc.Kind == "DaemonSet" {
-			ds = doc
-			break
-		}
-	}
-	spec := ds.Spec.Template.Spec
-	if !spec.HostNetwork || len(spec.Containers) != 1 || spec.Containers[0].Name != "kube-flannel" {
-		t.Fatalf("unexpected DaemonSet shape: hostNetwork=%v containers=%+v", spec.HostNetwork, spec.Containers)
-	}
-	c := spec.Containers[0]
-	args := strings.Join(c.Args, " ")
-	if !strings.Contains(args, "--healthz-ip=127.0.0.1") || !strings.Contains(args, "--healthz-port=8081") {
-		t.Errorf("flanneld args %q do not open the loopback healthz listener the probes dial", args)
-	}
-	if len(c.Ports) != 1 || c.Ports[0].Name != "healthz" || c.Ports[0].ContainerPort != 8081 {
-		t.Errorf("ports = %+v, want one named healthz on 8081", c.Ports)
-	}
-	for name, p := range map[string]*probe{"readiness": c.Readiness, "liveness": c.Liveness} {
-		if p == nil {
-			t.Errorf("%s probe missing", name)
-			continue
-		}
-		if p.HTTPGet.Host != "127.0.0.1" || fmt.Sprint(p.HTTPGet.Port) != "healthz" {
-			t.Errorf("%s probe dials %s:%v, want 127.0.0.1:healthz", name, p.HTTPGet.Host, p.HTTPGet.Port)
-		}
-	}
-	if c.Readiness != nil && c.Readiness.HTTPGet.Path != "/readyz" {
-		t.Errorf("readiness path = %s", c.Readiness.HTTPGet.Path)
-	}
-	for _, init := range spec.InitContainers {
-		if init.Readiness != nil || init.Liveness != nil {
-			t.Errorf("init container %s carries a probe", init.Name)
 		}
 	}
 }
