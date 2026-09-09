@@ -69,6 +69,15 @@ var createClusterCmd = &cobra.Command{
 			createKernel = "full"
 			ui.Infof("--ip-family %s needs the full node kernel; using --kernel full", createCfg.IPFamily)
 		}
+		// Reject a bad --cni before --kernel full can start a download:
+		// a typo should cost a message, not 37MB. Create re-checks.
+		if selectedDistro == "kubeadm" && createCfg.GPUWorkers == 0 {
+			pre := createCfg
+			pre.Kernel = createKernel
+			if err := cluster.ValidateCNI(pre); err != nil {
+				return err
+			}
+		}
 		if createKernel != "" {
 			kpath, err := cluster.ResolveKernel(createKernel)
 			if err != nil {
@@ -163,7 +172,7 @@ func init() {
 	f.StringVar(&createDistro, "distro", "kubeadm",
 		"Kubernetes distribution: kubeadm or k3s (ordinary nodes use OCI images; GPU clusters provision Fedora VMs)")
 	f.StringVar(&createCfg.Image, "image", "", "node image (overrides --k8s-version)")
-	f.StringVar(&createCfg.CNI, "cni", "kindnet", "kubeadm pod network: kindnet, cilium (ordinary clusters need --kernel full), or none (bring your own)")
+	f.StringVar(&createCfg.CNI, "cni", "kindnet", "kubeadm pod network: kindnet, cilium (ordinary clusters need --kernel full), flannel (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")

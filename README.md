@@ -88,7 +88,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 🌍 **IPv6 and dual-stack** — `--ip-family dual` (or `ipv6`) gives pods, Services, and nodes real IPv6, with kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer rules on the full kernel. kiac-lb hands out both families, the edge proxy fixes v6 large uploads too, and `kiac resume` heals both. See [docs/design/ipv6-dual-stack.md](docs/design/ipv6-dual-stack.md).
 - 🚪 **Gateway API built in** — `--gateway` installs the Gateway API CRDs and Traefik with a ready-to-use GatewayClass and Gateway, so an HTTPRoute works out of the box.
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
-- **Diagnostics with an exit code** — `kiac verify cluster` checks the VM, Kubernetes, DNS, storage, metrics, edge proxy, LoadBalancer, Gateway, observability, and host API paths without changing the cluster. JSON output is stable for automation; `kiac support bundle` writes a bounded, redacted archive for issue reports.
+- **Diagnostics with an exit code** — `kiac verify cluster` checks the VM, Kubernetes, pod network, DNS, storage, metrics, edge proxy, LoadBalancer, Gateway, observability, and host API paths without changing the cluster. JSON output is stable for automation; `kiac support bundle` writes a bounded, redacted archive for issue reports.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
 - 🖥️ **A console when you want one** — `kiac ui` opens a local web console: cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, a create form, and a per-cluster kubectl Console drawer (loopback-only, no shell). Works on every distro. Same engine as the CLI.
 - 🍎 **Native stack** — one Swift runtime from Apple, one Go binary from us. Coexists with Docker Desktop, kind, and k3d; never touches the Docker socket.
@@ -264,6 +264,7 @@ kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 kiac create cluster --k8s-version 1.34       # pick your Kubernetes (kubeadm 1.32-1.37 pinned)
 kiac create cluster --distro k3s --workers 1 # rancher/k3s nodes: sqlite datastore, up in under a minute
 kiac create cluster --cni cilium --kernel full --workers 2   # Cilium eBPF on the full node kernel
+kiac create cluster --cni flannel --kernel full --workers 2  # flannel VXLAN on the full node kernel, no host CLI needed
 kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra # real Apple GPU worker (alpha)
 kiac create cluster --config cluster.yaml    # declarative; explicit flags override the file (see examples/cluster.yaml)
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly # host directory in every node
@@ -306,7 +307,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.36 (pins 1.32-1.36) |
 | `--distro` | `kubeadm` | `kubeadm` or `k3s`; ordinary k3s replaces Flannel with kindnet, while GPU k3s uses bundled Flannel on krunkit's capable kernel; `--cni` does not apply to k3s |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
-| `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full` |
+| `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, `flannel`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full`; Flannel (v0.28.9 embedded, VXLAN, no host CLI) needs `--kernel full` and is not available on GPU clusters. Only Cilium enforces NetworkPolicy |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
 | `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |
@@ -341,7 +342,7 @@ Host bind mounts use ordinary `container run`, not `container machine`; `/Users`
 
 - **Persistence backed by `container machine`** (WWDC26 persistent Linux environments): `kiac resume` already brings a cluster back after a reboot, and machine-backed VMs would make that instant
 - **HA control planes**
-- **One-flag Calico and Flannel** on the full kernel
+- **One-flag Calico** on the full kernel (Flannel shipped: `--cni flannel --kernel full`)
 - **Hubble UI** for Cilium clusters
 - **Standalone Apple GPU driver packaging** with a stable API shared outside Kiac
 - **Multi-Mac GPU pools and stricter per-workload GPU memory enforcement** after the local alpha contracts settle

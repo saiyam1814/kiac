@@ -6,6 +6,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -55,12 +56,30 @@ func (c *Client) run(args ...string) (string, error) {
 	return c.runContext(context.Background(), args...)
 }
 
+// pipeWaitDelay bounds how long a bounded command's output pipes may
+// stay open after the command itself is gone. Killing the CLI at its
+// deadline does not kill any descendant that inherited the pipe; without
+// this, Wait would block on that copy and the deadline would be
+// defeated. apple/container's exec spawns no such descendant today, so
+// this is a guard against a future one (and what makes shell fakes in
+// tests honor their deadline).
+const pipeWaitDelay = 500 * time.Millisecond
+
 func (c *Client) runContext(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.Bin, args...)
+	if _, bounded := ctx.Deadline(); bounded {
+		cmd.WaitDelay = pipeWaitDelay
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil:
 			err = ctx.Err()
+		case errors.Is(err, exec.ErrWaitDelay):
+			// The command exited successfully; only a descendant kept
+			// the pipe open past pipeWaitDelay. That is not a failure,
+			// and reporting one would fail a healthy readiness probe.
+			return string(out), nil
 		}
 		return string(out), &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}
@@ -244,11 +263,36 @@ func (c *Client) Logs(name string, timeout time.Duration) (string, error) {
 
 // ExecStdin runs a command inside a node with r piped to stdin.
 func (c *Client) ExecStdin(name string, r io.Reader, command ...string) error {
+	return c.execStdinContext(context.Background(), name, r, command...)
+}
+
+// ExecStdinTimeout is ExecStdin bounded by a deadline, for transfers
+// that must not be able to wedge a create (plugin extraction, manifest
+// apply) the way an unbounded exec can.
+func (c *Client) ExecStdinTimeout(name string, timeout time.Duration, r io.Reader, command ...string) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return c.execStdinContext(ctx, name, r, command...)
+}
+
+func (c *Client) execStdinContext(ctx context.Context, name string, r io.Reader, command ...string) error {
 	args := append([]string{"exec", "-i", name}, command...)
-	cmd := exec.Command(c.Bin, args...)
+	cmd := exec.CommandContext(ctx, c.Bin, args...)
 	cmd.Stdin = r
+	if _, bounded := ctx.Deadline(); bounded {
+		cmd.WaitDelay = pipeWaitDelay
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		switch {
+		case ctx.Err() != nil:
+			err = ctx.Err()
+		case errors.Is(err, exec.ErrWaitDelay):
+			return nil
+		}
 		return &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
 	}
 	return nil

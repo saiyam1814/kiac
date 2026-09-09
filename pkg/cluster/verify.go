@@ -237,6 +237,7 @@ func (r *VerificationReport) skipKubernetesDataChecks(reason string) {
 		{"kubernetes.nodes", "Kubernetes nodes"},
 		{"kubernetes.pods", "Kubernetes workloads"},
 		{"kubernetes.dns", "cluster DNS"},
+		{"network.cni", "pod network"},
 		{"storage.default-class", "default storage"},
 		{"metrics.api", "metrics API"},
 		{"gateway.api", "Gateway API"},
@@ -334,7 +335,69 @@ func (m *Manager) verifyKubernetesData(report *VerificationReport, infos []runti
 		}
 	}
 
+	m.verifyCNI(report, cp, timeout)
 	m.verifyOptionalKubernetesAddons(report, cp, timeout)
+}
+
+// cniDaemonSet describes a pod network kiac can install by the DaemonSet
+// it runs on every node.
+type cniDaemonSet struct {
+	name, namespace, daemonSet, selector string
+}
+
+// cniDaemonSets lists the pod networks kiac installs. verify and the
+// support bundle use the first one present; none present means --cni
+// none, k3s's bundled Flannel (which is not a DaemonSet), or a custom
+// CNI the user brought.
+var cniDaemonSets = []cniDaemonSet{
+	{name: "kindnet", namespace: "kube-system", daemonSet: "kindnet", selector: "app=kindnet"},
+	{name: "cilium", namespace: "kube-system", daemonSet: "cilium", selector: "k8s-app=cilium"},
+	{name: "flannel", namespace: "kube-flannel", daemonSet: "kube-flannel-ds", selector: "app=flannel"},
+}
+
+// detectCNI returns the installed pod network and its DaemonSet JSON.
+// found is false when none of the known DaemonSets exists; err is the
+// first kubectl failure.
+func (m *Manager) detectCNI(cp, distro string, timeout time.Duration) (cni cniDaemonSet, raw string, found bool, err error) {
+	for _, candidate := range cniDaemonSets {
+		out, err := m.diagnosticKubectl(cp, distro, timeout, "get", "daemonset", candidate.daemonSet, "-n", candidate.namespace, "--ignore-not-found", "-o", "json")
+		if err != nil {
+			return candidate, "", false, err
+		}
+		if strings.TrimSpace(out) != "" {
+			return candidate, out, true, nil
+		}
+	}
+	return cniDaemonSet{}, "", false, nil
+}
+
+// verifyCNI reports whether the installed pod network's DaemonSet has a
+// ready pod on every node it is scheduled to. A CNI pod stuck in
+// ImagePullBackOff or a crash loop is the most common reason a node
+// stays NotReady, and this names it before anyone reads pod listings.
+func (m *Manager) verifyCNI(report *VerificationReport, cp string, timeout time.Duration) {
+	cni, raw, found, err := m.detectCNI(cp, report.Distro, timeout)
+	if err != nil {
+		report.add(VerificationWarn, "network.cni", "pod network", compactError(err), "kubectl get daemonsets -A")
+		return
+	}
+	if !found {
+		report.add(VerificationSkip, "network.cni", "pod network", "no kindnet, cilium, or flannel DaemonSet (--cni none, k3s bundled Flannel, or a custom CNI)", "")
+		return
+	}
+	hint := fmt.Sprintf("kubectl -n %s get pods -l %s -o wide", cni.namespace, cni.selector)
+	var ds kubeDaemonSet
+	if err := json.Unmarshal([]byte(raw), &ds); err != nil {
+		report.add(VerificationFail, "network.cni", "pod network", "cannot parse kubectl output: "+err.Error(), "")
+		return
+	}
+	desired, ready := ds.Status.DesiredNumberScheduled, ds.Status.NumberReady
+	if desired == 0 || ready < desired {
+		report.add(VerificationFail, "network.cni", "pod network",
+			fmt.Sprintf("%s DaemonSet %s/%s has %d/%d pods ready", cni.name, cni.namespace, cni.daemonSet, ready, desired), hint)
+		return
+	}
+	report.add(VerificationPass, "network.cni", "pod network", fmt.Sprintf("%s: %d/%d pods ready", cni.name, ready, desired), "")
 }
 
 func (m *Manager) verifyOptionalKubernetesAddons(report *VerificationReport, cp string, timeout time.Duration) {

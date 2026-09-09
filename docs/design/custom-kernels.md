@@ -1,8 +1,10 @@
 # Custom node kernels (`--kernel`): groundwork
 
-Status: groundwork landed, integration pending. No kernel is compiled or
-wired into `kiac create` yet; this doc records the investigation, the
-pipeline that now exists, and the exact wiring left to do.
+Status: shipped. `--kernel full`, `--cni cilium`, and `--cni flannel`
+(embedded upstream v0.28.9 manifest, VXLAN backend) are in `kiac create`;
+Calico remains open. The rest of this doc is the original investigation
+and plan, kept for the reasoning; where it says "left to do", check the
+code first.
 
 Goal: one flag, `kiac create cluster --kernel full`, boots node VMs on a
 kernel that has everything Cilium, Calico, and flannel need (VXLAN,
@@ -119,10 +121,13 @@ changes, in order:
    (wrapped in a `ui.Step("Resolving kernel")` when it names a
    download).
 
-CNI gate lifting, in `installCNI` (pkg/cluster/cluster.go): the
-`"flannel", "calico", "cilium"` case keeps today's error when
-`cfg.Kernel == ""` and otherwise proceeds: flannel applies an embedded
-manifest with the vxlan backend; calico/cilium print the exact helm/
+CNI gate lifting (done differently than planned): `validateCNI` in
+pkg/cluster/cluster.go gates before any VM boots; `installFlannel`
+(pkg/cluster/flannel.go) applies the embedded manifest with the vxlan
+backend; cilium drives the host CLI; calico still errors. Original plan:
+in `installCNI` the `"flannel", "calico", "cilium"` case keeps today's
+error when `cfg.Kernel == ""` and otherwise proceeds: flannel applies an
+embedded manifest with the vxlan backend; calico/cilium print the exact helm/
 `cilium install` command (their installers probe kernel features
 themselves) or apply pinned manifests once we commit to versions.
 Follow-ups: `kernel` key in `FileConfig` (configfile.go) and surfacing
@@ -162,6 +167,7 @@ the kernel in `kiac get nodes -o wide`.
    on the new kernel before any CNI change.
 3. Cilium e2e: `--kernel full --cni none`, install Cilium with kube-
    proxy replacement, run `cilium connectivity test`, then the same for
-   flannel (vxlan backend) and Calico.
+   flannel (vxlan backend; now covered by `test/e2e/run.sh flannel`) and
+   Calico (still outstanding).
 4. Only after 1-3 pass: flip the `--cni` gate and pin the checksum in
    `kernelAssets`.
