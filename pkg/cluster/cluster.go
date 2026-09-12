@@ -121,6 +121,7 @@ type Config struct {
 	IPFamily      IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
 	DNS           []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
 	Mounts        runtime.Mounts
+	Publish       runtime.Publishes // host port forwards for the control-plane VM (--publish)
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
@@ -218,6 +219,9 @@ func (m *Manager) Create(cfg Config) error {
 		return err
 	}
 	if err := runtime.ValidateMounts(cfg.Mounts); err != nil {
+		return err
+	}
+	if err := runtime.ValidatePublishes(cfg.Publish); err != nil {
 		return err
 	}
 
@@ -498,14 +502,22 @@ func (m *Manager) Create(cfg Config) error {
 
 func kubeadmNodeRunOpts(cfg Config, nodeName, memory string, dns []string) runtime.RunOpts {
 	return runtime.RunOpts{
-		Name:   nodeName,
-		Image:  cfg.Image,
-		CPUs:   cfg.CPUs,
-		Memory: memory,
-		Kernel: cfg.Kernel,
-		DNS:    dns,
-		Mounts: cfg.Mounts,
+		Name:    nodeName,
+		Image:   cfg.Image,
+		CPUs:    cfg.CPUs,
+		Memory:  memory,
+		Kernel:  cfg.Kernel,
+		DNS:     dns,
+		Mounts:  cfg.Mounts,
+		Publish: publishForNode(cfg, nodeName),
 	}
+}
+
+func publishForNode(cfg Config, nodeName string) []string {
+	if nodeName != ControlPlane(cfg.Name) {
+		return nil
+	}
+	return append([]string(nil), cfg.Publish...)
 }
 
 // serverIP returns the control-plane address the host kubeconfig should

@@ -177,6 +177,7 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 		CPMemory: "4G",
 		Kernel:   "/tmp/kiac-kernel-full",
 		Mounts:   runtime.Mounts{{Source: "/host", Target: "/workspace", ReadOnly: true}},
+		Publish:  runtime.Publishes{"127.0.0.1:8080:80"},
 	}
 	dns := []string{"192.168.64.1", "1.1.1.1"}
 	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123", dns)
@@ -195,6 +196,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	if !slices.Equal(server.Mounts, cfg.Mounts) {
 		t.Errorf("server Mounts = %+v, want %+v", server.Mounts, cfg.Mounts)
 	}
+	if !slices.Equal(server.Publish, []string{"127.0.0.1:8080:80"}) {
+		t.Errorf("server Publish = %q, want %q", server.Publish, []string{"127.0.0.1:8080:80"})
+	}
 
 	env := k3sAgentEnv("192.168.64.5", "tok123")
 	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env, dns)
@@ -212,6 +216,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	}
 	if !slices.Equal(agent.Mounts, cfg.Mounts) {
 		t.Errorf("agent Mounts = %+v, want %+v", agent.Mounts, cfg.Mounts)
+	}
+	if len(agent.Publish) != 0 {
+		t.Errorf("agent Publish = %q, want empty", agent.Publish)
 	}
 }
 
