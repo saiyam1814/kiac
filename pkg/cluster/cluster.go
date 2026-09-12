@@ -122,6 +122,8 @@ type Config struct {
 	DNS           []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
 	Mounts        runtime.Mounts
 	Publish       runtime.Publishes // host port forwards for the control-plane VM (--publish)
+	K3sServerArgs []string          // extra k3s server argv entries, appended after Kiac defaults
+	K3sAgentArgs  []string          // extra k3s agent argv entries, appended after Kiac defaults
 	NoMetrics     bool
 	NoStorage     bool
 	NoLB          bool
