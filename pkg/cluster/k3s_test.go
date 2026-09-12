@@ -156,16 +156,35 @@ func TestK3sServerArgs(t *testing.T) {
 			t.Errorf("No* server args %q missing %q", joined, want)
 		}
 	}
+
+	withExtra := k3sServerArgs(Config{K3sServerArgs: []string{"--tls-san", "api.dev.test"}}, "cp")
+	joined = " " + strings.Join(withExtra, " ") + " "
+	if !strings.Contains(joined, " --tls-san api.dev.test ") {
+		t.Errorf("server args %q missing custom args", joined)
+	}
 }
 
 func TestK3sAgentArgsAndEnv(t *testing.T) {
-	args := k3sAgentArgs("kiac-dev-worker-1")
+	args := k3sAgentArgs(Config{}, "kiac-dev-worker-1")
 	if len(args) != 3 || args[0] != "agent" || args[1] != "--node-name" || args[2] != "kiac-dev-worker-1" {
 		t.Errorf("agent args = %q", args)
+	}
+	extra := k3sAgentArgs(Config{K3sAgentArgs: []string{"--kubelet-arg=event-qps=100"}}, "kiac-dev-worker-1")
+	if got := strings.Join(extra, " "); !strings.Contains(got, "--kubelet-arg=event-qps=100") {
+		t.Errorf("agent args = %q, missing custom arg", got)
 	}
 	env := k3sAgentEnv("192.168.64.5", "tok123")
 	if len(env) != 2 || env[0] != "K3S_URL=https://192.168.64.5:6443" || env[1] != "K3S_TOKEN=tok123" {
 		t.Errorf("agent env = %q", env)
+	}
+}
+
+func TestValidateK3sArgs(t *testing.T) {
+	if err := validateK3sArgs([]string{"--tls-san", "api.dev.test"}, "--k3s-server-arg"); err != nil {
+		t.Fatalf("valid args rejected: %v", err)
+	}
+	if err := validateK3sArgs([]string{"", "api.dev.test"}, "--k3s-server-arg"); err == nil {
+		t.Fatal("empty k3s arg accepted")
 	}
 }
 
@@ -177,6 +196,7 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 		CPMemory: "4G",
 		Kernel:   "/tmp/kiac-kernel-full",
 		Mounts:   runtime.Mounts{{Source: "/host", Target: "/workspace", ReadOnly: true}},
+		Publish:  runtime.Publishes{"127.0.0.1:8080:80"},
 	}
 	dns := []string{"192.168.64.1", "1.1.1.1"}
 	server := k3sServerRunOpts(cfg, "kiac-dev-control-plane", "tok123", dns)
@@ -195,6 +215,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	if !slices.Equal(server.Mounts, cfg.Mounts) {
 		t.Errorf("server Mounts = %+v, want %+v", server.Mounts, cfg.Mounts)
 	}
+	if !slices.Equal(server.Publish, []string{"127.0.0.1:8080:80"}) {
+		t.Errorf("server Publish = %q, want %q", server.Publish, []string{"127.0.0.1:8080:80"})
+	}
 
 	env := k3sAgentEnv("192.168.64.5", "tok123")
 	agent := k3sAgentRunOpts(cfg, "kiac-dev-worker-1", env, dns)
@@ -212,6 +235,9 @@ func TestK3sRunOptsCarryKernel(t *testing.T) {
 	}
 	if !slices.Equal(agent.Mounts, cfg.Mounts) {
 		t.Errorf("agent Mounts = %+v, want %+v", agent.Mounts, cfg.Mounts)
+	}
+	if len(agent.Publish) != 0 {
+		t.Errorf("agent Publish = %q, want empty", agent.Publish)
 	}
 }
 

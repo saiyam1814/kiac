@@ -18,6 +18,14 @@ ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6
 #   - source: /Users/me/project
 #     target: /workspace
 #     readOnly: true
+# publish:            # optional host->VM forwards on the control-plane VM only
+#   - 127.0.0.1:8080:80
+#   - '[::1]:8443:443/udp'
+# k3sServerArgs:      # optional extra k3s "server" argv tokens (k3s distro only)
+#   - --tls-san
+#   - api.dev.test
+# k3sAgentArgs:       # optional extra k3s "agent" argv tokens (k3s distro only)
+#   - --kubelet-arg=protect-kernel-defaults=true
 cpus: "4"            # vCPUs per node VM (quote it: YAML reads bare 4 as a number)
 memory: 4G           # memory per node VM
 wait: 5m             # timeout for nodes to become Ready

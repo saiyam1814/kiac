@@ -25,6 +25,8 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --memory 8G --cpus 4
   kiac create cluster --distro k3s --workers 1
   kiac create cluster --distro k3s --workers 1 --gpu-workers 1
+  kiac create cluster --distro k3s --k3s-server-arg=--tls-san --k3s-server-arg=api.dev.test
+  kiac create cluster -p 127.0.0.1:8080:80
   kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
@@ -65,6 +67,9 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.GPUWorkers > 0 && createKernel != "" {
 			return fmt.Errorf("--kernel applies to apple/container nodes; real GPU clusters boot the kernel in --gpu-image")
 		}
+		if createCfg.GPUWorkers > 0 && len(createCfg.Publish) > 0 {
+			return fmt.Errorf("--publish is not supported on real GPU clusters (krunkit backend)")
+		}
 		if createKernel == "" && createCfg.IPFamily.WantsIPv6() {
 			createKernel = "full"
 			ui.Infof("--ip-family %s needs the full node kernel; using --kernel full", createCfg.IPFamily)
@@ -82,6 +87,9 @@ var createClusterCmd = &cobra.Command{
 		createCfg.Distro = selectedDistro
 		switch selectedDistro {
 		case "kubeadm":
+			if len(createCfg.K3sServerArgs) > 0 || len(createCfg.K3sAgentArgs) > 0 {
+				return fmt.Errorf("--k3s-server-arg and --k3s-agent-arg apply to --distro k3s only")
+			}
 			if createCfg.GPUWorkers > 0 && createCfg.Image != "" {
 				return fmt.Errorf("--image is an OCI node image and cannot boot real GPU VMs; use --gpu-image for the Fedora disk")
 			}
@@ -111,6 +119,9 @@ var createClusterCmd = &cobra.Command{
 			}
 			if createCfg.GPUWorkers > 0 && createCfg.Image != "" {
 				return fmt.Errorf("--image is an OCI node image and cannot boot real GPU VMs; use --gpu-image for the Fedora disk")
+			}
+			if createCfg.GPUWorkers > 0 && (len(createCfg.K3sServerArgs) > 0 || len(createCfg.K3sAgentArgs) > 0) {
+				return fmt.Errorf("custom k3s args are not supported on real GPU clusters yet")
 			}
 			if createCfg.GPUWorkers > 0 || createCfg.Image == "" {
 				if selectedK8sVersion == "" {
@@ -168,6 +179,9 @@ func init() {
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
+	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); repeatable")
+	f.StringArrayVar(&createCfg.K3sServerArgs, "k3s-server-arg", nil, "extra k3s server argument (k3s distro only); repeatable")
+	f.StringArrayVar(&createCfg.K3sAgentArgs, "k3s-agent-arg", nil, "extra k3s agent argument (k3s distro only); repeatable")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")

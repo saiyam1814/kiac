@@ -74,6 +74,22 @@ ipFamily: ipv4
 #     target: /workspace
 #     readOnly: true
 
+# Host -> node forwards for Apple's container runtime syntax:
+# [host-ip:]host-port:container-port[/protocol].
+# Kiac applies these only to the control-plane VM to avoid host-port
+# collisions across worker nodes.
+# publish:
+#   - 127.0.0.1:8080:80
+#   - '[::1]:8443:443/udp'
+
+# Extra argv entries for k3s only; each list item is one token.
+# These are appended after kiac's defaults for the respective role.
+# k3sServerArgs:
+#   - --tls-san
+#   - api.dev.test
+# k3sAgentArgs:
+#   - --kubelet-arg=protect-kernel-defaults=true
+
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G
