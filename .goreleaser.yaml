@@ -37,19 +37,20 @@ homebrew_casks:
     commit_author:
       name: kiac release bot
       email: 41898282+github-actions[bot]@users.noreply.github.com
-    url:
-      verified: github.com/saiyam1814/kiac/
     homepage: https://github.com/saiyam1814/kiac
     description: "Kubernetes in Apple Containers - every node is its own lightweight VM"
     license: MIT
     dependencies:
       - formula: kubernetes-cli
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kiac"]
-          end
+    # GoReleaser v2.17.1 only emits legacy flight hooks. Keep the declarative
+    # stanza here until hooks.post.install_steps is available in a stable
+    # release: https://github.com/goreleaser/goreleaser/pull/6873
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/kiac"]
+        end
+      end
     caveats: |
       kiac needs apple/container 1.0+ (skip 1.2.0; use 1.2.1 or newer):
         https://github.com/apple/container/releases
