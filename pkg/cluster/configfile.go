@@ -16,24 +16,27 @@ import (
 // fields distinguish "omitted" from an explicit zero value, and addon
 // toggles are positive booleans that Merge maps onto the No* fields.
 type FileConfig struct {
-	Name        string         `yaml:"name"`
-	Distro      string         `yaml:"distro"`
-	Workers     *int           `yaml:"workers"`
-	GPUWorkers  *int           `yaml:"gpuWorkers"`
-	GPUImage    string         `yaml:"gpuImage"`
-	GPUDiskSize string         `yaml:"gpuDiskSize"`
-	GPUDriver   string         `yaml:"gpuResourceDriver"`
-	K8sVersion  string         `yaml:"k8sVersion"`
-	Image       string         `yaml:"image"`
-	CNI         string         `yaml:"cni"`
-	IPFamily    string         `yaml:"ipFamily"`
-	DNS         []string       `yaml:"dns"`
-	Mounts      runtime.Mounts `yaml:"mounts"`
-	CPUs        string         `yaml:"cpus"`
-	Memory      string         `yaml:"memory"`
-	CPMemory    string         `yaml:"cpMemory"`
-	Wait        string         `yaml:"wait"`
-	Addons      FileAddons     `yaml:"addons"`
+	Name          string         `yaml:"name"`
+	Distro        string         `yaml:"distro"`
+	Workers       *int           `yaml:"workers"`
+	GPUWorkers    *int           `yaml:"gpuWorkers"`
+	GPUImage      string         `yaml:"gpuImage"`
+	GPUDiskSize   string         `yaml:"gpuDiskSize"`
+	GPUDriver     string         `yaml:"gpuResourceDriver"`
+	K8sVersion    string         `yaml:"k8sVersion"`
+	Image         string         `yaml:"image"`
+	CNI           string         `yaml:"cni"`
+	IPFamily      string         `yaml:"ipFamily"`
+	DNS           []string       `yaml:"dns"`
+	Mounts        runtime.Mounts `yaml:"mounts"`
+	Publish       []string       `yaml:"publish"`
+	K3sServerArgs []string       `yaml:"k3sServerArgs"`
+	K3sAgentArgs  []string       `yaml:"k3sAgentArgs"`
+	CPUs          string         `yaml:"cpus"`
+	Memory        string         `yaml:"memory"`
+	CPMemory      string         `yaml:"cpMemory"`
+	Wait          string         `yaml:"wait"`
+	Addons        FileAddons     `yaml:"addons"`
 }
 
 // FileAddons toggles the optional cluster addons. Omitted keys keep the
@@ -119,6 +122,21 @@ func (fc *FileConfig) Merge(cfg *Config, distro, k8sVersion *string, changed fun
 	}
 	if len(fc.Mounts) > 0 && !changed("mount") {
 		cfg.Mounts = fc.Mounts
+	}
+	if len(fc.Publish) > 0 && !changed("publish") {
+		var publishes runtime.Publishes
+		for _, value := range fc.Publish {
+			if err := publishes.Set(value); err != nil {
+				return fmt.Errorf("invalid publish %q in config file: %w", value, err)
+			}
+		}
+		cfg.Publish = publishes
+	}
+	if len(fc.K3sServerArgs) > 0 && !changed("k3s-server-arg") {
+		cfg.K3sServerArgs = append([]string(nil), fc.K3sServerArgs...)
+	}
+	if len(fc.K3sAgentArgs) > 0 && !changed("k3s-agent-arg") {
+		cfg.K3sAgentArgs = append([]string(nil), fc.K3sAgentArgs...)
 	}
 	if fc.CPUs != "" && !changed("cpus") {
 		cfg.CPUs = fc.CPUs

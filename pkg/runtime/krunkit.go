@@ -216,8 +216,8 @@ func (c *KrunkitClient) RunDetached(opts RunOpts) (retErr error) {
 	if err != nil || !imageInfo.Mode().IsRegular() {
 		return fmt.Errorf("krunkit boot disk %q is not a regular file", opts.Image)
 	}
-	if opts.Entrypoint != "" || len(opts.Args) > 0 || len(opts.Env) > 0 || opts.Kernel != "" {
-		return fmt.Errorf("krunkit VM %s must be provisioned after boot; OCI entrypoint, args, env, and custom kernels are unsupported", opts.Name)
+	if opts.Entrypoint != "" || len(opts.Args) > 0 || len(opts.Env) > 0 || opts.Kernel != "" || len(opts.Publish) > 0 {
+		return fmt.Errorf("krunkit VM %s must be provisioned after boot; OCI entrypoint, args, env, custom kernels, and --publish are unsupported", opts.Name)
 	}
 	if err := ValidateMounts(opts.Mounts); err != nil {
 		return err
