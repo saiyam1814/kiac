@@ -93,3 +93,62 @@ func TestCreateClusterWaitValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateClusterRejectsK3sArgsOnKubeadm(t *testing.T) {
+	oldCfg, oldDistro := createCfg, createDistro
+	oldConfigFile, oldKernel, oldIPFamily := createConfigFile, createKernel, createIPFamily
+	oldVersion := k8sVersion
+	t.Cleanup(func() {
+		createCfg, createDistro = oldCfg, oldDistro
+		createConfigFile, createKernel, createIPFamily = oldConfigFile, oldKernel, oldIPFamily
+		k8sVersion = oldVersion
+	})
+
+	createCfg = cluster.Config{
+		Name:          "dev",
+		WaitTimeout:   5 * time.Minute,
+		K3sServerArgs: []string{"--tls-san", "api.dev.test"},
+	}
+	createDistro = "kubeadm"
+	createConfigFile = ""
+	createKernel = ""
+	createIPFamily = "ipv4"
+	k8sVersion = cluster.DefaultK8sVersion
+
+	err := createClusterCmd.RunE(createClusterCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "apply to --distro k3s only") {
+		t.Fatalf("RunE error = %v, want k3s-args-on-kubeadm rejection", err)
+	}
+}
+
+func TestCreateClusterRejectsK3sArgsOnGPUK3s(t *testing.T) {
+	oldCfg, oldDistro := createCfg, createDistro
+	oldConfigFile, oldKernel, oldIPFamily := createConfigFile, createKernel, createIPFamily
+	oldVersion := k8sVersion
+	t.Cleanup(func() {
+		createCfg, createDistro = oldCfg, oldDistro
+		createConfigFile, createKernel, createIPFamily = oldConfigFile, oldKernel, oldIPFamily
+		k8sVersion = oldVersion
+	})
+
+	createCfg = cluster.Config{
+		Name:         "dev",
+		Workers:      0,
+		GPUWorkers:   1,
+		GPUImage:     cluster.DefaultGPUImage,
+		GPUDriver:    "device-plugin",
+		GPUDiskSize:  "20G",
+		WaitTimeout:  5 * time.Minute,
+		K3sAgentArgs: []string{"--kubelet-arg=event-qps=100"},
+	}
+	createDistro = "k3s"
+	createConfigFile = ""
+	createKernel = ""
+	createIPFamily = "ipv4"
+	k8sVersion = cluster.DefaultK3sVersion
+
+	err := createClusterCmd.RunE(createClusterCmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "not supported on real GPU clusters yet") {
+		t.Fatalf("RunE error = %v, want gpu-k3s-args rejection", err)
+	}
+}
