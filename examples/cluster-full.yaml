@@ -74,6 +74,14 @@ ipFamily: ipv4
 #     target: /workspace
 #     readOnly: true
 
+# Host -> node forwards for Apple's container runtime syntax:
+# [host-ip:]host-port:container-port[/protocol].
+# Kiac applies these only to the control-plane VM to avoid host-port
+# collisions across worker nodes.
+# publish:
+#   - 127.0.0.1:8080:80
+#   - '[::1]:8443:443/udp'
+
 # Resources per node VM. Quote cpus: YAML reads bare 4 as a number.
 cpus: "4"
 memory: 4G

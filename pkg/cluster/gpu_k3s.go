@@ -263,6 +263,9 @@ func validateGPUClusterConfig(cfg Config) error {
 	if cfg.Kernel != "" {
 		return fmt.Errorf("custom kernels cannot be combined with krunkit GPU nodes")
 	}
+	if len(cfg.Publish) > 0 {
+		return fmt.Errorf("--publish is not supported on real GPU clusters (krunkit backend)")
+	}
 	if cfg.Gateway && cfg.NoLB {
 		return fmt.Errorf("--gateway needs the built-in LoadBalancer; drop --no-lb")
 	}

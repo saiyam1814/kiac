@@ -61,3 +61,13 @@ func TestValidateGPUClusterConfigRejectsUnsupportedDRABeforeCreate(t *testing.T)
 		t.Fatalf("validation error = %v, want DRA version rejection", err)
 	}
 }
+
+func TestValidateGPUClusterConfigRejectsPublish(t *testing.T) {
+	err := validateGPUClusterConfig(Config{
+		Name: "gpu", GPUWorkers: 1, GPUDriver: "device-plugin", K8sVersion: "v1.36.4-k3s1", IPFamily: IPv4,
+		Publish: []string{"127.0.0.1:8080:80"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "--publish is not supported") {
+		t.Fatalf("validation error = %v, want publish rejection", err)
+	}
+}
