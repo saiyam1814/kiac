@@ -356,6 +356,32 @@ func TestRunDetachedPassesMountsBeforeImage(t *testing.T) {
 	}
 }
 
+func TestRunDetachedPassesPublishesBeforeImage(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:    "kiac-test-control-plane",
+		Image:   "example.invalid/node:v1",
+		Publish: []string{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+		Args:    []string{"server"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := readArgLines(t, argsFile)
+	want := []string{
+		"run", "-d", "--name", "kiac-test-control-plane", "--cap-add", "ALL",
+		"--publish", "127.0.0.1:8080:80",
+		"--publish", "[::1]:8443:443/udp",
+		"example.invalid/node:v1", "server",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("run args = %q, want %q", got, want)
+	}
+}
+
 func TestSystemStartSelectsKernelInstallMode(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

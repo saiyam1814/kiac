@@ -29,6 +29,7 @@ type FileConfig struct {
 	IPFamily    string         `yaml:"ipFamily"`
 	DNS         []string       `yaml:"dns"`
 	Mounts      runtime.Mounts `yaml:"mounts"`
+	Publish     []string       `yaml:"publish"`
 	CPUs        string         `yaml:"cpus"`
 	Memory      string         `yaml:"memory"`
 	CPMemory    string         `yaml:"cpMemory"`
@@ -119,6 +120,15 @@ func (fc *FileConfig) Merge(cfg *Config, distro, k8sVersion *string, changed fun
 	}
 	if len(fc.Mounts) > 0 && !changed("mount") {
 		cfg.Mounts = fc.Mounts
+	}
+	if len(fc.Publish) > 0 && !changed("publish") {
+		var publishes runtime.Publishes
+		for _, value := range fc.Publish {
+			if err := publishes.Set(value); err != nil {
+				return fmt.Errorf("invalid publish %q in config file: %w", value, err)
+			}
+		}
+		cfg.Publish = publishes
 	}
 	if fc.CPUs != "" && !changed("cpus") {
 		cfg.CPUs = fc.CPUs
