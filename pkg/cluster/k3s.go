@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -190,18 +189,12 @@ func k3sAgentRunOpts(cfg Config, nodeName string, env []string, dns []string) ru
 // k3s's own multicall binary is no substitute: it does not implement
 // ptp, the plugin kindnet's conflist is built around (and bridge would
 // reintroduce the br_netfilter breakage kindnet exists to avoid).
-func (m *Manager) ensureK3sCNIPlugins(node string) error {
-	archive, err := ensureCNIPluginsArchive()
+func (m *Manager) ensureK3sCNIPlugins(node string, wait time.Duration) error {
+	archive, err := resolveCNIPluginsArchive()
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return m.rt.ExecStdin(node, f, "/bin/sh", "-c",
-		"mkdir -p /opt/cni/bin && tar -xz -C /opt/cni/bin ./loopback ./ptp ./host-local ./portmap ./bandwidth")
+	return m.extractCNIPlugins(node, archive, wait, "./loopback", "./ptp", "./host-local", "./portmap", "./bandwidth")
 }
 
 // k3sToken generates the shared cluster secret agents present to join.
@@ -292,7 +285,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	}
 
 	if err := ui.Step("Installing CNI (kindnet)", func() error {
-		if err := m.ensureK3sCNIPlugins(cp); err != nil {
+		if err := m.ensureK3sCNIPlugins(cp, cfg.WaitTimeout); err != nil {
 			return err
 		}
 		return m.k3sKubectlStdin(cp, strings.NewReader(k3sKindnetManifestFor(cfg.family())),
@@ -323,7 +316,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			// names resolvable too; the helper's poll rides out each
 			// agent's k3s self-extraction.
 			if err := inParallel(cfg.Workers, func(i int) error {
-				return m.ensureK3sCNIPlugins(worker(cfg.Name, i+1))
+				return m.ensureK3sCNIPlugins(worker(cfg.Name, i+1), cfg.WaitTimeout)
 			}); err != nil {
 				return err
 			}

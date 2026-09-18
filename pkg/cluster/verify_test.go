@@ -10,7 +10,8 @@ import (
 	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
-const fakeVerificationTimeout = 2 * time.Second
+// Fakes answer instantly; the budget only has to outlast a loaded runner.
+const fakeVerificationTimeout = 10 * time.Second
 
 func TestVerifyHealthyClusterData(t *testing.T) {
 	m := fakeVerificationManager(t)
@@ -32,6 +33,7 @@ func TestVerifyHealthyClusterData(t *testing.T) {
 		"network.load-balancer": VerificationSkip,
 		"gateway.api":           VerificationSkip,
 		"observability.stack":   VerificationSkip,
+		"network.cni":           VerificationSkip,
 	}
 	for id, status := range want {
 		if got := verificationStatus(report, id); got != status {
@@ -184,6 +186,17 @@ case "$*" in
   *"get storageclass -o json"*)
     printf '%s\n' '{"items":[{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}]}'
     ;;
+  *"get daemonset kube-flannel-ds -n kube-flannel"*)
+    case "${KIAC_TEST_CNI:-}" in
+      flannel) printf '{"status":{"desiredNumberScheduled":4,"numberReady":4}}\n' ;;
+      flannel-degraded) printf '{"status":{"desiredNumberScheduled":4,"numberReady":2}}\n' ;;
+    esac
+    ;;
+  *"get daemonset kindnet -n kube-system"*)
+    if [ "${KIAC_TEST_CNI:-}" = kindnet ]; then printf '{"status":{"desiredNumberScheduled":1,"numberReady":1}}\n'; fi
+    ;;
+  *"get daemonset cilium -n kube-system"*)
+    ;;
   *"get crd gateways.gateway.networking.k8s.io"*)
     if [ "${KIAC_TEST_GATEWAY_CRD:-}" = true ]; then
       printf '%s\n' 'customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io'
@@ -213,4 +226,50 @@ esac
 		t.Fatal(err)
 	}
 	return &Manager{rt: &runtime.Client{Bin: bin}}
+}
+
+func TestVerifyReportsPodNetworkDaemonSet(t *testing.T) {
+	cases := []struct {
+		cni    string
+		want   VerificationStatus
+		detail string
+	}{
+		{"flannel", VerificationPass, "flannel: 4/4 pods ready"},
+		{"flannel-degraded", VerificationFail, "flannel DaemonSet kube-flannel/kube-flannel-ds has 2/4 pods ready"},
+		{"kindnet", VerificationPass, "kindnet: 1/1 pods ready"},
+		{"", VerificationSkip, "no kindnet, cilium, or flannel DaemonSet"},
+	}
+	for _, tc := range cases {
+		t.Run("cni="+tc.cni, func(t *testing.T) {
+			t.Setenv("KIAC_TEST_CNI", tc.cni)
+			report := VerificationReport{Distro: "kubeadm"}
+			fakeVerificationManager(t).verifyCNI(&report, "kiac-dev-control-plane", fakeVerificationTimeout)
+			if got := verificationStatus(report, "network.cni"); got != tc.want {
+				t.Fatalf("network.cni = %s, want %s", got, tc.want)
+			}
+			for _, check := range report.Checks {
+				if check.ID != "network.cni" {
+					continue
+				}
+				if !strings.Contains(check.Detail, tc.detail) {
+					t.Fatalf("detail = %q, want %q", check.Detail, tc.detail)
+				}
+				if tc.want == VerificationFail && !strings.Contains(check.Hint, "kubectl -n kube-flannel get pods -l app=flannel") {
+					t.Fatalf("hint = %q, want the flannel pod listing", check.Hint)
+				}
+			}
+		})
+	}
+}
+
+func TestSkipKubernetesDataChecksCoversEveryDataCheck(t *testing.T) {
+	// When the API is unreachable every Kubernetes-data check must still
+	// appear (as skip), so the JSON check set is stable across states.
+	report := VerificationReport{}
+	report.skipKubernetesDataChecks("control plane stopped")
+	for _, id := range []string{"kubernetes.nodes", "kubernetes.pods", "kubernetes.dns", "network.cni", "storage.default-class", "metrics.api", "gateway.api", "observability.stack"} {
+		if got := verificationStatus(report, id); got != VerificationSkip {
+			t.Errorf("%s = %q, want skip", id, got)
+		}
+	}
 }

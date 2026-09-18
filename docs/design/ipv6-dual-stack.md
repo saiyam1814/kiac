@@ -119,7 +119,8 @@ intentionally gated to recreate.
 - **ipv6-only on k3s** is rejected (needs pre-boot apiserver cert SANs the
   kubeadm path handles); use `--distro kubeadm`, or `--ip-family dual`.
 - **ipv6-only resume** is not yet supported; recreate the cluster.
-- **Cilium** dual-stack is not wired (`--cni cilium` with a non-ipv4
-  family is rejected); kindnet is the dual-stack CNI on both distros.
+- **Cilium and Flannel** dual-stack are not wired (`--cni cilium` or
+  `--cni flannel` with a non-ipv4 family is rejected); kindnet is the
+  dual-stack CNI on both distros.
 - The IPv6 CIDRs are kind's ULA defaults (`fd00:10:*`), not routable
   prefixes; this is a local development cluster.

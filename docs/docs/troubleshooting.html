@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Troubleshooting · kiac docs</title>
-<meta name="description" content="Common kiac failures and their fixes: doctor --fix, cluster already exists, reboots and resume, pending EXTERNAL-IPs, cilium prerequisites, and more.">
+<meta name="description" content="Common kiac failures and their fixes: doctor --fix, cluster already exists, reboots and resume, pending EXTERNAL-IPs, cilium and flannel prerequisites, and more.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -74,7 +74,7 @@ kiac create cluster --name dev --workers 2</code></pre>
   <h2 id="verify-cluster">Second move: verify the cluster</h2>
   <pre><code>kiac verify cluster --name dev
 kiac verify cluster --name dev -o json</code></pre>
-  <p>The check is read-only and follows the complete user path: VM and node services, Kubernetes API and Ready state, workloads, DNS, storage and metrics, edge-proxy process plus iptables hooks, LoadBalancer assignment, optional Gateway and observability stacks, and the Mac-to-API connection. A failed required check exits nonzero and includes the next command to inspect; an addon you intentionally disabled is shown as skipped.</p>
+  <p>The check is read-only and follows the complete user path: VM and node services, Kubernetes API and Ready state, workloads, the pod network DaemonSet, DNS, storage and metrics, edge-proxy process plus iptables hooks, LoadBalancer assignment, optional Gateway and observability stacks, and the Mac-to-API connection. A failed required check exits nonzero and includes the next command to inspect; an addon you intentionally disabled is shown as skipped.</p>
 
   <h2 id="reboot">After a reboot: clusters show 0/N</h2>
   <pre><code>kiac get clusters
@@ -126,19 +126,23 @@ kiac verify cluster --name gpu-lab</code></pre>
   <h2 id="top-unknown">kubectl top shows &lt;unknown&gt;</h2>
   <p>metrics-server needs about 60 seconds after cluster creation for its first scrape. If it never resolves, check the metrics-server pod in <code>kube-system</code>.</p>
 
-  <h2 id="cilium-prereqs">Cilium preflight errors</h2>
-  <p>Both Cilium prerequisites are checked before any VM boots, so these cost seconds, not minutes:</p>
+  <h2 id="cilium-prereqs">Cilium and Flannel preflight errors</h2>
+  <p>CNI prerequisites are checked before any VM boots, so these cost seconds, not minutes:</p>
   <pre><code><span class="o">Error: --cni cilium needs the full node kernel: add --kernel full (or a --kernel path)</span>
-<span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span></code></pre>
-  <p>The fixes are literal: add <code>--kernel full</code>, and <code>brew install cilium-cli</code>. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
+<span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span>
+<span class="o">Error: --cni flannel needs the full node kernel: add --kernel full (or a --kernel path)</span></code></pre>
+  <p>The fixes are literal: add <code>--kernel full</code>, and for Cilium <code>brew install cilium-cli</code>. Flannel needs no host CLI. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
 
-  <h2 id="cni-error">"flannel/calico needs kernel features"</h2>
-  <pre><code><span class="o">Error: flannel needs kernel features the stock node kernel does not enable; use
---cni cilium with --kernel full, or --cni none to bring your own</span></code></pre>
-  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle flannel or Calico manifests. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
+  <h2 id="flannel-not-ready">"flannel did not become ready"</h2>
+  <p>The flannel DaemonSet is given the <code>--wait</code> budget to roll out on every node. On timeout the error carries the kube-flannel pod list, recent namespace events, and the tail of every container's logs (init containers included), so it names the failing pod and reason, for example an image pull that never completed. Fix the cause it names and create again. On a running cluster, <code>kiac verify cluster</code> reports the pod network DaemonSet under <i>pod network</i>, and <code>kiac support</code> bundles its pods and logs.</p>
+
+  <h2 id="cni-error">"calico needs kernel features"</h2>
+  <pre><code><span class="o">Error: calico needs kernel features the stock node kernel does not enable; use
+--cni cilium or --cni flannel with --kernel full, or --cni none to bring your own</span></code></pre>
+  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle a Calico manifest. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>) and Flannel the supported overlay without a host CLI (<code>--cni flannel --kernel full</code>); on the full kernel you can also install Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
 
   <h2 id="kernel-download">Downloads and the ~/.kiac cache</h2>
-  <p><code>--kernel full</code> downloads the published kernel release asset (about 15MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
+  <p><code>--kernel full</code> downloads the published kernel release asset (about 37MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
   <ul>
     <li>A <code>sha256 mismatch</code> error means the download was corrupted (or the cache tampered with); the file is discarded, just re-run.</li>
     <li>Deleting a download-only subdirectory such as <code>~/.kiac/kernels</code>, <code>~/.kiac/images</code>, or <code>~/.kiac/models</code> triggers a fresh verified download when needed.</li>
@@ -166,7 +170,7 @@ kiac resume cluster --name dev</code></pre>
   <p>A full <code>container system</code> restart tears down and rebuilds vmnet (clearing the stale ARP state), and <code>kiac resume</code> re-points every node, kubeconfig, and certificate SAN at the fresh IPs. This is being tracked upstream at apple/container; see <a href="https://github.com/saiyam1814/kiac/issues/6">issue #6</a>.</p>
 
   <h2 id="slow-bulk">Cross-node bulk transfers are slow</h2>
-  <p>Expected on routed CNIs (kindnet): cross-node pod traffic takes vmnet's slow forwarded path. Control traffic and ordinary dev workloads are fine; bulk data transfers are where it shows. <code>--cni cilium --kernel full</code> avoids it entirely via the vxlan overlay (~285MB/s cross-node measured). See <a href="networking.html#fast-slow">Networking</a>.</p>
+  <p>Expected on routed CNIs (kindnet): cross-node pod traffic takes vmnet's slow forwarded path. Control traffic and ordinary dev workloads are fine; bulk data transfers are where it shows. <code>--cni cilium --kernel full</code> or <code>--cni flannel --kernel full</code> avoids it entirely via their vxlan overlays (~285MB/s cross-node measured with Cilium). See <a href="networking.html#fast-slow">Networking</a>.</p>
 
   <h2 id="tso-nodeport-stall">Large uploads to a NodePort from another VM stall (TSO)</h2>
   <p>Older kiac clusters, or clusters created with <code>--no-edge-proxy</code>, can hit an apple/container vmnet offload interaction: a large HTTP body (roughly 200&nbsp;KiB or more) sent from <b>another Apple Container VM</b> to a kiac NodePort stalls after the first ~150-300&nbsp;KiB and then times out, while small requests and health checks pass. The sending VM's TCP segmentation offload (TSO) hands the virtual NIC oversized segments that get mangled on the way through the kiac node's NodePort DNAT into the pod. Confirmed on both kindnet and Cilium, so it is not CNI-specific.</p>

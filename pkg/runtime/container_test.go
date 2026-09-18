@@ -36,6 +36,70 @@ func TestParseListShapes(t *testing.T) {
 	}
 }
 
+func TestExecTimeoutOutlivesChildHoldingPipe(t *testing.T) {
+	// The deadline kills the CLI process, not a child it spawned. A child
+	// that inherited the output pipe would otherwise keep CombinedOutput
+	// blocked until it exited on its own, silently defeating the bound.
+	// The fake forks its child before printing, so "started" in the
+	// output proves the pipe was held when the kill landed; the child
+	// sleeps far longer than the assertion bound, so only WaitDelay
+	// releasing the pipe can make this pass.
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 10 &\necho started\nwait\necho done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	timeout := 3 * time.Second
+	var (
+		out     string
+		err     error
+		elapsed time.Duration
+	)
+	// On a heavily loaded runner the fake may not even be scheduled
+	// before the deadline; the assertion only means something once the
+	// child holds the pipe, so retry the spawn a few times in that case.
+	for attempt := 0; attempt < 3 && !strings.Contains(out, "started"); attempt++ {
+		started := time.Now()
+		out, err = (&Client{Bin: bin}).ExecTimeout("node", timeout, "true")
+		elapsed = time.Since(started)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecTimeout error = %v, want context deadline", err)
+	}
+	if !strings.Contains(out, "started") {
+		t.Fatalf("fake was never scheduled before its deadline in three attempts; output = %q", out)
+	}
+	if strings.Contains(out, "done") {
+		t.Fatalf("child outlived the deadline and finished the script: %q", out)
+	}
+	if elapsed > timeout+pipeWaitDelay+5*time.Second {
+		t.Fatalf("ExecTimeout took %s with a child holding the pipe, want about %s", elapsed, timeout+pipeWaitDelay)
+	}
+}
+
+func TestExecTimeoutSuccessWithChildHoldingPipe(t *testing.T) {
+	// A command that exits 0 while a background child still holds its
+	// stdout must be reported as success with the output it produced,
+	// not as a failure: WaitDelay fires after a normal exit too, and
+	// ErrWaitDelay there only means the pipe outlived the process. The
+	// child sleeps far longer than the bound, so only WaitDelay can
+	// release the pipe in time.
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 10 &\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	out, err := (&Client{Bin: bin}).ExecTimeout("node", 30*time.Second, "true")
+	if err != nil {
+		t.Fatalf("ExecTimeout = %v, want success for an exit-0 command", err)
+	}
+	if strings.TrimSpace(out) != "ok" {
+		t.Fatalf("output = %q, want the command's own output", out)
+	}
+	if elapsed := time.Since(started); elapsed > pipeWaitDelay+5*time.Second {
+		t.Fatalf("success took %s, want about %s", elapsed, pipeWaitDelay)
+	}
+}
+
 func TestExecTimeout(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "container")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 5\n"), 0o755); err != nil {
@@ -46,7 +110,7 @@ func TestExecTimeout(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("ExecTimeout error = %v, want context deadline", err)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
 		t.Fatalf("ExecTimeout took %s", elapsed)
 	}
 }
@@ -58,7 +122,7 @@ func TestWaitReadyExecTimeout(t *testing.T) {
 	}
 	started := time.Now()
 	err := (&Client{Bin: bin}).WaitReady("node", time.Second)
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Errorf("WaitReady took %s for timeout 1s", elapsed)
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -427,4 +491,41 @@ func readArgLines(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+}
+
+func TestExecStdinTimeoutBoundsWedgedExec(t *testing.T) {
+	// A transfer into a node that never finishes (the exec session
+	// wedged after draining stdin) must be killed at the deadline, and a
+	// descendant holding the pipe must not extend that.
+	bin := filepath.Join(t.TempDir(), "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > /dev/null\nsleep 10 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	timeout := time.Second
+	started := time.Now()
+	err := (&Client{Bin: bin}).ExecStdinTimeout("node", timeout, strings.NewReader("manifest"), "kubectl", "apply", "-f", "-")
+	elapsed := time.Since(started)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ExecStdinTimeout error = %v, want context deadline", err)
+	}
+	if elapsed > timeout+pipeWaitDelay+5*time.Second {
+		t.Fatalf("ExecStdinTimeout took %s, want about %s", elapsed, timeout+pipeWaitDelay)
+	}
+}
+
+func TestExecStdinTimeoutDeliversInput(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	got := filepath.Join(dir, "stdin.txt")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ncat > \"$KIAC_TEST_STDIN\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KIAC_TEST_STDIN", got)
+	if err := (&Client{Bin: bin}).ExecStdinTimeout("node", 5*time.Second, strings.NewReader("hello\n"), "cat"); err != nil {
+		t.Fatalf("ExecStdinTimeout = %v", err)
+	}
+	data, err := os.ReadFile(got)
+	if err != nil || string(data) != "hello\n" {
+		t.Fatalf("stdin delivered = %q, %v", data, err)
+	}
 }

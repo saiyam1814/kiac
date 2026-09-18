@@ -93,3 +93,95 @@ func TestCreateClusterWaitValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateClusterCNIPrechecksFailFast covers the --cni mistakes users
+// most often make. Every one must fail before a VM boots or a download
+// starts, with a message that names the fix. PATH is emptied so the
+// runtime lookup fails immediately instead of reaching a real
+// `container` binary.
+func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
+	cases := []struct {
+		name     string
+		cfg      cluster.Config
+		flags    []string
+		config   string
+		distro   string
+		kernel   string // "" none, "file" a fake kernel image, else literal
+		ipFamily string
+		want     string
+	}{
+		{name: "flannel without kernel", flags: []string{"--cni=flannel"}, want: "--cni flannel needs the full node kernel"},
+		{name: "config file flannel without kernel", config: "cni: flannel\n", want: "--cni flannel needs the full node kernel"},
+		{name: "cilium without kernel", flags: []string{"--cni=cilium"}, want: "--cni cilium needs the full node kernel"},
+		{name: "k3s rejects cni", distro: "k3s", flags: []string{"--cni=flannel"}, want: "cni selection applies to --distro kubeadm only"},
+		{name: "gpu rejects custom kernel", cfg: cluster.Config{GPUWorkers: 1}, flags: []string{"--cni=flannel"}, kernel: "file", want: "--kernel applies to apple/container nodes"},
+		{name: "gpu rejects flannel", cfg: cluster.Config{GPUWorkers: 1}, flags: []string{"--cni=flannel"}, want: "support --cni kindnet or cilium"},
+		{name: "dual-stack rejects flannel", ipFamily: "dual", kernel: "file", flags: []string{"--cni=flannel"}, want: "does not support --cni flannel"},
+		{name: "cni names are lowercase", kernel: "file", flags: []string{"--cni=Flannel"}, want: "unknown --cni"},
+		{name: "calico fails before boot", kernel: "file", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
+		{name: "typo fails before boot", kernel: "file", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
+		{name: "typo fails before the kernel download", kernel: "full", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
+		{name: "calico fails before the kernel download", kernel: "full", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCfg, oldConfigFile := createCfg, createConfigFile
+			oldKernel, oldIPFamily, oldDistro := createKernel, createIPFamily, createDistro
+			t.Cleanup(func() {
+				createCfg, createConfigFile = oldCfg, oldConfigFile
+				createKernel, createIPFamily, createDistro = oldKernel, oldIPFamily, oldDistro
+			})
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("PATH", dir)
+			createCfg = tc.cfg
+			createCfg.Name = "dev"
+			createCfg.WaitTimeout = time.Minute
+			createCfg.GPUImage = cluster.DefaultGPUImage
+			createCfg.GPUDiskSize = "20G"
+			createCfg.GPUDriver = "device-plugin"
+			createConfigFile = ""
+			createDistro = "kubeadm"
+			if tc.distro != "" {
+				createDistro = tc.distro
+			}
+			createIPFamily = "ipv4"
+			if tc.ipFamily != "" {
+				createIPFamily = tc.ipFamily
+			}
+			createKernel = tc.kernel
+			if tc.kernel == "file" {
+				createKernel = filepath.Join(dir, "Image")
+				if err := os.WriteFile(createKernel, []byte("not a kernel"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.config != "" {
+				createConfigFile = filepath.Join(dir, "cluster.yaml")
+				if err := os.WriteFile(createConfigFile, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := &cobra.Command{}
+			command.Flags().StringVar(&createCfg.CNI, "cni", "kindnet", "")
+			if err := command.ParseFlags(tc.flags); err != nil {
+				t.Fatal(err)
+			}
+			err := createClusterCmd.RunE(command, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RunE error = %v, want substring %q", err, tc.want)
+			}
+			// No kernel or plugin archive may have been downloaded on the
+			// way to the error (state directories and locks are fine).
+			filepath.WalkDir(filepath.Join(dir, ".kiac"), func(path string, d os.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				if strings.Contains(path, "/kernels/") || strings.HasSuffix(path, ".tgz") {
+					t.Errorf("download happened before the precheck failed: %s", path)
+				}
+				return nil
+			})
+		})
+	}
+}

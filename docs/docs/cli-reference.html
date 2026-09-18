@@ -66,6 +66,7 @@ kiac create cluster --name dev --workers 2
 kiac create cluster --memory 8G --cpus 4
 kiac create cluster --distro k3s --workers 1
 kiac create cluster --cni cilium --kernel full
+kiac create cluster --cni flannel --kernel full
 kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly
 kiac create cluster --config cluster.yaml</code></pre>
@@ -81,7 +82,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.36 (1.32-1.36 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
     <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
-    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium needs <code>--kernel full</code>; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
+    <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, <code>flannel</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium and Flannel need <code>--kernel full</code>; Flannel (upstream v0.28.9 embedded, VXLAN backend) needs no host CLI and is not available on GPU clusters; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
     <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Given, it replaces the runtime's default resolv.conf entirely rather than adding to it (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
     <tr><td><code>--ip-family</code></td><td><code>ipv4</code></td><td><code>ipv4</code>, <code>dual</code>, or <code>ipv6</code>. Non-IPv4 ordinary clusters select the full kernel; GPU clusters currently require IPv4</td></tr>
@@ -95,7 +96,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--no-edge-proxy</code></td><td><code>false</code></td><td>skip the node-local edge proxy that fixes large TCP uploads through NodePorts and LoadBalancers</td></tr>
     <tr><td><code>--observability</code></td><td><code>false</code></td><td>install Prometheus + Grafana + node-exporter; Grafana uses a LoadBalancer IP or ClusterIP with <code>--no-lb</code></td></tr>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
-    <tr><td><code>--wait</code></td><td><code>5m</code></td><td>positive timeout for each cluster readiness step, including CNI installation; zero and negative values are rejected. Passed to Cilium as <code>--wait-duration</code></td></tr>
+    <tr><td><code>--wait</code></td><td><code>5m</code></td><td>positive timeout for each cluster readiness step, including CNI installation; zero and negative values are rejected. Passed to Cilium as <code>--wait-duration</code> and used as Flannel's <code>rollout status --timeout</code></td></tr>
   </table>
   <p>Version resolution: a minor like <code>1.34</code> uses kiac's digest-pinned node image (<code>kindest/node</code>, or <code>rancher/k3s</code> with <code>--distro k3s</code>); an exact patch matches the pin when it is the pinned patch, otherwise falls back to the matching upstream tag unpinned. K3s also accepts full releases such as <code>v1.36.4+k3s1</code> and <code>v1.36.4-k3s1</code>. Explicit K3s build revisions are preserved, and a digest pin is reused only when the complete release tag matches.</p>
   <p><code>--kernel</code> is CLI-only. <code>distro</code> and the GPU options are also available as <a href="config-file.html">config file</a> keys.</p>
@@ -154,7 +155,7 @@ kiac start node worker-2 --name staging</code></pre>
   </table>
 
   <h2 id="verify-cluster">kiac verify cluster</h2>
-  <p>Run read-only health checks across the node VMs, required node services, API readiness, Kubernetes nodes and workloads, DNS, storage, metrics, the edge proxy and its redirect rules, LoadBalancer assignments, optional Gateway and observability addons, and reachability from the Mac. Intentionally disabled addons report <code>skip</code>; required failures make the command exit nonzero.</p>
+  <p>Run read-only health checks across the node VMs, required node services, API readiness, Kubernetes nodes and workloads, the pod network DaemonSet (kindnet, Cilium, or Flannel), DNS, storage, metrics, the edge proxy and its redirect rules, LoadBalancer assignments, optional Gateway and observability addons, and reachability from the Mac. Intentionally disabled addons report <code>skip</code>; required failures make the command exit nonzero.</p>
   <pre><code>kiac verify cluster --name dev
 kiac verify cluster --name dev -o json</code></pre>
   <table>
@@ -165,7 +166,7 @@ kiac verify cluster --name dev -o json</code></pre>
   </table>
 
   <h2 id="support-bundle">kiac support bundle</h2>
-  <p>Write a mode-<code>0600</code>, bounded, redacted <code>tar.gz</code> with the verification report, host and Apple container runtime status, safe Kubernetes listings, and node system logs. Collection is read-only and excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. Names, IPs, events, and system logs remain operational data, so review the archive before sharing it.</p>
+  <p>Write a mode-<code>0600</code>, bounded, redacted <code>tar.gz</code> with the verification report, host and Apple container runtime status, safe Kubernetes listings (including the pod-network DaemonSet's pods and container logs as <code>kubernetes/cni-&lt;name&gt;.txt</code> and <code>.log</code>), and node system logs. Collection is read-only and excludes kubeconfigs, Kubernetes Secrets, raw container inspection, process environments, application logs, and edge-proxy credential files. Names, IPs, events, and system logs remain operational data, so review the archive before sharing it.</p>
   <pre><code>kiac support bundle --name dev
 kiac support bundle --name dev --output /tmp/dev-support.tar.gz</code></pre>
   <table>

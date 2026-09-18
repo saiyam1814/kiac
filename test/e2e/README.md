@@ -11,8 +11,9 @@ Run one distro locally:
 ./test/e2e/run.sh k3s
 ```
 
-`quick` runs both IPv4 distros. `dual` runs both dual-stack distros and
-`full` runs all four profiles. Every IPv4 profile creates one control
+`quick` runs both IPv4 distros. `dual` runs both dual-stack distros,
+`flannel` runs a kubeadm IPv4 cluster with `--cni flannel --kernel full`,
+and `full` runs all five clusters. Every IPv4 profile creates one control
 plane and three workers, enables Gateway API and observability, sends an
 exactly verified 1 MiB upload from worker 1 through worker 3 to a pod on
 worker 2, rejects an unauthenticated tunnel, checks the proxy's limited

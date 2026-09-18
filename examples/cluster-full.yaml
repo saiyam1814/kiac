@@ -42,9 +42,9 @@ k8sVersion: "1.36"
 # need a specific kindest/node build.
 # image: docker.io/kindest/node:v1.36.4
 
-# Pod network: kindnet (the default), or none to bring your own CNI.
-# The stock node kernel has no VXLAN/br_netfilter/BPF-JIT modules, so
-# flannel/calico/cilium need a custom kernel.
+# Pod network: kindnet (the default), cilium or flannel (both need
+# --kernel full on the command line; the stock node kernel has no
+# VXLAN/br_netfilter/BPF-JIT modules), or none to bring your own CNI.
 cni: kindnet
 
 # IP family for pods, Services, and nodes:

@@ -35,6 +35,10 @@ func (b *routedTestBackend) ExecStdin(name string, input io.Reader, command ...s
 	return err
 }
 
+func (b *routedTestBackend) ExecStdinTimeout(name string, _ time.Duration, input io.Reader, command ...string) error {
+	return b.ExecStdin(name, input, command...)
+}
+
 func (b *routedTestBackend) WaitReady(string, time.Duration) error { return nil }
 
 func (b *routedTestBackend) Logs(name string, _ time.Duration) (string, error) {

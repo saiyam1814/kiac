@@ -57,6 +57,9 @@ func TestValidateIPFamily(t *testing.T) {
 		{"dual with kernel ok", Config{IPFamily: DualStack, Kernel: "/x"}, false},
 		{"ipv6 with kernel ok", Config{IPFamily: IPv6, Kernel: "/x"}, false},
 		{"dual with cilium fails", Config{IPFamily: DualStack, Kernel: "/x", CNI: "cilium"}, true},
+		{"dual with flannel fails", Config{IPFamily: DualStack, Kernel: "/x", CNI: "flannel"}, true},
+		{"ipv6 with flannel fails", Config{IPFamily: IPv6, Kernel: "/x", CNI: "flannel"}, true},
+		{"ipv4 with flannel ok", Config{IPFamily: IPv4, Kernel: "/x", CNI: "flannel"}, false},
 		{"bogus family fails", Config{IPFamily: "nope"}, true},
 	}
 	for _, tt := range tests {

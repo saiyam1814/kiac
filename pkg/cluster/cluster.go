@@ -221,15 +221,10 @@ func (m *Manager) Create(cfg Config) error {
 		return err
 	}
 
-	// Fail cilium prerequisites before any VM boots, not minutes later
-	// when the CNI step runs.
-	if cfg.CNI == "cilium" {
-		if cfg.Kernel == "" {
-			return fmt.Errorf("--cni cilium needs the full node kernel: add --kernel full (or a --kernel path)")
-		}
-		if _, err := exec.LookPath("cilium"); err != nil {
-			return fmt.Errorf("--cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli")
-		}
+	// Fail CNI prerequisites before any VM boots, not minutes later when
+	// the CNI step runs.
+	if err := validateCNI(cfg); err != nil {
+		return err
 	}
 
 	if err := ui.Step("Preflight checks", func() error {
@@ -577,10 +572,44 @@ func (m *Manager) waitNodeIPv6(node string, timeout time.Duration) (string, erro
 	}
 }
 
+// ValidateCNI is validateCNI for the CLI, which runs it before resolving
+// --kernel so a CNI typo cannot cost a kernel download. cfg.Kernel may
+// be the unresolved flag value there; only its emptiness matters.
+func ValidateCNI(cfg Config) error { return validateCNI(cfg) }
+
+// validateCNI rejects a --cni selection Create cannot honor, before any
+// VM boots: an unknown name, calico (not wired up), or cilium/flannel
+// without their prerequisites. installCNI re-checks the same cases so
+// the invariant also holds for direct callers.
+func validateCNI(cfg Config) error {
+	switch cfg.CNI {
+	case "", "kindnet", "none":
+		return nil
+	case "cilium":
+		if cfg.Kernel == "" {
+			return fmt.Errorf("--cni cilium needs the full node kernel: add --kernel full (or a --kernel path)")
+		}
+		if _, err := exec.LookPath("cilium"); err != nil {
+			return fmt.Errorf("--cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli")
+		}
+		return nil
+	case "flannel":
+		if cfg.Kernel == "" {
+			return fmt.Errorf("--cni flannel needs the full node kernel: add --kernel full (or a --kernel path)")
+		}
+		return nil
+	case "calico":
+		return fmt.Errorf("calico needs kernel features the stock node kernel does not enable; use --cni cilium or --cni flannel with --kernel full, or --cni none to bring your own")
+	default:
+		return fmt.Errorf("unknown --cni %q (supported: kindnet, cilium, flannel, none)", cfg.CNI)
+	}
+}
+
 // installCNI applies the selected pod network. kindnet ships inside the
 // node image; cilium requires the full custom kernel (--kernel full)
-// and the cilium CLI on the host; "none" skips installation for other
-// BYO CNIs.
+// and the cilium CLI on the host; flannel applies the embedded upstream
+// manifest on the full kernel with no host CLI; "none" skips
+// installation for other BYO CNIs.
 func (m *Manager) installCNI(cp string, cfg Config) error {
 	switch cfg.CNI {
 	case "", "kindnet":
@@ -592,13 +621,15 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 		})
 	case "cilium":
 		return m.installCilium(cp, cfg)
-	case "flannel", "calico":
-		return fmt.Errorf("%s needs kernel features the stock node kernel does not enable; use --cni cilium with --kernel full, or --cni none to bring your own", cfg.CNI)
+	case "flannel":
+		return m.installFlannel(cp, cfg)
+	case "calico":
+		return fmt.Errorf("calico needs kernel features the stock node kernel does not enable; use --cni cilium or --cni flannel with --kernel full, or --cni none to bring your own")
 	case "none":
 		ui.Infof("skipping CNI: install your own before nodes go Ready (note: the stock kernel lacks br_netfilter/VXLAN/eBPF)")
 		return nil
 	default:
-		return fmt.Errorf("unknown --cni %q (supported: kindnet, cilium, none)", cfg.CNI)
+		return fmt.Errorf("unknown --cni %q (supported: kindnet, cilium, flannel, none)", cfg.CNI)
 	}
 }
 
@@ -691,6 +722,9 @@ func validateIPFamily(cfg Config) error {
 	}
 	if cfg.CNI == "cilium" {
 		return fmt.Errorf("--ip-family %s does not support --cni cilium yet: Cilium's installer and IPAM are not wired for dual-stack CIDRs", cfg.family())
+	}
+	if cfg.CNI == "flannel" {
+		return fmt.Errorf("--ip-family %s does not support --cni flannel yet: kiac's flannel install is IPv4-only for now", cfg.family())
 	}
 	return nil
 }
