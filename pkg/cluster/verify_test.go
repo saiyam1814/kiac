@@ -193,6 +193,7 @@ case "$*" in
     esac
     ;;
   *"get daemonset kindnet -n kube-system"*)
+    if [ -n "${KIAC_TEST_KINDNET_ERR:-}" ]; then echo "Unable to connect to the server" >&2; exit 1; fi
     if [ "${KIAC_TEST_CNI:-}" = kindnet ]; then printf '{"status":{"desiredNumberScheduled":1,"numberReady":1}}\n'; fi
     ;;
   *"get daemonset cilium -n kube-system"*)
@@ -271,5 +272,30 @@ func TestSkipKubernetesDataChecksCoversEveryDataCheck(t *testing.T) {
 		if got := verificationStatus(report, id); got != VerificationSkip {
 			t.Errorf("%s = %q, want skip", id, got)
 		}
+	}
+}
+
+func TestDetectCNIKeepsProbingPastATransientError(t *testing.T) {
+	// A transient failure probing the first candidate (kindnet) must not
+	// hide a healthy flannel install behind it: detectCNI keeps probing
+	// and reports flannel, not a warn.
+	t.Setenv("KIAC_TEST_KINDNET_ERR", "1")
+	t.Setenv("KIAC_TEST_CNI", "flannel")
+	report := VerificationReport{Distro: "kubeadm"}
+	fakeVerificationManager(t).verifyCNI(&report, "kiac-dev-control-plane", fakeVerificationTimeout)
+	if got := verificationStatus(report, "network.cni"); got != VerificationPass {
+		t.Fatalf("network.cni = %s, want pass despite the kindnet probe error", got)
+	}
+
+	// When every probe errors and nothing is found, the aggregated error
+	// surfaces as a warn rather than a silent skip.
+	t.Setenv("KIAC_TEST_CNI", "")
+	report = VerificationReport{Distro: "kubeadm"}
+	_, _, found, err := fakeVerificationManager(t).detectCNI("kiac-dev-control-plane", "kubeadm", fakeVerificationTimeout)
+	if found {
+		t.Fatal("detectCNI reported found with no DaemonSet present")
+	}
+	if err == nil || !strings.Contains(err.Error(), "kindnet:") {
+		t.Fatalf("detectCNI err = %v, want the kindnet probe failure aggregated", err)
 	}
 }

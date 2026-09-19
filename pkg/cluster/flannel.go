@@ -16,6 +16,14 @@ import (
 //
 //	curl -fsSL https://github.com/flannel-io/flannel/releases/download/vX.Y.Z/kube-flannel.yml \
 //	  -o pkg/cluster/assets/flannel.yaml
+//
+// Deliberately verbatim, not digest-pinned. The other node artifacts
+// (kindest/node, rancher/k3s, the CNI plugins archive) pin @sha256, but
+// this manifest keeps upstream's exact bytes so it stays byte-for-byte
+// diffable against the release; a bump tracks upstream's tag, not a
+// digest. Verbatim and digest-pinned cannot both hold - this was a
+// settled choice, not an oversight, so do not add @sha256 on the next
+// bump without dropping the verbatim property on purpose.
 const FlannelVersion = "v0.28.9"
 
 // flannelManifest is upstream kube-flannel.yml at FlannelVersion,

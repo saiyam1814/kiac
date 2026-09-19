@@ -73,15 +73,28 @@ func TestFlannelManifestWithCIDRRejectsReshapedManifest(t *testing.T) {
 }
 
 func TestFlannelDelegatePluginsAreDeclaredInConflist(t *testing.T) {
-	// The install path streams exactly the delegate binaries the
-	// conflist needs but the node image lacks. If upstream changes the
-	// delegation (a new plugin type, or dropping bridge), this pins the
-	// assumption so the bump is reviewed rather than silently broken.
+	// installFlannel streams ./bridge because flannel-cni-plugin delegates
+	// to bridge by default when the conflist's delegate block sets no
+	// explicit "type". This test pins exactly that assumption: the block
+	// chains portmap and leaves the delegate type unset. A bump that names
+	// an explicit non-bridge delegate would then be caught here rather
+	// than silently shipping the wrong plugin.
 	if !strings.Contains(flannelManifest, `"isDefaultGateway": true`) {
-		t.Fatal("flannel conflist no longer delegates to the bridge plugin; update ensureFlannelDelegatePlugins")
+		t.Fatal("flannel conflist no longer sets the default-gateway delegate; re-check the streamed plugin set")
 	}
 	if !strings.Contains(flannelManifest, `"type": "portmap"`) {
-		t.Fatal("flannel conflist no longer chains portmap; update ensureFlannelDelegatePlugins")
+		t.Fatal("flannel conflist no longer chains portmap; update the streamed plugin set")
+	}
+	// The delegate block itself must not pin a "type": ./bridge is only
+	// correct as flannel-cni-plugin's unset-delegate default.
+	i := strings.Index(flannelManifest, `"delegate"`)
+	if i < 0 {
+		t.Fatal("flannel conflist no longer has a delegate block")
+	}
+	block := flannelManifest[i:]
+	block = block[:strings.Index(block, "}")]
+	if strings.Contains(block, `"type"`) {
+		t.Fatalf("delegate block now pins a type, so ./bridge may no longer be the delegate:\n%s", block)
 	}
 }
 

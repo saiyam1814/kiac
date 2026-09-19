@@ -76,9 +76,12 @@ func (c *Client) runContext(ctx context.Context, args ...string) (string, error)
 		case ctx.Err() != nil:
 			err = ctx.Err()
 		case errors.Is(err, exec.ErrWaitDelay):
-			// The command exited successfully; only a descendant kept
-			// the pipe open past pipeWaitDelay. That is not a failure,
-			// and reporting one would fail a healthy readiness probe.
+			// The command exited successfully; only a descendant kept the
+			// pipe open past pipeWaitDelay. That is not a failure, and
+			// reporting one would fail a healthy readiness probe. Caveat:
+			// WaitDelay may have force-closed the pipe mid-write, so out
+			// can be truncated - a caller parsing this (e.g. JSON) should
+			// tolerate a short read rather than treat it as a hard error.
 			return string(out), nil
 		}
 		return string(out), &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}
@@ -291,6 +294,9 @@ func (c *Client) execStdinContext(ctx context.Context, name string, r io.Reader,
 		case ctx.Err() != nil:
 			err = ctx.Err()
 		case errors.Is(err, exec.ErrWaitDelay):
+			// Exited successfully; a descendant held the pipe past
+			// pipeWaitDelay. The transfer completed; only pipe teardown
+			// lagged, so this is success (no output is returned here).
 			return nil
 		}
 		return &CommandError{Tool: c.Bin, Args: args, Output: string(out), Err: err}

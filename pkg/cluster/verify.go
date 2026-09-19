@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -356,19 +357,25 @@ var cniDaemonSets = []cniDaemonSet{
 }
 
 // detectCNI returns the installed pod network and its DaemonSet JSON.
-// found is false when none of the known DaemonSets exists; err is the
-// first kubectl failure.
+// found is false when none of the known DaemonSets exists; err then
+// aggregates any probe failures (nil when every probe simply returned
+// empty).
 func (m *Manager) detectCNI(cp, distro string, timeout time.Duration) (cni cniDaemonSet, raw string, found bool, err error) {
+	var errs []error
 	for _, candidate := range cniDaemonSets {
-		out, err := m.diagnosticKubectl(cp, distro, timeout, "get", "daemonset", candidate.daemonSet, "-n", candidate.namespace, "--ignore-not-found", "-o", "json")
-		if err != nil {
-			return candidate, "", false, err
+		out, probeErr := m.diagnosticKubectl(cp, distro, timeout, "get", "daemonset", candidate.daemonSet, "-n", candidate.namespace, "--ignore-not-found", "-o", "json")
+		if probeErr != nil {
+			// A transient error probing one candidate must not hide a
+			// healthy install behind a later one; keep probing and only
+			// surface the failures if nothing is found at all.
+			errs = append(errs, fmt.Errorf("%s: %w", candidate.name, probeErr))
+			continue
 		}
 		if strings.TrimSpace(out) != "" {
 			return candidate, out, true, nil
 		}
 	}
-	return cniDaemonSet{}, "", false, nil
+	return cniDaemonSet{}, "", false, errors.Join(errs...)
 }
 
 // verifyCNI reports whether the installed pod network's DaemonSet has a
