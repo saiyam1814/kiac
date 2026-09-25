@@ -695,7 +695,7 @@ func (m *Manager) waitK3sGuest(node string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if _, err := m.rt.Exec(node, "sh", "-c", `[ "$(readlink -f /proc/1/exe 2>/dev/null)" = /bin/k3s ]`); err == nil {
+		if _, err := m.rt.Exec(node, "sh", "-c", k3sLivePIDScript+`[ "$(readlink -f /proc/$pid/exe 2>/dev/null)" = /bin/k3s ]`); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -707,7 +707,7 @@ func (m *Manager) waitK3sGuest(node string, timeout time.Duration) error {
 
 func (m *Manager) k3sAgentLiveURL(node string) (string, error) {
 	out, err := m.rt.Exec(node, "sh", "-c",
-		`tr '\000' '\n' < /proc/1/environ | sed -n 's/^K3S_URL=//p' | head -n1`)
+		k3sLivePIDScript+`tr '\000' '\n' < /proc/$pid/environ | sed -n 's/^K3S_URL=//p' | head -n1`)
 	if err != nil {
 		return "", err
 	}

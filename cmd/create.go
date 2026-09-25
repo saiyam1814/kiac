@@ -55,8 +55,8 @@ var createClusterCmd = &cobra.Command{
 		if !createCfg.IPFamily.Valid() {
 			return fmt.Errorf("invalid ip-family %q (supported: ipv4, dual, ipv6)", createCfg.IPFamily)
 		}
-		// A non-ipv4 family needs the full kernel (the stock kernel has no
-		// IPv6 netfilter). Auto-select it when the user did not name a
+		// A non-ipv4 family needs IPv6 netfilter, absent from older runtime
+		// kernels. Auto-select the full kernel when the user did not name a
 		// kernel, so --ip-family dual "just works" without the user
 		// knowing which kernel carries IPv6; an explicit --kernel wins.
 		if createCfg.GPUWorkers > 0 && createCfg.IPFamily != cluster.IPv4 {

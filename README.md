@@ -80,7 +80,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - ⚖️ **`type: LoadBalancer` works** — kiac-lb ships by default: a tiny systemd loop inside the control-plane VM assigns node IPs to Services in about two seconds, shares one IP across Services when ports don't collide, and heals itself after node restarts. No pods, no webhooks, no `<pending>`, no tunnels.
 - 🌐 **Direct networking** — every node gets a routable IP on macOS 26+. Hit NodePorts directly, no port-mapping flags; a tiny embedded node-local edge proxy terminates external TCP first so large uploads from sibling VMs do not hit vmnet's TSO forwarding bug.
 - 🧱 **Multi-node, day one** — `--workers N` gives a real topology: scheduling, cross-node pod networking, node failures you can practice on.
-- ⚡ **Two distros** — kubeadm on `kindest/node` by default, or `--distro k3s` for `rancher/k3s` as PID 1 in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.
+- ⚡ **Two distros** — kubeadm on `kindest/node` by default, or `--distro k3s` for `rancher/k3s` under a lightweight supervisor in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.
 - 🐝 **Cilium and eBPF, one flag pair** — `--cni cilium --kernel full` downloads a published, sha-pinned kernel build (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. Cross-node pod traffic runs at ~285MB/s and Mac-to-pod at ~1GB/s on Cilium's vxlan datapath.
 - **Real Apple GPU nodes (alpha)** — `--gpu-workers N` creates krunkit-backed worker VMs with the Mac's Apple GPU exposed through virtio-gpu/Venus. Kubernetes advertises only the honest `kiac.dev/gpu` resource through a device plugin or DRA; `kiac gpu bench` proves the Vulkan path with a pinned llama.cpp workload and can compare it with native Metal.
 - 🔁 **Clusters survive reboots** — `kiac resume cluster` restarts kubeadm or k3s VMs after a host reboot and heals every stale control-plane, node, kubeconfig, and networking address. It is idempotent and upgrades existing k3s clusters in place.
@@ -99,7 +99,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 
 - An Apple silicon Mac
 - macOS 26+ for multi-node clusters (single-node works on macOS 15, with limitations)
-- [apple/container](https://github.com/apple/container/releases) 1.0.0+ (1.2.0 is incompatible; use 1.2.1 or newer)
+- [apple/container](https://github.com/apple/container/releases) 1.0.0+ (1.4.1 recommended; 1.2.0 is incompatible)
 - `kubectl`
 
 GPU clusters additionally require [krunkit](https://github.com/libkrun/krunkit) 1.3.2+ and [vmnet-helper](https://github.com/nirs/vmnet-helper) 0.13.0+. These are loaded only when `--gpu-workers` is used, so ordinary cluster startup and resource use are unchanged.
@@ -163,7 +163,7 @@ The kubeconfig is merged into `~/.kube/config` as context `kiac-dev` (your exist
 ### Pick a flavor
 
 ```bash
-# k3s nodes: rancher/k3s as PID 1 in every VM, a 2-node cluster in under a minute
+# k3s nodes: supervised rancher/k3s in every VM, a 2-node cluster in under a minute
 kiac create cluster --name quick --distro k3s --workers 1
 
 # Cilium with eBPF on the full node kernel (needs the Cilium CLI: brew install cilium-cli)
@@ -303,7 +303,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--gpu-image` | `fedora-44` | verified GPU VM base image alias or a local raw ARM64 cloud-disk path |
 | `--gpu-disk-size` | `20G` | persistent disk size for each krunkit-backed node |
 | `--gpu-resource-driver` | `device-plugin` | Kubernetes resource publication: `device-plugin`, or `dra` on Kubernetes 1.36+ |
-| `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.36 (pins 1.32-1.36) |
+| `--k8s-version` | distro latest | Kubernetes minor; kubeadm defaults to 1.37 (pins 1.32-1.37), k3s defaults to 1.37 (pins 1.32-1.37) |
 | `--distro` | `kubeadm` | `kubeadm` or `k3s`; ordinary k3s replaces Flannel with kindnet, while GPU k3s uses bundled Flannel on krunkit's capable kernel; `--cni` does not apply to k3s |
 | `--image` | resolved from `--k8s-version` | explicit node image override |
 | `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full` |
@@ -329,7 +329,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
   <img src="assets/architecture.png" alt="How kiac builds a cluster" width="100%">
 </p>
 
-For ordinary clusters, Kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins workers over the `vmnet` network, and installs the selected CNI and addons. With `--distro k3s`, the VMs run `rancher/k3s` as PID 1 instead. `--kernel full` boots apple/container nodes on a published kernel build with the features overlay and eBPF CNIs need.
+For ordinary clusters, Kiac drives the `apple/container` CLI to boot one lightweight VM per node from the standard `kindest/node` image (systemd, containerd, kubeadm preinstalled), initializes the control plane with `kubeadm`, joins workers over the `vmnet` network, and installs the selected CNI and addons. With `--distro k3s`, the VMs run `rancher/k3s` under a lightweight supervisor instead. `--kernel full` boots apple/container nodes on a published kernel build with the features overlay and eBPF CNIs need.
 
 On systemd-backed nodes, `kiac resume cluster` repairs stale edge-proxy API credentials without replacing the tunnel token. Healthy proxies with current credentials stay running; interrupted updates remain retryable. Support bundles collect these proxies' journald logs, while ordinary K3s proxies keep their file-based logs.
 

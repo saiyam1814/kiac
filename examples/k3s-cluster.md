@@ -18,7 +18,7 @@ VM gets 4G by default, workers 2G; tune with `--cp-memory` and
 `--memory`).
 
 `--k8s-version` works the same as on the kubeadm path: minors 1.32
-through 1.36, each pinned to an exact rancher/k3s image digest, 1.36
+through 1.37, each pinned to an exact rancher/k3s image digest, 1.37
 by default. `kubectl` talks to it through the merged `kiac-dev`
 context as usual.
 

@@ -34,17 +34,16 @@ workers: 3
 
 # Kubernetes version: a supported minor ("1.32" through "1.37") or an
 # exact patch. Each minor is pinned to a tested image digest. This
-# cross-distro example uses "1.36"; kubeadm defaults to "1.37" while
-# k3s currently defaults to "1.36".
-k8sVersion: "1.36"
+# cross-distro example uses "1.37", the default for both kubeadm and k3s.
+k8sVersion: "1.37"
 
 # Node image, overrides k8sVersion entirely. Leave unset unless you
 # need a specific kindest/node build.
-# image: docker.io/kindest/node:v1.36.4
+# image: docker.io/kindest/node:v1.37.0
 
 # Pod network: kindnet (the default), or none to bring your own CNI.
-# The stock node kernel has no VXLAN/br_netfilter/BPF-JIT modules, so
-# flannel/calico/cilium need a custom kernel.
+# Older retained kernels lack VXLAN/br_netfilter/BPF-JIT. KIAC's Cilium
+# path requires an explicit kernel; Flannel and Calico are not bundled.
 cni: kindnet
 
 # IP family for pods, Services, and nodes:
@@ -55,8 +54,8 @@ cni: kindnet
 #   ipv6           - IPv6-primary (single-stack v6 pods/Services/node IPs).
 #                    Nodes keep an IPv4 address for image pulls and egress.
 #                    kubeadm only; not yet supported on --distro k3s.
-# dual and ipv6 auto-select the kiac full kernel (the stock kernel has no
-# IPv6 netfilter, so IPv6 Services would never connect) and need an
+# dual and ipv6 auto-select the kiac full kernel to ensure IPv6 netfilter
+# is available even on installations retaining older kernels, and need an
 # IPv6-enabled container network (macOS 26+).
 ipFamily: ipv4
 
