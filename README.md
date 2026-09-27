@@ -345,15 +345,6 @@ GPU mode is deliberately opt-in. When `--gpu-workers` is nonzero, Kiac builds th
 
 Host bind mounts use ordinary `container run`, not `container machine`; `/Users` is therefore not shared automatically. A configured mount is attached independently to every node and remains attached when that container is stopped and started or resumed. See [Storage & metrics](https://saiyam1814.github.io/kiac/docs/storage-and-metrics.html#host-bind-mounts) for the required Kubernetes `hostPath` layer and security implications.
 
-## Roadmap
-
-- **Persistence backed by `container machine`** (WWDC26 persistent Linux environments): `kiac resume` already brings a cluster back after a reboot, and machine-backed VMs would make that instant
-- **HA control planes**
-- **One-flag Calico** on the full kernel (Flannel shipped: `--cni flannel --kernel full`)
-- **Hubble UI** for Cilium clusters
-- **Standalone Apple GPU driver packaging** with a stable API shared outside Kiac
-- **Multi-Mac GPU pools and stricter per-workload GPU memory enforcement** after the local alpha contracts settle
-
 ## Contributing
 
 Issues and PRs are welcome, from typo fixes to new addons. A good way in: try the configs in [`examples/`](examples/), read the [docs site](https://saiyam1814.github.io/kiac/), and open an issue for anything that surprised you. If you want to build something bigger, open an issue first so we can agree on the shape.
