@@ -118,10 +118,10 @@ func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
 		{name: "gpu rejects flannel", cfg: cluster.Config{GPUWorkers: 1}, flags: []string{"--cni=flannel"}, want: "support --cni kindnet or cilium"},
 		{name: "dual-stack rejects flannel", ipFamily: "dual", kernel: "file", flags: []string{"--cni=flannel"}, want: "does not support --cni flannel"},
 		{name: "cni names are lowercase", kernel: "file", flags: []string{"--cni=Flannel"}, want: "unknown --cni"},
-		{name: "calico fails before boot", kernel: "file", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
+		{name: "calico fails before boot", kernel: "file", flags: []string{"--cni=calico"}, want: "calico is not bundled"},
 		{name: "typo fails before boot", kernel: "file", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
 		{name: "typo fails before the kernel download", kernel: "full", flags: []string{"--cni=flanel"}, want: "unknown --cni"},
-		{name: "calico fails before the kernel download", kernel: "full", flags: []string{"--cni=calico"}, want: "calico needs kernel features"},
+		{name: "calico fails before the kernel download", kernel: "full", flags: []string{"--cni=calico"}, want: "calico is not bundled"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
