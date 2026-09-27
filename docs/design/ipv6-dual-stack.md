@@ -17,8 +17,8 @@ ip6tables v1.8.11 (legacy): can't initialize ip6tables table `filter':
 Table does not exist (do you need to insmod?)
 ```
 
-The cause is below Kubernetes. The default kernel `apple/container` boots
-(Kata's generic VM kernel) is built without IPv6 netfilter and with
+The cause was below Kubernetes: the affected installation retained an
+older minimal kernel without IPv6 netfilter and with
 `CONFIG_MODULES` off, so there is nothing to `insmod` and no way to create
 the IPv6 `filter`/`nat` tables. kube-proxy probes, logs "No iptables
 support for family IPv6", and silently programs only IPv4 rules, so every
@@ -63,7 +63,7 @@ IPv6 subnet (`container network inspect default`), which needs macOS 26+.
   interface *before* enabling `net.ipv6 forwarding`: turning on forwarding
   otherwise disables the default `accept_ra=1`, and the node never
   acquires (or later loses, at RA-lifetime expiry) its v6 address. This
-  bit only the k3s path at first, because k3s runs as PID 1 and its boot
+  bit only the k3s path at first, because K3s starts before systemd-style network readiness and its boot
   preamble executes before any SLAAC; kubeadm nodes acquire v6 during
   their own init.
 - **kiac-lb** reads each Service's `spec.ipFamilies` and assigns a node
