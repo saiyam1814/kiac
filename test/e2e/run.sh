@@ -115,7 +115,14 @@ wait_for_server() {
 
 start_traffic_server() {
   k -n kiac-e2e rollout status deployment/upload-server --timeout=180s
-  TRAFFIC_POD=$(k -n kiac-e2e get pod -l app=upload-server -o jsonpath='{.items[0].metadata.name}')
+  # Pick the newest pod, not items[0]. After the nodeSelector patch the old
+  # pod lingers in Terminating for its full grace period (sleep ignores
+  # SIGTERM as PID 1) while rollout status has already returned, and the
+  # name-ordered list puts whichever ReplicaSet hash sorts first at [0].
+  # Starting the server in the dying pod passes its loopback health check
+  # while the Service routes to the new pod, where nothing listens.
+  TRAFFIC_POD=$(k -n kiac-e2e get pod -l app=upload-server \
+    --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
   k -n kiac-e2e cp "${TRAFFIC_BIN}" "${TRAFFIC_POD}:/tmp/kiac-e2e-traffic"
   k -n kiac-e2e exec "${TRAFFIC_POD}" -- chmod 0755 /tmp/kiac-e2e-traffic
   k -n kiac-e2e exec "${TRAFFIC_POD}" -- sh -c \
@@ -250,6 +257,9 @@ run_cluster() {
   local workers=$4
   local features=$5
   local restart=$6
+  # Optional 7th arg selects a non-default CNI; cilium and flannel need
+  # the full kernel, which create resolves (and caches) via --kernel full.
+  local cni=${7:-}
   local name="${KIAC_E2E_PREFIX}-${label}"
   local cp="kiac-${name}-control-plane"
   local sender="kiac-${name}-worker-1"
@@ -272,11 +282,14 @@ run_cluster() {
 
   local create=(create cluster --name "${name}" --distro "${distro}" --workers "${workers}" --ip-family "${family}" --wait 8m
     --mount "type=bind,source=${mount_dir},target=/kiac-e2e-host")
+  if [[ -n "${cni}" ]]; then
+    create+=(--cni "${cni}" --kernel full)
+  fi
   if [[ "${features}" == true ]]; then
     create+=(--gateway --observability)
   fi
 
-  printf '\n=== %s: %s %s, %s workers ===\n' "${label}" "${distro}" "${family}" "${workers}"
+  printf '\n=== %s: %s %s, %s workers%s ===\n' "${label}" "${distro}" "${family}" "${workers}" "${cni:+", ${cni}"}"
   "${KIAC_BIN}" "${create[@]}"
 
   k wait --for=condition=Ready nodes --all --timeout=300s
@@ -456,14 +469,18 @@ case "${PROFILE}" in
     run_cluster kad kubeadm dual 3 true false
     run_cluster k3d k3s dual 3 true false
     ;;
+  flannel)
+    run_cluster fl kubeadm ipv4 3 true true flannel
+    ;;
   full)
     run_cluster ka kubeadm ipv4 3 true true
     run_cluster k3 k3s ipv4 3 true true
     run_cluster kad kubeadm dual 3 true false
     run_cluster k3d k3s dual 3 true false
+    run_cluster fl kubeadm ipv4 3 true true flannel
     ;;
   *)
-    printf 'unknown runtime profile %q (quick, kubeadm, k3s, dual, full)\n' "${PROFILE}" >&2
+    printf 'unknown runtime profile %q (quick, kubeadm, k3s, dual, flannel, full)\n' "${PROFILE}" >&2
     exit 2
     ;;
 esac

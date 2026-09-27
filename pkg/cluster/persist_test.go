@@ -646,6 +646,10 @@ func (r *resumeEdgeProxyRuntime) Exec(name string, command ...string) (string, e
 	return out, err
 }
 
+func (r *resumeEdgeProxyRuntime) ExecStdinTimeout(name string, _ time.Duration, input io.Reader, command ...string) error {
+	return r.ExecStdin(name, input, command...)
+}
+
 func (r *resumeEdgeProxyRuntime) ExecStdin(name string, input io.Reader, command ...string) error {
 	raw, err := io.ReadAll(input)
 	if err != nil {

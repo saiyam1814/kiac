@@ -79,9 +79,10 @@
     <li><b>WireGuard</b> and <b>kprobes</b>: transparent encryption and the tracing hooks tools like Hubble and Tetragon build on.</li>
   </ul>
   <p>The kernel stays monolithic with zero loadable modules, matching Apple's model, and its version (6.12.28) matches the kernel apple/container 1.0.0 boots by default, minimizing guest ABI drift.</p>
-  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 15MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
+  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 37MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
   <pre><code>kiac create cluster --kernel full                 <span class="c"># full kernel, default kindnet CNI</span>
 kiac create cluster --kernel full --cni cilium    <span class="c"># full kernel + Cilium</span>
+kiac create cluster --kernel full --cni flannel   <span class="c"># full kernel + upstream Flannel, no host CLI</span>
 kiac create cluster --kernel full --cni none      <span class="c"># full kernel, bring your own CNI</span></code></pre>
 
   <h2 id="performance">The performance story</h2>
@@ -146,7 +147,7 @@ kubectl delete networkpolicy deny-web</code></pre>
   <ul>
     <li>Both prerequisites are checked before any VM boots, so a missing <code>cilium</code> binary or kernel costs seconds, not minutes.</li>
     <li>The kernel cache lives at <code>~/.kiac/kernels/</code>; deleting it just triggers a fresh verified download next time.</li>
-    <li><code>--cni flannel</code> and <code>--cni calico</code> are not wired up: they fail fast with a pointer to <code>--cni cilium</code> or <code>--cni none</code> (bring your own on the full kernel).</li>
+    <li><code>--cni flannel</code> works on the same kernel: kiac embeds the upstream v0.28.9 manifest (VXLAN backend, no host CLI needed) and streams the <code>bridge</code> delegate plugin from its sha-verified archive into every node. <code>--cni calico</code> is not wired up yet and fails fast.</li>
     <li><code>--kernel</code> is CLI-only; <code>distro</code> is also available in the <a href="config-file.html">config file</a>.</li>
   </ul>
 

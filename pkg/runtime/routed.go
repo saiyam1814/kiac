@@ -70,6 +70,10 @@ func (r *RoutedRuntime) ExecStdin(name string, input io.Reader, command ...strin
 	return r.backendFor(name).ExecStdin(name, input, command...)
 }
 
+func (r *RoutedRuntime) ExecStdinTimeout(name string, timeout time.Duration, input io.Reader, command ...string) error {
+	return r.backendFor(name).ExecStdinTimeout(name, timeout, input, command...)
+}
+
 func (r *RoutedRuntime) WaitReady(name string, timeout time.Duration) error {
 	return r.backendFor(name).WaitReady(name, timeout)
 }

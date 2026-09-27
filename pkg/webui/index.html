@@ -216,14 +216,22 @@ async function loadMeta() {
   };
   const syncForm = () => {
     const k3s = $('distro').value === 'k3s';
-    const cil = !k3s && $('cni').value === 'cilium';
     const gpu = $('gpu').checked;
+    // GPU kubeadm clusters accept only kindnet or cilium (the server
+    // rejects the rest), so never offer an option the request would fail on.
+    const gpuCNIs = ['kindnet', 'cilium'];
+    for (const o of $('cni').options) { o.disabled = gpu && !k3s && !gpuCNIs.includes(o.value); }
+    if (gpu && !k3s && !gpuCNIs.includes($('cni').value)) { $('cni').value = 'kindnet'; }
+    const cni = $('cni').value;
+    const cil = !k3s && cni === 'cilium';
+    const fl = !k3s && cni === 'flannel';
     $('cni').disabled = k3s;
     $('gpu-options').hidden = !gpu;
     const note = $('cni-note');
     if (gpu) { note.textContent = cil ? 'Cilium runs inside the Fedora krunkit nodes; no custom kiac kernel is needed.' : 'Real GPU clusters use the verified Fedora disk and require krunkit plus vmnet-helper.'; note.style.display = 'block'; }
     else if (k3s) { note.textContent = 'Ordinary k3s clusters use kindnet; GPU k3s clusters use bundled Flannel. Local-path and metrics-server come bundled; kiac-lb handles LoadBalancers.'; note.style.display = 'block'; }
     else if (cil) { note.textContent = 'Cilium downloads the full node kernel once (~40MB) and needs the cilium CLI: brew install cilium-cli.'; note.style.display = 'block'; }
+    else if (fl) { note.textContent = 'Flannel downloads the full node kernel once (~40MB); no host CLI is needed. IPv4 only for now.'; note.style.display = 'block'; }
     else { note.style.display = 'none'; }
   };
   $('distro').addEventListener('change', () => { syncVersions(true); syncForm(); });

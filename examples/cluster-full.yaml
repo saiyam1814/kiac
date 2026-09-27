@@ -41,9 +41,9 @@ k8sVersion: "1.37"
 # need a specific kindest/node build.
 # image: docker.io/kindest/node:v1.37.0
 
-# Pod network: kindnet (the default), or none to bring your own CNI.
-# Older retained kernels lack VXLAN/br_netfilter/BPF-JIT. KIAC's Cilium
-# path requires an explicit kernel; Flannel and Calico are not bundled.
+# Pod network: kindnet (the default), cilium or flannel (both need
+# --kernel full on the command line), or none to bring your own CNI.
+# Explicit kernels keep these paths compatible with older installations.
 cni: kindnet
 
 # IP family for pods, Services, and nodes:
