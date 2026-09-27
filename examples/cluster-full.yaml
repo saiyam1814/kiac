@@ -77,6 +77,8 @@ ipFamily: ipv4
 # [host-ip:]host-port:container-port[/protocol].
 # Kiac applies these only to the control-plane VM to avoid host-port
 # collisions across worker nodes.
+# Omitted host IP binds all IPv4 interfaces; use 127.0.0.1 for loopback.
+# Publishing 6443 does not add API-server TLS SANs.
 # publish:
 #   - 127.0.0.1:8080:80
 #   - '[::1]:8443:443/udp'

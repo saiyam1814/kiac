@@ -172,7 +172,7 @@ func init() {
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
-	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); repeatable")
+	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")

@@ -311,7 +311,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
 | `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
 | `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |
-| `-p`, `--publish` | | publish host localhost traffic to the control-plane VM using apple/container syntax `[host-ip:]host-port:container-port[/protocol]`; repeatable |
+| `-p`, `--publish` | | publish host traffic to the control-plane VM only using `[host-ip:]host-port:container-port[/protocol]`; omitted host IP binds all IPv4 interfaces, so use `127.0.0.1` for loopback only; repeatable; does not add API-server TLS SANs |
 | `--cpus` | `4` | vCPUs per node VM |
 | `--memory` | `2G` | memory per worker VM (idle workers use a few hundred MB) |
 | `--cp-memory` | `4G` | memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon) |
@@ -324,6 +324,8 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--gateway` | `false` | install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway |
 | `--config` | | cluster config YAML (see [`examples/cluster.yaml`](examples/cluster.yaml)); flags set explicitly on the command line override file values (`--kernel` is flag-only) |
 | `--wait` | `5m` | positive timeout for each readiness step, including CNI installation; zero and negative values are rejected |
+
+`--publish` is supported on ordinary apple/container clusters and forwards only to the control-plane VM. Publishing port 6443 does not add certificate SANs. For kubeadm, a client connecting through a published endpoint can retain verified TLS by setting `tls-server-name` to the existing certificate identity `kiac-<name>-control-plane`, while retaining the generated CA and client credentials. The generated kubeconfig still uses the node address; changing its endpoint is a separate client configuration step.
 
 ## How it works
 
