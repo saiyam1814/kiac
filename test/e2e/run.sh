@@ -233,7 +233,7 @@ assert_k3s_node_addresses() {
     if [[ "${node}" != *-control-plane ]]; then
       saved_url=$(container exec "${node}" cat /etc/kiac/k3s-server-url | tr -d '\r\n')
       live_url=$(container exec "${node}" sh -c \
-        "tr '\\000' '\\n' < /proc/1/environ | sed -n 's/^K3S_URL=//p' | head -n1" | tr -d '\r\n')
+        "tr '\\000' '\\n' < /proc/\$(cat /var/run/kiac-k3s.pid 2>/dev/null || echo 1)/environ | sed -n 's/^K3S_URL=//p' | head -n1" | tr -d '\r\n')
       [[ "${saved_url}" == "${server_url}" && "${live_url}" == "${server_url}" ]] || {
         printf '%s k3s server URLs saved=%q live=%q, want %q\n' \
           "${node}" "${saved_url}" "${live_url}" "${server_url}" >&2
@@ -284,6 +284,16 @@ run_cluster() {
   actual=$(k get nodes --no-headers | awk 'NF {count++} END {print count+0}')
   [[ "${actual}" -eq "${expected}" ]] || {
     printf 'got %s Kubernetes nodes, want %s\n' "${actual}" "${expected}" >&2
+    return 1
+  }
+
+  # kubeadm can report Ready kubelets from the pinned image while silently
+  # selecting a newer upstream control plane. Verify the actual API too.
+  local api_version node_versions
+  api_version=$(k get --raw /version | sed -n 's/.*"gitVersion": *"\([^" ]*\)".*/\1/p')
+  node_versions=$(k get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' | sort -u)
+  [[ -n "${api_version}" && "${api_version}" == "${node_versions}" ]] || {
+    printf 'API version %q differs from node versions %q\n' "${api_version}" "${node_versions}" >&2
     return 1
   }
 

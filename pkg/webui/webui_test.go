@@ -109,8 +109,8 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 	if len(got.K3sVersions) == 0 || got.K3sVersions[0] != got.DefaultK3sVersion {
 		t.Fatalf("k3s versions/default = %v/%q", got.K3sVersions, got.DefaultK3sVersion)
 	}
-	if got.DefaultVersion == got.DefaultK3sVersion {
-		t.Fatalf("expected distro defaults to differ while k3s 1.37 is unavailable; both are %q", got.DefaultVersion)
+	if got.DefaultVersion != cluster.DefaultK8sVersion || got.DefaultK3sVersion != cluster.DefaultK3sVersion {
+		t.Fatalf("distro defaults = %q/%q, want %q/%q", got.DefaultVersion, got.DefaultK3sVersion, cluster.DefaultK8sVersion, cluster.DefaultK3sVersion)
 	}
 	if len(got.GPUImages) == 0 || got.DefaultGPUImage == "" || strings.Join(got.GPUDrivers, ",") != "device-plugin,dra" {
 		t.Fatalf("GPU metadata = images %v default %q drivers %v", got.GPUImages, got.DefaultGPUImage, got.GPUDrivers)

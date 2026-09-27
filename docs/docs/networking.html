@@ -84,20 +84,21 @@ kiac-dev-worker-2        Ready    &lt;none&gt;          v1.37.0   192.168.64.4</
   </ul>
 
   <h2 id="kernel">The kernel story, and why kindnet</h2>
-  <p>By default each node runs Apple's minimal, optimized Linux kernel (6.12 series). It is a monolithic build tuned for fast boot: there is no module loading, and it ships without several features that mainstream CNIs assume:</p>
+  <p>Without <code>--kernel</code>, nodes use the kernel configured in apple/container. Older installations can retain the minimal 6.12.28 kernel, which lacks several features that mainstream CNIs assume:</p>
   <ul>
     <li><b>No <code>br_netfilter</code></b> (<code>CONFIG_BRIDGE_NETFILTER</code>): traffic crossing a bridge cannot be steered through iptables, which silently breaks same-node Service traffic for any bridge-based CNI.</li>
     <li><b>No VXLAN or Geneve</b>: overlay networks like Flannel's default backend cannot form.</li>
     <li><b>No eBPF prerequisites</b> (BPF JIT, BTF): Cilium's datapath cannot load.</li>
   </ul>
-  <p><b>kindnet</b> needs none of that. It ships inside the <code>kindest/node</code> image and uses a routed PTP (veth) topology with plain L3 routes between node IPs, which is exactly what the vmnet topology provides. That makes it the default:</p>
+  <p>apple/container 1.4.1 recommends Kata's 6.18.35 kernel, which includes VXLAN, <code>br_netfilter</code>, nftables, BPF JIT, and BTF. Upgrading the CLI or running <code>kiac doctor --fix</code> does not replace an already configured kernel. Check a running node with <code>container exec kiac-dev-control-plane uname -r</code>. KIAC retains its CNI defaults across these kernel versions; ordinary Cilium clusters still require an explicit <code>--kernel full</code> or kernel path.</p>
+  <p><b>kindnet</b> needs none of those additional features. It ships inside the <code>kindest/node</code> image and uses a routed PTP (veth) topology with plain L3 routes between node IPs, which is exactly what the vmnet topology provides. That makes it the default:</p>
   <pre><code>kiac create cluster --cni kindnet                <span class="c"># default</span>
 kiac create cluster --cni cilium --kernel full   <span class="c"># Cilium on the full kernel; see the Cilium page</span>
 kiac create cluster --cni none                   <span class="c"># bring your own; nodes stay NotReady until you install one</span></code></pre>
-  <p>kindnet also runs on ordinary <a href="k3s.html">--distro k3s</a> clusters: kiac disables K3s's bundled Flannel because Flannel bridges pods onto <code>cni0</code> and, on Apple's kernel without <code>br_netfilter</code>, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and times out. kindnet's routed topology has no bridge, so the problem never exists. GPU K3s clusters run Fedora's capable kernel and keep bundled Flannel. <code>--cni</code> remains a kubeadm-only flag in both backend modes.</p>
+  <p>kindnet also runs on ordinary <a href="k3s.html">--distro k3s</a> clusters: kiac disables K3s's bundled Flannel because Flannel bridges pods onto <code>cni0</code> and, on older kernels without <code>br_netfilter</code>, same-node pod-to-ClusterIP return traffic bypasses iptables un-DNAT and times out. kindnet's routed topology has no bridge, so the problem never exists. GPU K3s clusters run Fedora's capable kernel and keep bundled Flannel. <code>--cni</code> remains a kubeadm-only flag in both backend modes.</p>
   <p>Asking for <code>--cni flannel</code> or <code>calico</code> still fails fast with an explanation rather than half-installing something that cannot start. To run them anyway, boot the full kernel and bring your own manifests: <code>--kernel full --cni none</code>.</p>
   <div class="warn"><b>Honest trade-off</b>
-  On the stock kernel, kindnet gives you real cross-node pod networking, not a policy engine: NetworkPolicy is not enforced, and bulk cross-node throughput rides vmnet's slow forwarded path. Both limits lift with <a href="cilium.html">--cni cilium --kernel full</a>.</div>
+  With either default kernel, kindnet provides cross-node pod networking: NetworkPolicy is not enforced, and bulk cross-node throughput rides vmnet's slow forwarded path. Both limits lift with <a href="cilium.html">--cni cilium --kernel full</a>.</div>
 
   <h2 id="loadbalancer">LoadBalancer: kiac-lb on node IPs</h2>
   <p>kiac installs <b>kiac-lb</b> by default on kubeadm clusters. It is deliberately not a controller deployment: it is a small systemd service <em>inside the control-plane VM</em> that assigns node IPs to Services of <code>type: LoadBalancer</code> by patching their status with the node's own kubectl. No pods, no images, no RBAC, no webhooks to wait for; a Service gets its EXTERNAL-IP within a couple of seconds.</p>

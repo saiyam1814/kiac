@@ -85,8 +85,8 @@ kiac gpu doctor</code></pre>
   <p>On macOS 14 or 15, use vmnet-helper's upstream installer and sudoers setup instead of Homebrew. If krunkit came from the old <code>slp/krunkit</code> or <code>slp/krun</code> tap, remove the legacy tap before reinstalling from <code>libkrun/krun</code>. <code>kiac gpu doctor</code> checks the host architecture, tool versions, SSH, disk-image, and host-network tooling, and that a Venus-capable renderer from the official krunkit dependency stack is installed.</p>
 
   <h2 id="create">Create a GPU cluster</h2>
-  <p>K3s 1.36 with DRA is the shortest path to the complete feature:</p>
-  <pre><code>kiac create cluster --name gpu-lab --distro k3s --k8s-version 1.36 \
+  <p>K3s 1.37 with DRA is the shortest path to the complete feature:</p>
+  <pre><code>kiac create cluster --name gpu-lab --distro k3s --k8s-version 1.37 \
   --workers 1 --gpu-workers 1 --gpu-resource-driver dra
 
 kubectl get nodes \

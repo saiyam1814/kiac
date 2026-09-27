@@ -78,7 +78,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--gpu-image</code></td><td><code>fedora-44</code></td><td>verified GPU VM base-image alias, or a local raw disk path</td></tr>
     <tr><td><code>--gpu-disk-size</code></td><td><code>20G</code></td><td>persistent disk size for every krunkit-backed node in a GPU cluster</td></tr>
     <tr><td><code>--gpu-resource-driver</code></td><td><code>device-plugin</code></td><td><code>device-plugin</code>, or <code>dra</code> on Kubernetes 1.36+; see <a href="gpu.html">Apple GPU</a></td></tr>
-    <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.36 (1.32-1.36 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
+    <tr><td><code>--k8s-version</code></td><td>distro latest</td><td>Kubernetes version: kubeadm defaults to 1.37 (1.32-1.37 pinned); k3s defaults to 1.37 (1.32-1.37 pinned). Versions 1.32 and 1.33 are retained for compatibility but are upstream end-of-life</td></tr>
     <tr><td><code>--distro</code></td><td><code>kubeadm</code></td><td>Kubernetes distribution per node VM: <code>kubeadm</code> (kindest/node), or <code>k3s</code> (rancher/k3s: sqlite datastore, bundled local-path storage and metrics-server; kiac-lb handles LoadBalancers). See <a href="k3s.html">k3s distro</a></td></tr>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
     <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium needs <code>--kernel full</code>; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
@@ -97,7 +97,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--gateway</code></td><td><code>false</code></td><td>install Gateway API CRDs + Traefik with a ready-to-use GatewayClass and Gateway</td></tr>
     <tr><td><code>--wait</code></td><td><code>5m</code></td><td>positive timeout for each cluster readiness step, including CNI installation; zero and negative values are rejected. Passed to Cilium as <code>--wait-duration</code></td></tr>
   </table>
-  <p>Version resolution: a minor like <code>1.34</code> uses kiac's digest-pinned node image (<code>kindest/node</code>, or <code>rancher/k3s</code> with <code>--distro k3s</code>); an exact patch matches the pin when it is the pinned patch, otherwise falls back to the matching upstream tag unpinned. K3s also accepts full releases such as <code>v1.36.4+k3s1</code> and <code>v1.36.4-k3s1</code>. Explicit K3s build revisions are preserved, and a digest pin is reused only when the complete release tag matches.</p>
+  <p>Version resolution: a minor like <code>1.34</code> uses kiac's digest-pinned node image (<code>kindest/node</code>, or <code>rancher/k3s</code> with <code>--distro k3s</code>); an exact patch matches the pin when it is the pinned patch, otherwise falls back to the matching upstream tag unpinned. Kubeadm initializes the control plane at the version installed in the selected node image. K3s also accepts full releases such as <code>v1.36.4+k3s1</code> and <code>v1.36.4-k3s1</code>. Explicit K3s build revisions are preserved, and a digest pin is reused only when the complete release tag matches.</p>
   <p><code>--kernel</code> is CLI-only. <code>distro</code> and the GPU options are also available as <a href="config-file.html">config file</a> keys.</p>
 
   <h2 id="delete-cluster">kiac delete cluster</h2>
@@ -185,7 +185,7 @@ kiac load image api:dev web:dev --name dev    <span class="c"># several at once<
   </table>
 
   <h2 id="doctor">kiac doctor</h2>
-  <p>Check that this Mac can run kiac clusters: macOS version (26+ for multi-node), apple/container CLI 1.0.0+ (excluding incompatible 1.2.0; use 1.2.1+), the container system service, <code>kubectl</code>, and Apple silicon.</p>
+  <p>Check that this Mac can run kiac clusters: macOS version (26+ for multi-node), apple/container CLI 1.0.0+ (1.4.1 recommended; excluding incompatible 1.2.0), the container system service, <code>kubectl</code>, and Apple silicon.</p>
   <pre><code>kiac doctor
 kiac doctor --fix</code></pre>
   <table>

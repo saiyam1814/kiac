@@ -68,7 +68,7 @@
     <li><b>Metrics.</b> metrics-server ships preconfigured; <code>kubectl top nodes</code> works out of the box.</li>
     <li><b>Storage.</b> A default StorageClass backed by local-path-provisioner, so PVCs just bind.</li>
     <li><b>LoadBalancer.</b> kiac-lb, a tiny controller inside the control-plane VM, assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds; the edge proxy keeps large external uploads flowing through NodePorts and LoadBalancers. See <a href="networking.html#loadbalancer">Networking</a>.</li>
-    <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for rancher/k3s as PID 1 per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
+    <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for supervised rancher/k3s per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
     <li><b>Cilium and eBPF.</b> <code>--cni cilium --kernel full</code> boots the nodes on a published, sha-pinned kernel build and drives the official Cilium installer. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
     <li><b>Real Apple GPU nodes (alpha).</b> <code>--gpu-workers N</code> exposes the Mac's GPU to selected Kubernetes workers through krunkit and Venus, with an honest <code>kiac.dev/gpu</code> resource, device plugin or DRA allocation, and a pinned inference benchmark. See <a href="gpu.html">Apple GPU</a>.</li>
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>
@@ -84,7 +84,7 @@
     <tr><th>Requirement</th><th>Detail</th></tr>
     <tr><td>Apple silicon Mac</td><td>arm64 only</td></tr>
     <tr><td>macOS 26+</td><td>needed for multi-node networking; single-node may still work on older macOS</td></tr>
-    <tr><td><a href="https://github.com/apple/container/releases">apple/container</a> 1.0.0+</td><td>signed pkg installer from Apple; skip incompatible 1.2.0 and use 1.2.1+</td></tr>
+    <tr><td><a href="https://github.com/apple/container/releases">apple/container</a> 1.0.0+</td><td>1.4.1 recommended; signed pkg installer from Apple; skip incompatible 1.2.0</td></tr>
     <tr><td><code>kubectl</code></td><td>any recent version</td></tr>
     <tr><td>GPU mode only: krunkit 1.3.2+ and vmnet-helper 0.13.0+</td><td>optional; ordinary clusters do not load or pay for this backend</td></tr>
   </table>
@@ -109,7 +109,7 @@ git clone https://github.com/saiyam1814/kiac &amp;&amp; cd kiac &amp;&amp; make 
 kubectl top nodes    <span class="c"># native metrics, give it ~60s to scrape</span>
 kiac verify cluster --name dev</code></pre>
   <p><code>kiac verify cluster</code> is read-only and checks the complete path from each node VM and its services through Kubernetes readiness, DNS, storage, metrics, networking helpers, optional addons, and the Mac-to-API connection. Use <code>-o json</code> for a stable automation schema and a nonzero exit when a required check fails.</p>
-  <p>Kubeadm supports Kubernetes 1.32 through 1.37 with 1.37 as its default; k3s supports 1.32 through 1.36 with 1.36 as its default. Every minor maps to a pinned image digest. Pick one with <code>--k8s-version 1.34</code>. Kubernetes 1.32 and 1.33 remain available for compatibility but are upstream end-of-life. In a hurry? <code>kiac create cluster --distro k3s --workers 1</code> is Ready in well under a minute.</p>
+  <p>Kubeadm supports Kubernetes 1.32 through 1.37 with 1.37 as its default; k3s supports 1.32 through 1.37 with 1.37 as its default. Every minor maps to a pinned image digest. Pick one with <code>--k8s-version 1.34</code>. Kubernetes 1.32 and 1.33 remain available for compatibility but are upstream end-of-life. In a hurry? <code>kiac create cluster --distro k3s --workers 1</code> is Ready in well under a minute.</p>
 
   <div class="note"><b>Where next?</b>
   <a href="getting-started.html">Getting started</a> walks through the whole flow including your first deploy. <a href="cli-reference.html">CLI reference</a> lists every command and flag.</div>
