@@ -461,6 +461,25 @@ func TestCreateClusterArgsForRealGPU(t *testing.T) {
 	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, CNI: "none"}); err == nil {
 		t.Fatal("GPU kubeadm cluster with no CNI was accepted")
 	}
+	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, CNI: "flannel"}); err == nil {
+		t.Fatal("GPU kubeadm cluster with flannel was accepted; flannel needs the apple/container full kernel")
+	}
+}
+
+func TestCreateClusterArgsForFlannel(t *testing.T) {
+	args, err := createClusterArgs(createReq{Name: "fl", Workers: 2, Distro: "kubeadm", CNI: "flannel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"--cni flannel", "--kernel full"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("flannel args missing %q: %s", want, joined)
+		}
+	}
+	if _, err := createClusterArgs(createReq{Name: "x", Distro: "kubeadm", CNI: "bogus"}); err == nil || !strings.Contains(err.Error(), "unknown CNI") {
+		t.Fatalf("unknown CNI must be rejected before any VM boots, got: %v", err)
+	}
 	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, Gateway: true, NoLB: true}); err == nil {
 		t.Fatal("Gateway API without the built-in LoadBalancer was accepted")
 	}

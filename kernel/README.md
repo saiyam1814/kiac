@@ -1,13 +1,13 @@
 # kiac node kernels
 
-kiac node VMs boot whatever kernel the `container` runtime supplies. The
-default (Kata Containers' generic VM kernel, monolithic, no modules)
-lacks VXLAN, GENEVE, br_netfilter, the eBPF JIT, and BTF, which is why
-`--cni` is limited to kindnet/none today.
+Ordinary KIAC node VMs use the kernel configured in apple/container.
+Older installations can retain a minimal kernel without the features
+needed by overlay and eBPF CNIs. KIAC's explicit `--kernel full` path
+provides a checksum-pinned kernel for Cilium and Flannel; the runtime's
+newer default kernel does not change that selection requirement.
 
-This directory holds the config for the kiac **full** kernel, which
-adds those features so Cilium, Calico, and flannel can run. Design and
-wiring plan: `docs/design/custom-kernels.md`.
+This directory holds the configuration for that full kernel. See the
+[implemented kernel-selection behavior](../docs/design/custom-kernels.md).
 
 ## Contents
 
@@ -42,12 +42,12 @@ release assets). The job:
 `ResolveKernel` in `pkg/cluster/kernel.go` maps the name `full` to the
 release asset, downloads it once to `~/.kiac/kernels/`, and verifies
 its sha256 against the checksum pinned in `kernelAssets` on download
-and on every cache hit. After the first release, copy the digest from
-the `.sha256` asset into that table.
+and on every cache hit. New kernel releases must update that pin after
+validating their published artifact.
 
-Until `--kernel` is wired into `kiac create` (see the design doc), a
-built Image can be tried directly:
+Select the published kernel or an explicit local build:
 
 ```sh
-container run --rm -it --kernel ~/.kiac/kernels/kiac-kernel-6.12.28-full alpine uname -r
+kiac create cluster --kernel full
+kiac create cluster --kernel /absolute/path/to/Image
 ```

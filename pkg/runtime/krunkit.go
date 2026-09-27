@@ -564,6 +564,16 @@ func (c *KrunkitClient) ExecStdin(name string, input io.Reader, command ...strin
 	return err
 }
 
+func (c *KrunkitClient) ExecStdinTimeout(name string, timeout time.Duration, input io.Reader, command ...string) error {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, err := c.execContext(ctx, name, input, command...)
+	return err
+}
+
 func (c *KrunkitClient) execContext(ctx context.Context, name string, input io.Reader, command ...string) (string, error) {
 	if len(command) == 0 {
 		return "", fmt.Errorf("no command specified for krunkit VM %s", name)

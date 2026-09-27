@@ -175,7 +175,8 @@ The lightweight path in `pkg/cluster/k3s_resume.go` is:
    launcher only overrides `K3S_URL` for the `agent` command, then execs
    the image's existing `/bin/k3s`. It never reads or rewrites
    `K3S_TOKEN`, and creates no resident process.
-3. Compare the live PID 1 environment with the current server URL. Only
+3. Compare the live K3s process environment with the current server URL
+   (the supervised child PID for new nodes, PID 1 for older clusters). Only
    an agent still running against an old URL is stopped and started
    once. This also migrates clusters created before the launcher existed.
 4. Wait for every Kubernetes Node to be Ready **and** to report the

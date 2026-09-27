@@ -39,6 +39,11 @@ metadata:
   namespace: kiac-e2e
 spec:
   type: LoadBalancer
+  # Dual-stack where the cluster is: the dual profiles upload over the node's
+  # IPv6 address, and a SingleStack (IPv4) Service has no IPv6 EndpointSlice,
+  # so neither kube-proxy nor the edge proxy can route that NodePort. On a
+  # single-stack cluster this degrades to one family.
+  ipFamilyPolicy: PreferDualStack
   selector:
     app: upload-server
   ports:

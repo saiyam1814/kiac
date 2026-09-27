@@ -141,7 +141,7 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		"defaultVersion":    cluster.DefaultK8sVersion,
 		"k3sVersions":       cluster.SupportedK3sVersions(),
 		"defaultK3sVersion": cluster.DefaultK3sVersion,
-		"cnis":              []string{"kindnet", "cilium", "none"},
+		"cnis":              []string{"kindnet", "cilium", "flannel", "none"},
 		"distros":           []string{"kubeadm", "k3s"},
 		"gpuImages":         cluster.SupportedGPUImages(),
 		"defaultGPUImage":   cluster.DefaultGPUImage,
@@ -458,10 +458,18 @@ func createClusterArgs(req createReq) ([]string, error) {
 		// The backend selects K3s networking; the CLI rejects --cni here.
 		args = append(args, "--distro", "k3s")
 	} else if req.CNI != "" {
+		switch req.CNI {
+		case "kindnet", "cilium", "flannel", "none":
+		default:
+			// Fail here rather than after every VM has booted.
+			return nil, fmt.Errorf("unknown CNI %q (supported: kindnet, cilium, flannel, none)", req.CNI)
+		}
 		args = append(args, "--cni", req.CNI)
-		if req.CNI == "cilium" && req.GPUWorkers == 0 {
-			// Cilium needs the full kernel; 'full' downloads the
-			// published sha-pinned build once and caches it.
+		if req.GPUWorkers == 0 && (req.CNI == "cilium" || req.CNI == "flannel") {
+			// Both need the full kernel on apple/container nodes; 'full'
+			// downloads the published sha-pinned build once and caches
+			// it. GPU clusters boot the kernel in --gpu-image instead
+			// (and only accept kindnet or cilium, checked above).
 			args = append(args, "--kernel", "full")
 		}
 	}

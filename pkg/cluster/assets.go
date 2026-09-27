@@ -14,6 +14,7 @@ var metricsServerManifest string
 // only host-reachable LoadBalancer addresses under vmnet are the node
 // IPs themselves and kube-proxy programs ingress IPs into iptables.
 
-// Flannel and Calico manifests are not bundled. Cilium uses its official
-// installer and an explicitly selected kernel; older runtime kernels lack
-// the required networking features even when the CLI has been upgraded.
+// The Flannel manifest is embedded in flannel.go. Flannel and Cilium
+// require explicitly selected kernels because runtime upgrades can retain
+// older kernels without their prerequisites. Cilium uses its official CLI;
+// Calico is not bundled.
