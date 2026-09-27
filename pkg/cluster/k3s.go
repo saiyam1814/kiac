@@ -19,7 +19,7 @@ const k3sKubeconfig = "/etc/rancher/k3s/k3s.yaml"
 
 // k3sServerArgs builds the k3s server command line for the given node.
 // The rancher/k3s image entrypoint execs whatever follows the image, so
-// these run k3s directly as PID 1 (no systemd in the VM).
+// these run k3s under a small supervisor (no systemd in the VM).
 func k3sServerArgs(cfg Config, nodeName string) []string {
 	args := []string{
 		"server",
@@ -46,6 +46,9 @@ func k3sServerArgs(cfg Config, nodeName string) []string {
 		// assigns an endpoint-local node IP instead.
 		"--disable=traefik",
 		"--disable=servicelb",
+		// KIAC owns Gateway CRD installation. K3s 1.37 bundles a newer
+		// standard channel that conflicts with our experimental CRDs.
+		"--disable=gateway-api-crd",
 	}
 
 	// Dual-stack: give k3s both pod and Service CIDRs (v4 primary). The
@@ -69,20 +72,21 @@ func k3sServerArgs(cfg Config, nodeName string) []string {
 	if cfg.NoStorage {
 		args = append(args, "--disable=local-storage")
 	}
-	args = append(args, cfg.K3sServerArgs...)
+	args = append(args, cfg.K3sControlPlaneArgs...)
 	return args
 }
 
 // k3sAgentArgs builds the k3s agent command line for one worker.
 func k3sAgentArgs(cfg Config, nodeName string) []string {
 	args := []string{"agent", "--node-name", nodeName}
-	return append(args, cfg.K3sAgentArgs...)
+	return append(args, cfg.K3sWorkerArgs...)
 }
 
 func validateK3sArgs(values []string, flag string) error {
 	managedDisable := map[string]struct{}{
 		"traefik":                {},
 		"servicelb":              {},
+		"gateway-api-crd":        {},
 		"metrics-server":         {},
 		"local-storage":          {},
 		"network-policy":         {},
@@ -96,6 +100,12 @@ func validateK3sArgs(values []string, flag string) error {
 	for i := range values {
 		raw := strings.TrimSpace(values[i])
 		name, value, hasValue := strings.Cut(raw, "=")
+		if !strings.HasPrefix(name, "-") {
+			continue // This token can be the preceding option's value.
+		}
+		// K3s accepts one- and two-dash long options through urfave/cli.
+		// Normalize before checking KIAC-managed flags.
+		name = "--" + strings.TrimLeft(name, "-")
 		switch name {
 		case "--cluster-cidr", "--service-cidr", "--node-name", "--flannel-backend", "--disable-network-policy":
 			return fmt.Errorf("%s does not allow overriding %s; kiac manages it", flag, name)
@@ -120,14 +130,14 @@ func validateK3sArgs(values []string, flag string) error {
 
 // k3sBoot wraps a k3s command line in a /bin/sh preamble that relinks
 // the image's iptables to the legacy xtables backend before exec'ing
-// k3s as PID 1. The image's default symlinks point at the nf_tables
-// build, and the node kernel has no CONFIG_NF_TABLES, so kube-proxy
+// supervised k3s. The image's default symlinks point at the nf_tables
+// build, and older node kernels have no CONFIG_NF_TABLES, so kube-proxy
 // exits ("Could not fetch rule set generation id: Invalid argument")
-// and, k3s being PID 1, takes the whole VM down with it. The legacy
+// and prevents the node from becoming ready. The legacy
 // backend (CONFIG_IP_NF_IPTABLES_LEGACY=y) is fully supported. Both
 // variants ship in the image under /bin/aux.
 func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
-	cmd := senderOffloadFix + "; " +
+	cmd := k3sCgroupPrep + senderOffloadFix + "; " +
 		"for t in iptables iptables-save iptables-restore ip6tables ip6tables-save ip6tables-restore; do ln -sf xtables-legacy-multi /bin/aux/$t; done; " +
 		"if [ -x " + kiacLBScriptPath + " ]; then " +
 		"mkdir -p /var/log /var/run; " +
@@ -142,10 +152,10 @@ func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
 	// learns its addresses after it boots, so compute them here (mirroring
 	// runtime.IP/IPv6's default-route source lookup) and append the flag
 	// to the k3s exec. sysctl enables v6 forwarding, matching the kubeadm
-	// path's post-boot step; k3s is PID 1 so there is no separate hook.
+	// path's post-boot step; this runs before the K3s supervisor starts.
 	nodeIPExpr := ""
 	if cfg.family() == DualStack {
-		// k3s runs as PID 1, so this preamble executes before SLAAC has
+		// The boot preamble executes before SLAAC has
 		// assigned the vmnet global IPv6 (it waits on a router
 		// advertisement). Two things matter here:
 		//
@@ -168,7 +178,7 @@ func k3sBoot(cfg Config, k3sArgs []string) (entrypoint string, args []string) {
 			`[ -n "$KIAC_V6" ] && break; sleep 1; KIAC_I=$((KIAC_I+1)); done; `
 		nodeIPExpr = ` --node-ip="$KIAC_V4,$KIAC_V6"`
 	}
-	cmd += "exec k3s"
+	cmd += "exec sh -c " + shQuote(k3sSupervisor) + " sh"
 	for _, a := range k3sArgs {
 		cmd += " " + shQuote(a)
 	}
@@ -258,8 +268,8 @@ func k3sToken() (string, error) {
 
 // CreateK3s boots a k3s cluster: the same VM-per-node layout and
 // container names as Create, but each VM runs the rancher/k3s image as
-// PID 1 (single binary, sqlite datastore, no systemd), so the kubeadm
-// path's systemd-based readiness and addon installs do not apply here.
+// a supervised process (single binary, sqlite datastore, no systemd). The
+// kubeadm path's systemd-based readiness and addon installs do not apply here.
 func (m *Manager) CreateK3s(cfg Config) error {
 	if cfg.GPUWorkers > 0 {
 		return m.createK3sGPU(cfg)
@@ -294,10 +304,10 @@ func (m *Manager) CreateK3s(cfg Config) error {
 	if err := runtime.ValidatePublishes(cfg.Publish); err != nil {
 		return err
 	}
-	if err := validateK3sArgs(cfg.K3sServerArgs, "--k3s-server-arg"); err != nil {
+	if err := validateK3sArgs(cfg.K3sControlPlaneArgs, "--k3s-controlplane-arg"); err != nil {
 		return err
 	}
-	if err := validateK3sArgs(cfg.K3sAgentArgs, "--k3s-agent-arg"); err != nil {
+	if err := validateK3sArgs(cfg.K3sWorkerArgs, "--k3s-worker-arg"); err != nil {
 		return err
 	}
 	if cfg.family() == IPv6 {
@@ -336,7 +346,7 @@ func (m *Manager) CreateK3s(cfg Config) error {
 			return err
 		}
 		// WaitReady polls systemd/containerd and cannot work here (k3s
-		// is PID 1); the apiserver answering IS readiness for k3s.
+		// has no systemd); the apiserver answering IS readiness for k3s.
 		return m.waitK3sAPI(cp, cfg.WaitTimeout)
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)

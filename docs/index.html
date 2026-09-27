@@ -706,9 +706,9 @@
           <code>kiac create cluster --workers 2</code>
         </article>
         <article class="engine engine-fast">
-          <span class="engine-label">Fast path &middot; Kubernetes 1.36</span>
+          <span class="engine-label">Fast path &middot; Kubernetes 1.37</span>
           <h3>k3s</h3>
-          <p>A compact multi-node cluster with rancher/k3s as PID 1 in every VM. Ideal for fast local loops without giving up node boundaries.</p>
+          <p>A compact multi-node cluster with supervised rancher/k3s in every VM. Ideal for fast local loops without giving up node boundaries.</p>
           <code>kiac create cluster --distro k3s --workers 1</code>
         </article>
         <article class="engine engine-ebpf">
@@ -800,7 +800,7 @@
         <p>Install the runtime, install one Go binary, and choose your topology. Kiac keeps its dependencies explicit and checks them before create.</p>
         <ul class="requirements">
           <li><strong>Host:</strong> Apple silicon Mac</li>
-          <li><strong>Everyday clusters:</strong> apple/container 1.2.1+ and kubectl</li>
+          <li><strong>Everyday clusters:</strong> apple/container 1.2.1+ (1.4.1 recommended) and kubectl</li>
           <li><strong>Multi-node:</strong> macOS 26+</li>
           <li><strong>GPU alpha:</strong> krunkit 1.3.2+ and vmnet-helper 0.13.0+</li>
         </ul>

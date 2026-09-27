@@ -132,10 +132,10 @@ kiac verify cluster --name gpu-lab</code></pre>
 <span class="o">Error: --cni cilium drives the official installer, which is not on PATH; install it with: brew install cilium-cli</span></code></pre>
   <p>The fixes are literal: add <code>--kernel full</code>, and <code>brew install cilium-cli</code>. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</p>
 
-  <h2 id="cni-error">"flannel/calico needs kernel features"</h2>
-  <pre><code><span class="o">Error: flannel needs kernel features the stock node kernel does not enable; use
---cni cilium with --kernel full, or --cni none to bring your own</span></code></pre>
-  <p>Not a bug: Apple's minimal node kernel ships without br_netfilter, VXLAN, and the eBPF machinery, and kiac does not bundle flannel or Calico manifests. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
+  <h2 id="cni-error">"flannel/calico is not bundled"</h2>
+  <pre><code><span class="o">Error: flannel is not bundled; use --cni cilium with --kernel full,
+or --cni none to bring your own on a compatible kernel</span></code></pre>
+  <p>KIAC does not bundle Flannel or Calico manifests. The older minimal 6.12.28 kernel also lacks their prerequisites; newer apple/container kernels include more networking features, but do not change the CNIs KIAC installs. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>); on the full kernel you can also install flannel or Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
 
   <h2 id="kernel-download">Downloads and the ~/.kiac cache</h2>
   <p><code>--kernel full</code> downloads the published kernel release asset (about 15MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>

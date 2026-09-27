@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/hex"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,8 @@ func TestResolveK3sImage(t *testing.T) {
 		want    string // substring of resolved image
 		wantErr bool
 	}{
+		{in: "1.37", want: "rancher/k3s:v1.37.0-k3s1@sha256:"},
+		{in: "v1.37", want: "rancher/k3s:v1.37.0-k3s1@sha256:"},
 		{in: "1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
 		{in: "v1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
 		{in: "1.32", want: "rancher/k3s:v1.32.13-k3s1@sha256:"},
@@ -48,6 +51,10 @@ func TestResolveK3sImageFullRelease(t *testing.T) {
 		in   string
 		want string
 	}{
+		{in: "v1.37.0", want: k3sImages["1.37"]},
+		{in: "v1.37.0+k3s1", want: k3sImages["1.37"]},
+		{in: "v1.37.0-k3s1", want: k3sImages["1.37"]},
+		{in: "v1.37.0+k3s2", want: "docker.io/rancher/k3s:v1.37.0-k3s2"},
 		{in: "v1.36.4+k3s1", want: k3sImages["1.36"]},
 		{in: "v1.36.4-k3s1", want: k3sImages["1.36"]},
 		{in: "1.36.4+k3s1", want: k3sImages["1.36"]},
@@ -125,7 +132,7 @@ func TestK3sImagePins(t *testing.T) {
 	}
 }
 
-func TestK3sServerArgs(t *testing.T) {
+func TestK3sControlPlaneArgs(t *testing.T) {
 	args := k3sServerArgs(Config{}, "kiac-dev-control-plane")
 	if args[0] != "server" {
 		t.Fatalf("first arg = %q, want server", args[0])
@@ -136,8 +143,9 @@ func TestK3sServerArgs(t *testing.T) {
 		" --disable-network-policy ", // k3s netpol controller targets the flannel bridge
 		" --tls-san kiac-dev-control-plane ",
 		" --node-name kiac-dev-control-plane ",
-		" --disable=traefik ",   // never fight --gateway Traefik for 80/443
-		" --disable=servicelb ", // kiac-lb publishes endpoint-local LoadBalancer IPs
+		" --disable=traefik ",         // never fight --gateway Traefik for 80/443
+		" --disable=gateway-api-crd ", // KIAC installs its own compatible CRDs
+		" --disable=servicelb ",       // kiac-lb publishes endpoint-local LoadBalancer IPs
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("server args %q missing %q", joined, want)
@@ -157,19 +165,19 @@ func TestK3sServerArgs(t *testing.T) {
 		}
 	}
 
-	withExtra := k3sServerArgs(Config{K3sServerArgs: []string{"--tls-san", "api.dev.test"}}, "cp")
+	withExtra := k3sServerArgs(Config{K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"}}, "cp")
 	joined = " " + strings.Join(withExtra, " ") + " "
 	if !strings.Contains(joined, " --tls-san api.dev.test ") {
 		t.Errorf("server args %q missing custom args", joined)
 	}
 }
 
-func TestK3sAgentArgsAndEnv(t *testing.T) {
+func TestK3sWorkerArgsAndEnv(t *testing.T) {
 	args := k3sAgentArgs(Config{}, "kiac-dev-worker-1")
 	if len(args) != 3 || args[0] != "agent" || args[1] != "--node-name" || args[2] != "kiac-dev-worker-1" {
 		t.Errorf("agent args = %q", args)
 	}
-	extra := k3sAgentArgs(Config{K3sAgentArgs: []string{"--kubelet-arg=event-qps=100"}}, "kiac-dev-worker-1")
+	extra := k3sAgentArgs(Config{K3sWorkerArgs: []string{"--kubelet-arg=event-qps=100"}}, "kiac-dev-worker-1")
 	if got := strings.Join(extra, " "); !strings.Contains(got, "--kubelet-arg=event-qps=100") {
 		t.Errorf("agent args = %q, missing custom arg", got)
 	}
@@ -180,13 +188,13 @@ func TestK3sAgentArgsAndEnv(t *testing.T) {
 }
 
 func TestValidateK3sArgs(t *testing.T) {
-	if err := validateK3sArgs([]string{"--tls-san", "api.dev.test"}, "--k3s-server-arg"); err != nil {
+	if err := validateK3sArgs([]string{"--tls-san", "api.dev.test"}, "--k3s-controlplane-arg"); err != nil {
 		t.Fatalf("valid args rejected: %v", err)
 	}
-	if err := validateK3sArgs([]string{"--disable=helm-controller"}, "--k3s-server-arg"); err != nil {
+	if err := validateK3sArgs([]string{"--disable=helm-controller"}, "--k3s-controlplane-arg"); err != nil {
 		t.Fatalf("valid --disable value rejected: %v", err)
 	}
-	if err := validateK3sArgs([]string{"", "api.dev.test"}, "--k3s-server-arg"); err == nil {
+	if err := validateK3sArgs([]string{"", "api.dev.test"}, "--k3s-controlplane-arg"); err == nil {
 		t.Fatal("empty k3s arg accepted")
 	}
 	for _, tc := range []struct {
@@ -203,10 +211,30 @@ func TestValidateK3sArgs(t *testing.T) {
 		{name: "managed disable list", args: []string{"--disable=foo,local-storage,bar"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateK3sArgs(tc.args, "--k3s-server-arg"); err == nil {
+			if err := validateK3sArgs(tc.args, "--k3s-controlplane-arg"); err == nil {
 				t.Fatalf("managed k3s args accepted: %q", tc.args)
 			}
 		})
+	}
+}
+
+func TestK3sManagedArgsRejectBothLongOptionSpellings(t *testing.T) {
+	for _, prefix := range []string{"-", "--"} {
+		for _, name := range []string{"cluster-cidr", "service-cidr", "node-name", "flannel-backend", "disable-network-policy"} {
+			for _, args := range [][]string{{prefix + name + "=value"}, {prefix + name, "value"}} {
+				if err := validateK3sArgs(args, "--k3s-controlplane-arg"); err == nil {
+					t.Errorf("accepted managed option: %q", args)
+				}
+			}
+		}
+		for _, args := range [][]string{{prefix + "disable=traefik"}, {prefix + "disable", "gateway-api-crd"}, {prefix + "disable=other,servicelb"}} {
+			if err := validateK3sArgs(args, "--k3s-controlplane-arg"); err == nil {
+				t.Errorf("accepted managed addon override: %q", args)
+			}
+		}
+		if err := validateK3sArgs([]string{prefix + "tls-san", "node-name"}, "--k3s-controlplane-arg"); err != nil {
+			t.Errorf("rejected an ordinary option value: %v", err)
+		}
 	}
 }
 
@@ -388,5 +416,25 @@ func TestK3sNodesReady(t *testing.T) {
 		if got := k3sNodesReady(c.out, c.want); got != c.ok {
 			t.Errorf("%s: k3sNodesReady(want=%d) = %v, want %v", c.name, c.want, got, c.ok)
 		}
+	}
+}
+
+// Every supported K3s image must also have the matching binary for Fedora
+// GPU nodes; otherwise a default-version bump silently breaks --gpu-workers.
+func TestK3sGPUArtifactsMatchImagePins(t *testing.T) {
+	for minor, img := range k3sImages {
+		t.Run(minor, func(t *testing.T) {
+			tag := strings.Split(strings.TrimPrefix(img, "docker.io/rancher/k3s:"), "@")[0]
+			asset, ok := k3sARM64Assets[tag]
+			if !ok {
+				t.Fatalf("no GPU binary pinned for image %s", img)
+			}
+			if want := strings.Replace(tag, "-k3s", "+k3s", 1); asset.Release != want {
+				t.Errorf("GPU release = %q, want %q", asset.Release, want)
+			}
+			if digest, err := hex.DecodeString(asset.SHA256); err != nil || len(digest) != 32 {
+				t.Errorf("invalid GPU binary SHA256 %q", asset.SHA256)
+			}
+		})
 	}
 }

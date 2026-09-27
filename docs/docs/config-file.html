@@ -65,12 +65,12 @@
   <pre><code>name: dev            <span class="c"># cluster name: lowercase letters, digits, dashes</span>
 distro: kubeadm      <span class="c"># kubeadm or k3s</span>
 workers: 2           <span class="c"># worker node count; 0 untaints the control plane</span>
-k8sVersion: "1.36"   <span class="c"># works with both distros; kubeadm also supports "1.37"</span>
+k8sVersion: "1.37"   <span class="c"># default for both distros</span>
 <span class="c"># gpuWorkers: 1                 # alpha: real Apple GPU workers</span>
 <span class="c"># gpuImage: fedora-44           # verified cloud image alias</span>
 <span class="c"># gpuDiskSize: 20G              # persistent disk per krunkit VM</span>
 <span class="c"># gpuResourceDriver: dra        # device-plugin, or dra on Kubernetes 1.36+</span>
-<span class="c"># image: docker.io/kindest/node:v1.36.4   # node image, overrides k8sVersion</span>
+<span class="c"># image: docker.io/kindest/node:v1.37.0   # node image, overrides k8sVersion</span>
 cni: kindnet         <span class="c"># pod network: kindnet, cilium, or none</span>
 ipFamily: ipv4       <span class="c"># ipv4, dual, or ipv6; GPU mode is currently ipv4-only</span>
 <span class="c"># dns: [1.1.1.1, 8.8.8.8]  # node VM nameservers, up to 3; replaces the</span>
@@ -103,12 +103,14 @@ addons:
     <tr><td><code>gpuImage</code></td><td>string</td><td><code>fedora-44</code></td><td><code>--gpu-image</code></td></tr>
     <tr><td><code>gpuDiskSize</code></td><td>string</td><td><code>20G</code></td><td><code>--gpu-disk-size</code></td></tr>
     <tr><td><code>gpuResourceDriver</code></td><td>string</td><td><code>device-plugin</code></td><td><code>--gpu-resource-driver</code></td></tr>
-    <tr><td><code>k8sVersion</code></td><td>string</td><td>distro latest: kubeadm <code>"1.37"</code>, k3s <code>"1.36"</code></td><td><code>--k8s-version</code></td></tr>
+    <tr><td><code>k8sVersion</code></td><td>string</td><td>distro latest: kubeadm <code>"1.37"</code>, k3s <code>"1.37"</code></td><td><code>--k8s-version</code></td></tr>
     <tr><td><code>image</code></td><td>string</td><td>resolved from <code>k8sVersion</code></td><td><code>--image</code></td></tr>
     <tr><td><code>cni</code></td><td>string</td><td><code>kindnet</code></td><td><code>--cni</code></td></tr>
     <tr><td><code>ipFamily</code></td><td>string</td><td><code>ipv4</code></td><td><code>--ip-family</code></td></tr>
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
     <tr><td><code>mounts</code></td><td>list of <code>source</code>, <code>target</code>, <code>readOnly</code></td><td>none</td><td><code>--mount</code></td></tr>
+    <tr><td><code>publish</code></td><td>list of strings</td><td>none</td><td><code>--publish</code>; ordinary control-plane VM only; use an explicit host IP for loopback binding</td></tr>
+    <tr><td><code>k3sControlplaneArgs</code>, <code>k3sWorkerArgs</code></td><td>lists of strings</td><td>none</td><td><code>--k3s-controlplane-arg</code>, <code>--k3s-worker-arg</code>; each item is one argv token; ordinary K3s only</td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
     <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>
     <tr><td><code>cpMemory</code></td><td>string</td><td><code>4G</code></td><td><code>--cp-memory</code> (control-plane VM)</td></tr>

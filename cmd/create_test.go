@@ -105,9 +105,9 @@ func TestCreateClusterRejectsK3sArgsOnKubeadm(t *testing.T) {
 	})
 
 	createCfg = cluster.Config{
-		Name:          "dev",
-		WaitTimeout:   5 * time.Minute,
-		K3sServerArgs: []string{"--tls-san", "api.dev.test"},
+		Name:                "dev",
+		WaitTimeout:         5 * time.Minute,
+		K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
 	}
 	createDistro = "kubeadm"
 	createConfigFile = ""
@@ -132,14 +132,14 @@ func TestCreateClusterRejectsK3sArgsOnGPUK3s(t *testing.T) {
 	})
 
 	createCfg = cluster.Config{
-		Name:         "dev",
-		Workers:      0,
-		GPUWorkers:   1,
-		GPUImage:     cluster.DefaultGPUImage,
-		GPUDriver:    "device-plugin",
-		GPUDiskSize:  "20G",
-		WaitTimeout:  5 * time.Minute,
-		K3sAgentArgs: []string{"--kubelet-arg=event-qps=100"},
+		Name:          "dev",
+		Workers:       0,
+		GPUWorkers:    1,
+		GPUImage:      cluster.DefaultGPUImage,
+		GPUDriver:     "device-plugin",
+		GPUDiskSize:   "20G",
+		WaitTimeout:   5 * time.Minute,
+		K3sWorkerArgs: []string{"--kubelet-arg=event-qps=100"},
 	}
 	createDistro = "k3s"
 	createConfigFile = ""

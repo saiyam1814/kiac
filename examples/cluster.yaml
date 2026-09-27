@@ -7,8 +7,8 @@
 
 name: dev            # cluster name: lowercase letters, digits, dashes
 workers: 2           # worker node count; 0 untaints the control plane
-k8sVersion: "1.36"   # works with both distros; kubeadm also supports "1.37"
-# image: docker.io/kindest/node:v1.36.4   # node image, overrides k8sVersion
+k8sVersion: "1.37"   # default for both distros
+# image: docker.io/kindest/node:v1.37.0   # node image, overrides k8sVersion
 cni: kindnet         # pod network: kindnet, or none to bring your own
 ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary).
                      # dual/ipv6 auto-select the full kernel (IPv6 netfilter) and need macOS 26+.
@@ -18,15 +18,17 @@ ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6
 #   - source: /Users/me/project
 #     target: /workspace
 #     readOnly: true
+# Omitted host IP binds all IPv4 interfaces; use 127.0.0.1 for loopback.
+# Publishing 6443 does not add API-server TLS SANs.
 # publish:            # optional host->VM forwards on the control-plane VM only
 #                     # (does not publish worker NodePorts; kubeadm 6443 publish has no extra TLS SAN)
 #   - 127.0.0.1:8080:80
 #   - '[::1]:8443:443/udp'
-# k3sServerArgs:      # optional extra k3s "server" argv tokens (k3s distro only)
+# k3sControlplaneArgs:      # optional extra k3s "server" argv tokens (k3s distro only)
 #                     # minimally validated; conflicting values can break the cluster
 #   - --tls-san
 #   - api.dev.test
-# k3sAgentArgs:       # optional extra k3s "agent" argv tokens (k3s distro only)
+# k3sWorkerArgs:       # optional extra k3s "agent" argv tokens (k3s distro only)
 #                     # minimally validated; conflicting values can break the cluster
 #   - --kubelet-arg=protect-kernel-defaults=true
 cpus: "4"            # vCPUs per node VM (quote it: YAML reads bare 4 as a number)

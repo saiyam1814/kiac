@@ -104,33 +104,33 @@ func (f IPFamily) Valid() bool {
 
 // Config describes a cluster to create.
 type Config struct {
-	Name          string
-	Distro        string // kubeadm or k3s; persisted by non-OCI VM backends
-	K8sVersion    string // exact resolved version when the VM image does not encode it
-	Workers       int
-	GPUWorkers    int    // real Apple GPU workers; zero keeps the apple/container path
-	GPUImage      string // resolved bootable raw Fedora disk for GPU clusters
-	GPUDiskSize   string // writable disk size for each krunkit VM
-	GPUDriver     string // device-plugin or dra
-	Image         string
-	CPUs          string
-	Memory        string // worker VMs; measured idle usage is ~400Mi, so 2G default
-	CPMemory      string // control plane; etcd+apiserver (and all addons on single-node) need headroom
-	CNI           string
-	Kernel        string   // resolved kernel Image path; empty = runtime default
-	IPFamily      IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
-	DNS           []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
-	Mounts        runtime.Mounts
-	Publish       runtime.Publishes // host port forwards for the control-plane VM (--publish)
-	K3sServerArgs []string          // extra k3s server argv entries, appended after Kiac defaults
-	K3sAgentArgs  []string          // extra k3s agent argv entries, appended after Kiac defaults
-	NoMetrics     bool
-	NoStorage     bool
-	NoLB          bool
-	NoEdgeProxy   bool
-	Observability bool
-	Gateway       bool
-	WaitTimeout   time.Duration
+	Name                string
+	Distro              string // kubeadm or k3s; persisted by non-OCI VM backends
+	K8sVersion          string // exact resolved version when the VM image does not encode it
+	Workers             int
+	GPUWorkers          int    // real Apple GPU workers; zero keeps the apple/container path
+	GPUImage            string // resolved bootable raw Fedora disk for GPU clusters
+	GPUDiskSize         string // writable disk size for each krunkit VM
+	GPUDriver           string // device-plugin or dra
+	Image               string
+	CPUs                string
+	Memory              string // worker VMs; measured idle usage is ~400Mi, so 2G default
+	CPMemory            string // control plane; etcd+apiserver (and all addons on single-node) need headroom
+	CNI                 string
+	Kernel              string   // resolved kernel Image path; empty = runtime default
+	IPFamily            IPFamily // ipv4 (default), dual, or ipv6; non-ipv4 requires the full kernel
+	DNS                 []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
+	Mounts              runtime.Mounts
+	Publish             runtime.Publishes // host port forwards for the control-plane VM (--publish)
+	K3sControlPlaneArgs []string          // extra k3s server argv entries, appended after Kiac defaults
+	K3sWorkerArgs       []string          // extra k3s agent argv entries, appended after Kiac defaults
+	NoMetrics           bool
+	NoStorage           bool
+	NoLB                bool
+	NoEdgeProxy         bool
+	Observability       bool
+	Gateway             bool
+	WaitTimeout         time.Duration
 }
 
 // family returns the configured IP family, defaulting an empty value to
@@ -297,27 +297,7 @@ func (m *Manager) Create(cfg Config) error {
 	}
 
 	if err := ui.Step("Initializing Kubernetes control plane", func() error {
-		args := []string{"init",
-			"--pod-network-cidr=" + cfg.family().podCIDR(kubeadmPodCIDRv4, kubeadmPodCIDRv6),
-			"--node-name", cp,
-			"--ignore-preflight-errors=all"}
-		if cfg.family().WantsIPv6() {
-			args = append(args, "--service-cidr="+cfg.family().serviceCIDR(kubeadmServiceCIDRv4, kubeadmServiceCIDRv6))
-		}
-		if cfg.family() == IPv6 {
-			// IPv6-only: kubeadm's default advertise-address detection
-			// picks the v4 default-route source, which conflicts with a
-			// v6-only service CIDR. Pin it to the node's v6 so the
-			// apiserver serves and certs itself on the family the cluster
-			// actually uses; the host then connects over v6 too.
-			v6, err := m.waitNodeIPv6(cp, 45*time.Second)
-			if err != nil {
-				return err
-			}
-			args = append(args, "--apiserver-advertise-address="+v6)
-		}
-		_, err := m.rt.Exec(cp, append([]string{"kubeadm"}, args...)...)
-		return err
+		return m.initKubeadm(cp, cfg)
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
 		return err
@@ -607,9 +587,9 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 	case "cilium":
 		return m.installCilium(cp, cfg)
 	case "flannel", "calico":
-		return fmt.Errorf("%s needs kernel features the stock node kernel does not enable; use --cni cilium with --kernel full, or --cni none to bring your own", cfg.CNI)
+		return fmt.Errorf("%s is not bundled; use --cni cilium with --kernel full, or --cni none to bring your own on a compatible kernel", cfg.CNI)
 	case "none":
-		ui.Infof("skipping CNI: install your own before nodes go Ready (note: the stock kernel lacks br_netfilter/VXLAN/eBPF)")
+		ui.Infof("skipping CNI: install your own before nodes go Ready; verify the configured kernel supports its requirements")
 		return nil
 	default:
 		return fmt.Errorf("unknown --cni %q (supported: kindnet, cilium, none)", cfg.CNI)
@@ -618,9 +598,9 @@ func (m *Manager) installCNI(cp string, cfg Config) error {
 
 // installCilium drives the host's cilium CLI (the official installer)
 // against a temporary kubeconfig for the new cluster. Cilium's eBPF
-// datapath needs the full custom kernel; the stock node kernel has no
-// BPF JIT, VXLAN, or br_netfilter, so this path refuses to proceed
-// without one rather than produce agents in a crash loop. Bonus of the
+// datapath needs BPF JIT, VXLAN, and br_netfilter. Require an explicit
+// kernel because runtime upgrades can retain older kernels without
+// these features. Bonus of the
 // vxlan tunnel datapath: cross-node pod traffic rides node-IP-addressed
 // packets, which take vmnet's fast path (~285MB/s measured) instead of
 // the slow forwarded path that punishes routed CNIs.
@@ -690,9 +670,8 @@ func (m *Manager) preflight(installDefaultKernel bool) error {
 // config cannot satisfy, before any VM boots. It does not touch the
 // network (that is preflightIPv6Network, which needs the runtime); it
 // only enforces the value itself and its interaction with the kernel and
-// CNI. Kernel gating is by design: the stock kernel has no IPv6
-// netfilter, so a non-ipv4 family without the full kernel would create a
-// cluster whose IPv6 Services silently never connect.
+// CNI. Explicit kernel selection ensures IPv6 netfilter is available
+// even on installations retaining older runtime kernels.
 func validateIPFamily(cfg Config) error {
 	if !cfg.family().Valid() {
 		return fmt.Errorf("invalid --ip-family %q (supported: ipv4, dual, ipv6)", cfg.IPFamily)
@@ -701,7 +680,7 @@ func validateIPFamily(cfg Config) error {
 		return nil
 	}
 	if cfg.Kernel == "" {
-		return fmt.Errorf("--ip-family %s needs the full node kernel (the stock kernel has no IPv6 netfilter); this should have been auto-selected, pass --kernel full explicitly", cfg.family())
+		return fmt.Errorf("--ip-family %s needs an explicit kernel with IPv6 netfilter; this should have been auto-selected, pass --kernel full explicitly", cfg.family())
 	}
 	if cfg.CNI == "cilium" {
 		return fmt.Errorf("--ip-family %s does not support --cni cilium yet: Cilium's installer and IPAM are not wired for dual-stack CIDRs", cfg.family())

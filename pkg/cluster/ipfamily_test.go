@@ -88,7 +88,7 @@ func TestPinnedFamily(t *testing.T) {
 	}
 }
 
-func TestK3sServerArgsDualStack(t *testing.T) {
+func TestK3sControlPlaneArgsDualStack(t *testing.T) {
 	args := k3sServerArgs(Config{IPFamily: DualStack, Kernel: "/x"}, "cp")
 	joined := ""
 	for _, a := range args {

@@ -45,8 +45,8 @@ mounts:
     target: /workspace
     readOnly: true
 publish: [127.0.0.1:8080:80]
-k3sServerArgs: [--tls-san, api.dev.test]
-k3sAgentArgs: [--kubelet-arg=protect-kernel-defaults=true]
+k3sControlplaneArgs: [--tls-san, api.dev.test]
+k3sWorkerArgs: [--kubelet-arg=protect-kernel-defaults=true]
 cpus: "8"
 memory: 8G
 cpMemory: 10G
@@ -84,11 +84,11 @@ addons:
 				if got := strings.Join(fc.Publish, ","); got != "127.0.0.1:8080:80" {
 					t.Errorf("publish = %q", got)
 				}
-				if got := strings.Join(fc.K3sServerArgs, ","); got != "--tls-san,api.dev.test" {
-					t.Errorf("k3sServerArgs = %q", got)
+				if got := strings.Join(fc.K3sControlPlaneArgs, ","); got != "--tls-san,api.dev.test" {
+					t.Errorf("k3sControlplaneArgs = %q", got)
 				}
-				if got := strings.Join(fc.K3sAgentArgs, ","); got != "--kubelet-arg=protect-kernel-defaults=true" {
-					t.Errorf("k3sAgentArgs = %q", got)
+				if got := strings.Join(fc.K3sWorkerArgs, ","); got != "--kubelet-arg=protect-kernel-defaults=true" {
+					t.Errorf("k3sWorkerArgs = %q", got)
 				}
 				a := fc.Addons
 				if a.Metrics == nil || *a.Metrics || a.Storage == nil || *a.Storage || a.LoadBalancer == nil || *a.LoadBalancer || a.EdgeProxy == nil || *a.EdgeProxy {
@@ -195,24 +195,24 @@ func intPtr(i int) *int    { return &i }
 
 func TestMerge(t *testing.T) {
 	full := FileConfig{
-		Name:          "demo",
-		Workers:       intPtr(3),
-		GPUWorkers:    intPtr(2),
-		GPUImage:      "fedora-custom",
-		GPUDiskSize:   "24G",
-		GPUDriver:     "dra",
-		K8sVersion:    "1.34",
-		Image:         "docker.io/kindest/node:v1.34.8",
-		CNI:           "none",
-		DNS:           []string{"192.168.64.1", "9.9.9.9"},
-		Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-		Publish:       []string{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-		K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-		K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-		CPUs:          "8",
-		Memory:        "8G",
-		CPMemory:      "10G",
-		Wait:          "10m",
+		Name:                "demo",
+		Workers:             intPtr(3),
+		GPUWorkers:          intPtr(2),
+		GPUImage:            "fedora-custom",
+		GPUDiskSize:         "24G",
+		GPUDriver:           "dra",
+		K8sVersion:          "1.34",
+		Image:               "docker.io/kindest/node:v1.34.8",
+		CNI:                 "none",
+		DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+		Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+		Publish:             []string{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+		K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+		K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+		CPUs:                "8",
+		Memory:              "8G",
+		CPMemory:            "10G",
+		Wait:                "10m",
 		Addons: FileAddons{
 			Metrics:       boolPtr(false),
 			Storage:       boolPtr(false),
@@ -237,17 +237,17 @@ func TestMerge(t *testing.T) {
 			file: full,
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -277,17 +277,17 @@ func TestMerge(t *testing.T) {
 			},
 			wantCfg: Config{
 				Name: "cli", Workers: 1, GPUWorkers: 1, GPUImage: "cli.raw", GPUDiskSize: "30G", GPUDriver: "device-plugin",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     false, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           false, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 5 * time.Minute,
 			},
@@ -299,17 +299,17 @@ func TestMerge(t *testing.T) {
 			changed: map[string]bool{"observability": true, "gateway": true, "no-lb": true, "no-edge-proxy": true},
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: false, NoEdgeProxy: false,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: false, NoEdgeProxy: false,
 				Observability: false, Gateway: false,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -324,17 +324,17 @@ func TestMerge(t *testing.T) {
 			},
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"10.0.0.53"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"10.0.0.53"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -349,17 +349,17 @@ func TestMerge(t *testing.T) {
 			},
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/cli", Target: "/data"}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/cli", Target: "/data"}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -374,17 +374,17 @@ func TestMerge(t *testing.T) {
 			},
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:9443:443"},
-				K3sServerArgs: []string{"--tls-san", "api.dev.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=protect-kernel-defaults=true"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:9443:443"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.dev.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=protect-kernel-defaults=true"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -393,24 +393,24 @@ func TestMerge(t *testing.T) {
 		{
 			name:    "explicit k3s arg flags override file",
 			file:    full,
-			changed: map[string]bool{"k3s-server-arg": true, "k3s-agent-arg": true},
+			changed: map[string]bool{"k3s-controlplane-arg": true, "k3s-worker-arg": true},
 			mutate: func(cfg *Config, v *string) {
-				cfg.K3sServerArgs = []string{"--tls-san", "api.override.test"}
-				cfg.K3sAgentArgs = []string{"--kubelet-arg=event-qps=100"}
+				cfg.K3sControlPlaneArgs = []string{"--tls-san", "api.override.test"}
+				cfg.K3sWorkerArgs = []string{"--kubelet-arg=event-qps=100"}
 			},
 			wantCfg: Config{
 				Name: "demo", Workers: 3, GPUWorkers: 2, GPUImage: "fedora-custom", GPUDiskSize: "24G", GPUDriver: "dra",
-				Image:         "docker.io/kindest/node:v1.34.8",
-				CNI:           "none",
-				DNS:           []string{"192.168.64.1", "9.9.9.9"},
-				Mounts:        runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
-				Publish:       runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
-				K3sServerArgs: []string{"--tls-san", "api.override.test"},
-				K3sAgentArgs:  []string{"--kubelet-arg=event-qps=100"},
-				CPUs:          "8",
-				Memory:        "8G",
-				CPMemory:      "10G",
-				NoMetrics:     true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
+				Image:               "docker.io/kindest/node:v1.34.8",
+				CNI:                 "none",
+				DNS:                 []string{"192.168.64.1", "9.9.9.9"},
+				Mounts:              runtime.Mounts{{Source: "/Users/me/project", Target: "/workspace", ReadOnly: true}},
+				Publish:             runtime.Publishes{"127.0.0.1:8080:80", "[::1]:8443:443/udp"},
+				K3sControlPlaneArgs: []string{"--tls-san", "api.override.test"},
+				K3sWorkerArgs:       []string{"--kubelet-arg=event-qps=100"},
+				CPUs:                "8",
+				Memory:              "8G",
+				CPMemory:            "10G",
+				NoMetrics:           true, NoStorage: true, NoLB: true, NoEdgeProxy: true,
 				Observability: true, Gateway: true,
 				WaitTimeout: 10 * time.Minute,
 			},
@@ -542,7 +542,7 @@ func TestLoadAndMergeExample(t *testing.T) {
 	if err := fc.Merge(&cfg, &distro, &version, func(string) bool { return false }); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Name != "dev" || cfg.Workers != 2 || version != "1.36" {
+	if cfg.Name != "dev" || cfg.Workers != 2 || version != "1.37" {
 		t.Errorf("example merged to name=%q workers=%d version=%q", cfg.Name, cfg.Workers, version)
 	}
 	if cfg.NoMetrics || cfg.NoStorage || cfg.NoLB || cfg.Observability || cfg.Gateway {

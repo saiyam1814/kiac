@@ -52,7 +52,7 @@ homebrew_casks:
         end
       end
     caveats: |
-      kiac needs apple/container 1.0+ (skip 1.2.0; use 1.2.1 or newer):
+      kiac needs apple/container 1.0+ (1.4.1 recommended; skip 1.2.0):
         https://github.com/apple/container/releases
       Then: kiac doctor
 

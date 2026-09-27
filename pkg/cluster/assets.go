@@ -14,7 +14,6 @@ var metricsServerManifest string
 // only host-reachable LoadBalancer addresses under vmnet are the node
 // IPs themselves and kube-proxy programs ingress IPs into iptables.
 
-// Flannel/Calico/Cilium manifests are deliberately absent: the stock
-// node kernel ships without CONFIG_BRIDGE_NETFILTER, VXLAN, and eBPF
-// prerequisites, so they cannot start. Revisit when kiac supports
-// custom kernels via `container run --kernel`.
+// Flannel and Calico manifests are not bundled. Cilium uses its official
+// installer and an explicitly selected kernel; older runtime kernels lack
+// the required networking features even when the CLI has been upgraded.

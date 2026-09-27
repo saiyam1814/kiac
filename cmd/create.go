@@ -25,7 +25,7 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --memory 8G --cpus 4
   kiac create cluster --distro k3s --workers 1
   kiac create cluster --distro k3s --workers 1 --gpu-workers 1
-  kiac create cluster --distro k3s --k3s-server-arg=--tls-san --k3s-server-arg=api.dev.test
+  kiac create cluster --distro k3s --k3s-controlplane-arg=--tls-san --k3s-controlplane-arg=api.dev.test
   kiac create cluster -p 127.0.0.1:8080:80
   kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -57,8 +57,8 @@ var createClusterCmd = &cobra.Command{
 		if !createCfg.IPFamily.Valid() {
 			return fmt.Errorf("invalid ip-family %q (supported: ipv4, dual, ipv6)", createCfg.IPFamily)
 		}
-		// A non-ipv4 family needs the full kernel (the stock kernel has no
-		// IPv6 netfilter). Auto-select it when the user did not name a
+		// A non-ipv4 family needs IPv6 netfilter, absent from older runtime
+		// kernels. Auto-select the full kernel when the user did not name a
 		// kernel, so --ip-family dual "just works" without the user
 		// knowing which kernel carries IPv6; an explicit --kernel wins.
 		if createCfg.GPUWorkers > 0 && createCfg.IPFamily != cluster.IPv4 {
@@ -87,8 +87,8 @@ var createClusterCmd = &cobra.Command{
 		createCfg.Distro = selectedDistro
 		switch selectedDistro {
 		case "kubeadm":
-			if len(createCfg.K3sServerArgs) > 0 || len(createCfg.K3sAgentArgs) > 0 {
-				return fmt.Errorf("--k3s-server-arg and --k3s-agent-arg apply to --distro k3s only")
+			if len(createCfg.K3sControlPlaneArgs) > 0 || len(createCfg.K3sWorkerArgs) > 0 {
+				return fmt.Errorf("--k3s-controlplane-arg and --k3s-worker-arg apply to --distro k3s only")
 			}
 			if createCfg.GPUWorkers > 0 && createCfg.Image != "" {
 				return fmt.Errorf("--image is an OCI node image and cannot boot real GPU VMs; use --gpu-image for the Fedora disk")
@@ -120,7 +120,7 @@ var createClusterCmd = &cobra.Command{
 			if createCfg.GPUWorkers > 0 && createCfg.Image != "" {
 				return fmt.Errorf("--image is an OCI node image and cannot boot real GPU VMs; use --gpu-image for the Fedora disk")
 			}
-			if createCfg.GPUWorkers > 0 && (len(createCfg.K3sServerArgs) > 0 || len(createCfg.K3sAgentArgs) > 0) {
+			if createCfg.GPUWorkers > 0 && (len(createCfg.K3sControlPlaneArgs) > 0 || len(createCfg.K3sWorkerArgs) > 0) {
 				return fmt.Errorf("custom k3s args are not supported on real GPU clusters yet")
 			}
 			if createCfg.GPUWorkers > 0 || createCfg.Image == "" {
@@ -179,9 +179,9 @@ func init() {
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
-	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); repeatable. kubeadm note: publishing 6443 does not add extra TLS SANs")
-	f.StringArrayVar(&createCfg.K3sServerArgs, "k3s-server-arg", nil, "extra k3s server argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
-	f.StringArrayVar(&createCfg.K3sAgentArgs, "k3s-agent-arg", nil, "extra k3s agent argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
+	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
+	f.StringArrayVar(&createCfg.K3sControlPlaneArgs, "k3s-controlplane-arg", nil, "extra k3s server argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
+	f.StringArrayVar(&createCfg.K3sWorkerArgs, "k3s-worker-arg", nil, "extra k3s agent argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")
 	f.StringVar(&createCfg.Memory, "memory", "2G", "memory per worker VM (idle workers use a few hundred MB)")
 	f.StringVar(&createCfg.CPMemory, "cp-memory", "4G", "memory for the control-plane VM (etcd, apiserver, and on single-node clusters every addon)")
