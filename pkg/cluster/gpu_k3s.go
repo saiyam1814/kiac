@@ -33,6 +33,7 @@ var k3sARM64Assets = map[string]k3sBinaryAsset{
 	"v1.34.11-k3s1": {Release: "v1.34.11+k3s1", SHA256: "272f45b9efc69d0bbdb7042156156c6903087829a5003d4593af0ad2d08d76d4"},
 	"v1.35.8-k3s1":  {Release: "v1.35.8+k3s1", SHA256: "898476e008704289382377ef19946f23b511cf2678042cb5c8aef991e64f840a"},
 	"v1.36.4-k3s1":  {Release: "v1.36.4+k3s1", SHA256: "c920706346d5ad4e5cd3c7bf1bb09ce71ebe07fec829e513e40f1caf98aed8bb"},
+	"v1.37.0-k3s1":  {Release: "v1.37.0+k3s1", SHA256: "9bc2c128a597bf7c10ee45df844f2838251ba53806f7673d7fea24a6cb1b6a99"},
 }
 
 type k3sGPUArtifacts struct {
@@ -397,7 +398,7 @@ func (m *Manager) configureK3sGPUNode(node, role, nodeIP, serverIP, token string
 		"node-ip":   nodeIP,
 	}
 	if role == "server" {
-		disable := []string{"traefik", "servicelb"}
+		disable := []string{"traefik", "servicelb", "gateway-api-crd"}
 		if cfg.NoMetrics {
 			disable = append(disable, "metrics-server")
 		}

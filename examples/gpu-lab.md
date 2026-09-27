@@ -39,7 +39,7 @@ official krunkit dependency stack.
 
 ## 2. Create the cluster
 
-The checked-in config selects K3s 1.36, one ordinary worker, one GPU worker,
+The checked-in config selects K3s 1.37, one ordinary worker, one GPU worker,
 and the DRA resource driver:
 
 ```sh

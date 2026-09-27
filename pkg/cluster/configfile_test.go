@@ -456,7 +456,7 @@ func TestLoadAndMergeExample(t *testing.T) {
 	if err := fc.Merge(&cfg, &distro, &version, func(string) bool { return false }); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Name != "dev" || cfg.Workers != 2 || version != "1.36" {
+	if cfg.Name != "dev" || cfg.Workers != 2 || version != "1.37" {
 		t.Errorf("example merged to name=%q workers=%d version=%q", cfg.Name, cfg.Workers, version)
 	}
 	if cfg.NoMetrics || cfg.NoStorage || cfg.NoLB || cfg.Observability || cfg.Gateway {

@@ -96,7 +96,8 @@ func TestK3sBootRestartsEdgeProxy(t *testing.T) {
 		edgeProxySupervisorPID,
 		"--kubeconfig",
 		"--token-file",
-		"exec k3s 'server'",
+		"exec sh -c",
+		"sh 'server'",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("k3s boot command missing %q", want)

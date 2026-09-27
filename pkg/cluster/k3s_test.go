@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/hex"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,8 @@ func TestResolveK3sImage(t *testing.T) {
 		want    string // substring of resolved image
 		wantErr bool
 	}{
+		{in: "1.37", want: "rancher/k3s:v1.37.0-k3s1@sha256:"},
+		{in: "v1.37", want: "rancher/k3s:v1.37.0-k3s1@sha256:"},
 		{in: "1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
 		{in: "v1.36", want: "rancher/k3s:v1.36.4-k3s1@sha256:"},
 		{in: "1.32", want: "rancher/k3s:v1.32.13-k3s1@sha256:"},
@@ -48,6 +51,10 @@ func TestResolveK3sImageFullRelease(t *testing.T) {
 		in   string
 		want string
 	}{
+		{in: "v1.37.0", want: k3sImages["1.37"]},
+		{in: "v1.37.0+k3s1", want: k3sImages["1.37"]},
+		{in: "v1.37.0-k3s1", want: k3sImages["1.37"]},
+		{in: "v1.37.0+k3s2", want: "docker.io/rancher/k3s:v1.37.0-k3s2"},
 		{in: "v1.36.4+k3s1", want: k3sImages["1.36"]},
 		{in: "v1.36.4-k3s1", want: k3sImages["1.36"]},
 		{in: "1.36.4+k3s1", want: k3sImages["1.36"]},
@@ -136,8 +143,9 @@ func TestK3sServerArgs(t *testing.T) {
 		" --disable-network-policy ", // k3s netpol controller targets the flannel bridge
 		" --tls-san kiac-dev-control-plane ",
 		" --node-name kiac-dev-control-plane ",
-		" --disable=traefik ",   // never fight --gateway Traefik for 80/443
-		" --disable=servicelb ", // kiac-lb publishes endpoint-local LoadBalancer IPs
+		" --disable=traefik ",         // never fight --gateway Traefik for 80/443
+		" --disable=gateway-api-crd ", // KIAC installs its own compatible CRDs
+		" --disable=servicelb ",       // kiac-lb publishes endpoint-local LoadBalancer IPs
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("server args %q missing %q", joined, want)
@@ -339,5 +347,25 @@ func TestK3sNodesReady(t *testing.T) {
 		if got := k3sNodesReady(c.out, c.want); got != c.ok {
 			t.Errorf("%s: k3sNodesReady(want=%d) = %v, want %v", c.name, c.want, got, c.ok)
 		}
+	}
+}
+
+// Every supported K3s image must also have the matching binary for Fedora
+// GPU nodes; otherwise a default-version bump silently breaks --gpu-workers.
+func TestK3sGPUArtifactsMatchImagePins(t *testing.T) {
+	for minor, img := range k3sImages {
+		t.Run(minor, func(t *testing.T) {
+			tag := strings.Split(strings.TrimPrefix(img, "docker.io/rancher/k3s:"), "@")[0]
+			asset, ok := k3sARM64Assets[tag]
+			if !ok {
+				t.Fatalf("no GPU binary pinned for image %s", img)
+			}
+			if want := strings.Replace(tag, "-k3s", "+k3s", 1); asset.Release != want {
+				t.Errorf("GPU release = %q, want %q", asset.Release, want)
+			}
+			if digest, err := hex.DecodeString(asset.SHA256); err != nil || len(digest) != 32 {
+				t.Errorf("invalid GPU binary SHA256 %q", asset.SHA256)
+			}
+		})
 	}
 }

@@ -1,9 +1,9 @@
 # Cilium on kiac: eBPF networking in one command
 
-The stock node kernel (Apple's generic VM kernel) has no VXLAN, no
-br_netfilter, and no eBPF JIT, which is why `--cni` is limited to
-kindnet out of the box. `--kernel full` swaps in the kiac full kernel,
-and with it Cilium becomes a one-liner. This walkthrough creates a
+Older apple/container installations can retain kernels without VXLAN,
+br_netfilter, or eBPF JIT. KIAC's Cilium path requires an explicit kernel
+even when the runtime has a newer default. `--kernel full` selects the
+verified kiac kernel, making Cilium a one-liner. This walkthrough creates a
 Cilium cluster, checks it, routes traffic through the Gateway API
 addon, and measures cross-node throughput with a 20MB fetch.
 

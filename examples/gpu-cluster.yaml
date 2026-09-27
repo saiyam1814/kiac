@@ -8,7 +8,7 @@
 # schedulable kiac.dev/gpu inventory; Kiac mounts /dev/dri only into GPU pods.
 name: gpu-lab
 distro: k3s
-k8sVersion: "1.36"
+k8sVersion: "1.37"
 workers: 1
 gpuWorkers: 1
 gpuImage: fedora-44

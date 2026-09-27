@@ -23,7 +23,7 @@ var nodeImages = map[string]string{
 // not publish new minors at the same time.
 const (
 	DefaultK8sVersion = "1.37"
-	DefaultK3sVersion = "1.36"
+	DefaultK3sVersion = "1.37"
 )
 
 // ResolveImage maps a Kubernetes version like "1.37", "v1.37" or
@@ -68,6 +68,7 @@ var k3sImages = map[string]string{
 	"1.34": "docker.io/rancher/k3s:v1.34.11-k3s1@sha256:5d52389a0f4fd7ebdb5a1fb2d7c67c35da966230782c4abb0667d86bcccea9c2",
 	"1.35": "docker.io/rancher/k3s:v1.35.8-k3s1@sha256:59fe491fd3b73204e499e40b325240d85c42c7189c3ae50150d37b78243f3b32",
 	"1.36": "docker.io/rancher/k3s:v1.36.4-k3s1@sha256:edad48e12bf81c3a09ac1c05c0c0ffaaa22145980b989d6fae84543a76b83657",
+	"1.37": "docker.io/rancher/k3s:v1.37.0-k3s1@sha256:d33b1973401a60410681d66c007f5c3a51d565a7c03608904764aef3321fee4d",
 }
 
 var k3sVersionRe = regexp.MustCompile(`^\d+\.\d+(?:\.\d+(?:[+-]k3s\d+)?)?$`)

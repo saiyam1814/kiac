@@ -56,7 +56,7 @@
 <main>
   <div class="kicker">Distros &amp; kernels</div>
   <h1>Cilium &amp; the full kernel</h1>
-  <p class="lede">Apple's stock node kernel cannot run Cilium. kiac ships a published, sha-pinned kernel build that can, and one flag pair boots your nodes on it and drives the official Cilium installer.</p>
+  <p class="lede">KIAC's Cilium path uses an explicitly selected kernel and the official Cilium installer. The <code>--kernel full</code> option supplies a published, checksum-pinned kernel with the required features.</p>
 
   <pre><code>kiac create cluster --name dev --workers 2 --cni cilium --kernel full</code></pre>
   <div class="note"><b>GPU-cluster exception</b>
@@ -66,12 +66,12 @@
   <table>
     <tr><th>Requirement</th><th>Detail</th></tr>
     <tr><td><code>cilium</code> CLI on your Mac</td><td><code>brew install cilium-cli</code>. kiac drives the official installer; if the binary is missing, create fails with exactly that hint <em>before</em> any VM boots.</td></tr>
-    <tr><td><code>--kernel full</code> (or a <code>--kernel</code> path)</td><td>Cilium's eBPF datapath needs kernel features the stock node kernel lacks; <code>--cni cilium</code> without a kernel is refused up front rather than producing agents in a crash loop.</td></tr>
+    <tr><td><code>--kernel full</code> (or a <code>--kernel</code> path)</td><td>KIAC requires an explicit kernel for ordinary Cilium clusters, including when apple/container has a newer default. This keeps the path independent of older retained kernels that lack eBPF prerequisites.</td></tr>
     <tr><td>kubeadm distro</td><td>This is the default; <code>--cni</code> (and with it the Cilium path) does not apply to <a href="k3s.html">--distro k3s</a>.</td></tr>
   </table>
 
   <h2 id="kernel">What --kernel full is</h2>
-  <p>Node VMs normally boot the runtime's default kernel: a minimal, monolithic build with no module loading and no VXLAN, <code>br_netfilter</code>, or eBPF JIT. <code>--kernel full</code> swaps in a kernel kiac builds in CI (<code>.github/workflows/kernel-build.yml</code>) from two pinned inputs: Apple's containerization base config and kiac's <code>kernel/config-full</code> fragment. On top of the base it enables:</p>
+  <p>Node VMs normally boot the runtime's configured kernel. Older installations may still use the minimal 6.12.28 build; apple/container 1.4.1 recommends a more capable 6.18.35 build. See <a href="networking.html#kernel">kernel versions and defaults</a>. <code>--kernel full</code> swaps in a kernel kiac builds in CI (<code>.github/workflows/kernel-build.yml</code>) from two pinned inputs: Apple's containerization base config and kiac's <code>kernel/config-full</code> fragment. On top of the base it enables:</p>
   <ul>
     <li><b>VXLAN and Geneve</b>: overlay datapaths (Cilium's tunnel mode, flannel's vxlan backend).</li>
     <li><b>br_netfilter and nf_tables</b>: bridged traffic steered through iptables/nftables, which bridge-based CNIs assume.</li>

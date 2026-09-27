@@ -225,6 +225,9 @@ test_data_paths() {
   retry 30 2 wait_for_lb kiac-e2e upload-server
   local lb_ip
   lb_ip=$(k -n kiac-e2e get svc upload-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  # Service status can be published before the edge proxy's next reconcile.
+  # Wait for this exact path, then require the bulk upload to pass once.
+  retry 30 2 k -n kiac-e2e exec upload-sender -- wget -q -T 5 -O - "http://${lb_ip}:8080/healthz"
   k -n kiac-e2e exec upload-sender -- /tmp/kiac-e2e-traffic upload \
     --url "http://${lb_ip}:8080/upload" --bytes 33554432
   retry 20 2 curl --noproxy '*' -fsS --max-time 15 "http://${lb_ip}:8080/healthz"
@@ -341,6 +344,16 @@ run_gpu_cluster() {
   "${KIAC_BIN}" "${create[@]}"
   k wait --for=condition=Ready nodes --all --timeout=8m
   [[ "$(k get nodes --no-headers | awk 'NF {n++} END {print n+0}')" -eq "$((gpu_workers + workers + 1))" ]]
+  # kubeadm can report Ready kubelets from the pinned image while silently
+  # selecting a newer upstream control plane. Verify the actual API too.
+  local api_version node_versions
+  api_version=$(k get --raw /version | sed -n 's/.*"gitVersion": *"\([^" ]*\)".*/\1/p')
+  node_versions=$(k get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.kubeletVersion}{"\n"}{end}' | sort -u)
+  [[ -n "${api_version}" && "${api_version}" == "${node_versions}" ]] || {
+    printf 'API version %q differs from node versions %q\n' "${api_version}" "${node_versions}" >&2
+    return 1
+  }
+
   assert_gpu_inventory "${driver}" "${gpu_workers}"
 
   if [[ "${gpu_workers}" -ge 2 ]]; then
@@ -390,11 +403,11 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath \
 
 case "${KIAC_GPU_E2E_PROFILE:-all}" in
   all)
-    run_gpu_cluster k3s k3s 1.36 dra 2 1 full
+    run_gpu_cluster k3s k3s 1.37 dra 2 1 full
     run_gpu_cluster kubeadm kubeadm 1.37 device-plugin 1 0 no-lb-observability
     ;;
   k3s)
-    run_gpu_cluster k3s k3s 1.36 dra 2 1 full
+    run_gpu_cluster k3s k3s 1.37 dra 2 1 full
     ;;
   kubeadm)
     run_gpu_cluster kubeadm kubeadm 1.37 device-plugin 1 0 no-lb-observability
