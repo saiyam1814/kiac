@@ -21,7 +21,6 @@ ipFamily: ipv4       # ipv4 (default), dual (IPv4-primary + IPv6), or ipv6 (IPv6
 # Omitted host IP binds all IPv4 interfaces; use 127.0.0.1 for loopback.
 # Publishing 6443 does not add API-server TLS SANs.
 # publish:            # optional host->VM forwards on the control-plane VM only
-#                     # (does not publish worker NodePorts; kubeadm 6443 publish has no extra TLS SAN)
 #   - 127.0.0.1:8080:80
 #   - '[::1]:8443:443/udp'
 # k3sControlplaneArgs:      # optional extra k3s "server" argv tokens (k3s distro only)
