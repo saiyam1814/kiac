@@ -27,6 +27,8 @@ sboms:
 
 homebrew_casks:
   - directory: Casks
+    # The workflow publishes the generated cask only after release publication.
+    skip_upload: true
     repository:
       owner: saiyam1814
       name: homebrew-tap
@@ -62,6 +64,8 @@ release:
     name: kiac
   draft: true
   use_existing_draft: true
+  name_template: "{{ .Tag }}"
+  target_commitish: "{{ .FullCommit }}"
   mode: keep-existing
 
 changelog:

@@ -78,27 +78,33 @@ jobs:
         run: make ci
 
       - name: Create immutable release draft
+        id: draft
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            if [[ "$(gh release view "${RELEASE_TAG}" --json isDraft --jq .isDraft)" != "true" ]]; then
-              echo "release ${RELEASE_TAG} already exists and is not a draft" >&2
-              exit 1
-            fi
-            draft_target="$(gh release view "${RELEASE_TAG}" --json targetCommitish --jq .targetCommitish)"
-            if [[ "${draft_target}" != "${GITHUB_SHA}" ]]; then
-              echo "release draft ${RELEASE_TAG} targets ${draft_target}, expected ${GITHUB_SHA}" >&2
-              exit 1
-            fi
-          else
-            gh release create "${RELEASE_TAG}" \
-              --draft \
-              --generate-notes \
-              --target "${GITHUB_SHA}" \
-              --title "${RELEASE_TAG}"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" > "${RUNNER_TEMP}/releases.json"
+          matches="$(jq --arg tag "${RELEASE_TAG}" '[.[][] | select(.tag_name == $tag)]' "${RUNNER_TEMP}/releases.json")"
+          count="$(jq 'length' <<< "${matches}")"
+          if [[ "${count}" -gt 1 ]]; then
+            echo "multiple releases exist for ${RELEASE_TAG}; refusing ambiguous publication" >&2
+            exit 1
           fi
+          if [[ "${count}" -eq 1 ]]; then
+            if ! jq -e --arg sha "${GITHUB_SHA}" '.[0].draft == true and .[0].target_commitish == $sha' <<< "${matches}" >/dev/null; then
+              echo "existing release must be a draft at ${GITHUB_SHA}" >&2
+              exit 1
+            fi
+            release_id="$(jq -r '.[0].id' <<< "${matches}")"
+            # GoReleaser 2.17.1's draft lookup matches the title to the tag.
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -f name="${RELEASE_TAG}" >/dev/null
+          else
+            release_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${RELEASE_TAG}" -f target_commitish="${GITHUB_SHA}" \
+              -f name="${RELEASE_TAG}" -F draft=true -F generate_release_notes=true --jq .id)"
+          fi
+          echo "id=${release_id}" >> "${GITHUB_OUTPUT}"
 
           # GitHub materializes an immutable release tag only when its draft is published.
           git tag "${RELEASE_TAG}" "${GITHUB_SHA}"
@@ -137,6 +143,23 @@ jobs:
           fi
           echo "archive=${archive}" >> "${GITHUB_OUTPUT}"
           echo "sbom=${archive}.sbom.json" >> "${GITHUB_OUTPUT}"
+          test -s dist/homebrew/Casks/kiac.rb
+          grep -F "version \"${RELEASE_TAG#v}\"" dist/homebrew/Casks/kiac.rb
+          archive_sha="$(sha256sum "${archive}" | cut -d' ' -f1)"
+          grep -F "sha256 \"${archive_sha}\"" dist/homebrew/Casks/kiac.rb
+          if grep -Eq 'verified:|^[[:space:]]*postflight[[:space:]]+do' dist/homebrew/Casks/kiac.rb; then
+            echo "generated cask contains deprecated stanzas" >&2
+            exit 1
+          fi
+
+      - name: Verify uploaded draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_ID: ${{ steps.draft.outputs.id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${DRAFT_RELEASE_ID}" | \
+            go run ./internal/cmd/release-verify -release-id "${DRAFT_RELEASE_ID}" \
+              -tag "${RELEASE_TAG}" -commit "${GITHUB_SHA}" -dir dist
 
       - name: Attest release provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -149,12 +172,39 @@ jobs:
           subject-path: ${{ steps.artifacts.outputs.archive }}
           sbom-path: ${{ steps.artifacts.outputs.sbom }}
 
-      - name: Complete Homebrew formula-to-cask migration
+      - name: Publish and verify immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_ID: ${{ steps.draft.outputs.id }}
+        shell: bash
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${DRAFT_RELEASE_ID}" | \
+            go run ./internal/cmd/release-verify -release-id "${DRAFT_RELEASE_ID}" \
+              -tag "${RELEASE_TAG}" -commit "${GITHUB_SHA}" -dir dist
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${DRAFT_RELEASE_ID}" \
+            -F draft=false >/dev/null
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
+          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "published tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          immutable="$(gh api \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/releases/${DRAFT_RELEASE_ID}" \
+            --jq .immutable)"
+          if [[ "${immutable}" != "true" ]]; then
+            echo "published release ${RELEASE_TAG} is not immutable" >&2
+            exit 1
+          fi
+
+      - name: Publish Homebrew cask after release verification
         shell: bash
         run: |
           tap_dir="${RUNNER_TEMP}/homebrew-tap"
           git clone --depth 1 git@github.com:saiyam1814/homebrew-tap.git "${tap_dir}"
-          test -f "${tap_dir}/Casks/kiac.rb"
+          mkdir -p "${tap_dir}/Casks"
+          cp dist/homebrew/Casks/kiac.rb "${tap_dir}/Casks/kiac.rb"
           rm -f "${tap_dir}/kiac.rb" "${tap_dir}/Formula/kiac.rb"
           if [[ -f "${tap_dir}/tap_migrations.json" ]]; then
             jq '. + {"kiac": "kiac"}' "${tap_dir}/tap_migrations.json" > "${tap_dir}/tap_migrations.json.tmp"
@@ -166,29 +216,8 @@ jobs:
           if ! git -C "${tap_dir}" diff --cached --quiet; then
             git -C "${tap_dir}" -c user.name='kiac release bot' \
               -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-              commit -m 'kiac: migrate formula to cask'
+              commit -m "kiac: publish ${RELEASE_TAG}"
             git -C "${tap_dir}" push origin HEAD:main
-          fi
-
-      - name: Publish and verify immutable release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh release edit "${RELEASE_TAG}" --draft=false
-          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-          tag_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
-          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
-            echo "published tag ${RELEASE_TAG} points to ${tag_sha}, expected ${GITHUB_SHA}" >&2
-            exit 1
-          fi
-          immutable="$(gh api \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
-            --jq .immutable)"
-          if [[ "${immutable}" != "true" ]]; then
-            echo "published release ${RELEASE_TAG} is not immutable" >&2
-            exit 1
           fi
 
       - name: Remove deploy key
