@@ -165,6 +165,12 @@ test_dra_capacity() {
   retry 30 2 dra_overflow_pending
   events=$(k get events --field-selector involvedObject.kind=Pod,involvedObject.name=kiac-gpu-capacity-overflow -o jsonpath='{range .items[*]}{.reason}{" "}{.message}{"\n"}{end}')
   grep -Eiq 'allocat|capacity|resource' <<<"${events}"
+  local inspection
+  inspection=$("${KIAC_BIN}" gpu inspect --name "${CURRENT_CLUSTER}" -o json)
+  grep -F "\"reserved\": \"${capacity_gib}Gi\"" <<<"${inspection}" >/dev/null
+  grep -F '"unreserved": "0"' <<<"${inspection}" >/dev/null
+  grep -F '"reason": "Unschedulable"' <<<"${inspection}" >/dev/null
+  grep -F '"shareID":' <<<"${inspection}" >/dev/null
   k delete -f "${overflow}" --wait=true
   k delete -f "${manifest}" --wait=true
   rm -f "${manifest}" "${overflow}"

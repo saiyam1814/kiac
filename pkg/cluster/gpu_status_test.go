@@ -2,7 +2,9 @@ package cluster
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
@@ -80,5 +82,29 @@ func TestGPUNodeSchedulableRejectsUnavailableNodes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGPUInventoryReadsAreBounded(t *testing.T) {
+	for _, distro := range []string{"k3s", "kubeadm"} {
+		rt := &recordingRuntime{}
+		m := &Manager{rt: rt}
+		if _, err := m.gpuKubectl("cp", distro, "get", "nodes", "-o", "json"); err != nil {
+			t.Fatal(err)
+		}
+		m.renderDeviceExists("gpu")
+		if len(rt.execs) != 2 {
+			t.Fatalf("execs=%v", rt.execs)
+		}
+		if rt.execs[0].timeout != 30*time.Second || rt.execs[1].timeout != 10*time.Second {
+			t.Fatalf("unbounded diagnostics: %+v", rt.execs)
+		}
+		command := strings.Join(rt.execs[0].command, " ")
+		if !strings.Contains(command, "--request-timeout=20s get nodes -o json") {
+			t.Fatalf("missing API deadline: %s", command)
+		}
+		if (distro == "kubeadm") != strings.Contains(command, "--kubeconfig "+adminConf) {
+			t.Fatalf("wrong kubeconfig: %s", command)
+		}
 	}
 }

@@ -606,17 +606,28 @@ func (c *KrunkitClient) execContext(ctx context.Context, name string, input io.R
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "UserKnownHostsFile=" + filepath.Join(nodeDir, "known_hosts"),
 		"-o", "ConnectTimeout=5",
+		"-o", "ServerAliveInterval=5",
+		"-o", "ServerAliveCountMax=3",
 		state.SSHUser + "@" + host,
 		remote,
 	}
 	cmd := exec.CommandContext(ctx, ssh, args...)
 	cmd.Stdin = input
+	if _, bounded := ctx.Deadline(); bounded {
+		cmd.WaitDelay = pipeWaitDelay
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
 			err = ctx.Err()
+		} else if errors.Is(err, exec.ErrWaitDelay) {
+			// SSH exited successfully, but a descendant retained a pipe.
+			// Match the container backend's bounded-exec semantics.
+			err = nil
 		}
-		return string(out), &CommandError{Tool: ssh, Args: redactSSHArgs(args), Output: string(out), Err: err}
+		if err != nil {
+			return string(out), &CommandError{Tool: ssh, Args: redactSSHArgs(args), Output: string(out), Err: err}
+		}
 	}
 	if ip != "" && ip != state.IP {
 		_ = c.updateState(name, func(latest *KrunkitNodeState) { latest.IP = ip })

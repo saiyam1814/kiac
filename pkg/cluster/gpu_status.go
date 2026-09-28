@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // GPUNodeStatus is the real host/guest and Kubernetes view of one GPU node.
@@ -198,6 +199,6 @@ func (m *Manager) gpuDRAReadyNodes(cp, distro string) (map[string]bool, error) {
 }
 
 func (m *Manager) renderDeviceExists(node string) bool {
-	_, err := m.rt.Exec(node, "test", "-c", "/dev/dri/renderD128")
+	_, err := m.rt.ExecTimeout(node, 10*time.Second, "test", "-c", "/dev/dri/renderD128")
 	return err == nil
 }

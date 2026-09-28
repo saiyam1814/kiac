@@ -200,5 +200,5 @@ func init() {
 	}
 	gpuCompatEnableCmd.Flags().BoolVar(&gpuCompatRotate, "rotate-certificate", false, "replace the webhook's serving certificate")
 	gpuCompatCmd.AddCommand(gpuCompatEnableCmd, gpuCompatDisableCmd)
-	gpuCmd.AddCommand(gpuDoctorCmd, gpuStatusCmd, gpuBenchCmd, gpuValuesCmd, gpuCompatCmd)
+	gpuCmd.AddCommand(newGPUInspectCommand(), gpuDoctorCmd, gpuStatusCmd, gpuBenchCmd, gpuValuesCmd, gpuCompatCmd)
 }

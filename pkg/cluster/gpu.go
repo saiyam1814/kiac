@@ -269,6 +269,12 @@ func (m *Manager) gpuKubectl(cp, distro string, args ...string) (string, error) 
 	if distro == "kubeadm" {
 		base = append(base, "--kubeconfig", adminConf)
 	}
+	// A Kubernetes request timeout alone cannot interrupt a connected but
+	// stalled SSH session. Bound the host process too for inventory reads.
+	if len(args) > 0 && args[0] == "get" {
+		base = append(base, "--request-timeout=20s")
+		return m.rt.ExecTimeout(cp, 30*time.Second, append(base, args...)...)
+	}
 	return m.rt.Exec(cp, append(base, args...)...)
 }
 

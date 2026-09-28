@@ -150,6 +150,8 @@ kiac gpu compat disable --name gpu-lab --namespace demo</code></pre>
 
   <h2 id="operations">Operate and remove</h2>
   <pre><code>kiac gpu status --name gpu-lab
+kiac gpu inspect --name gpu-lab
+kiac gpu inspect --name gpu-lab -o json
 kiac verify cluster --name gpu-lab
 kiac support bundle --name gpu-lab
 kiac stop node gpu-1 --name gpu-lab
@@ -157,6 +159,8 @@ kiac start node gpu-1 --name gpu-lab
 kiac resume cluster --name gpu-lab
 kiac delete cluster --name gpu-lab</code></pre>
   <p><code>kiac gpu status</code> checks node readiness and cordon state as well as render-device and resource-driver inventory. Cordoned, deleting, or NotReady nodes are not reported as schedulable. This is not a measure of unused GPU capacity or a guarantee that a particular workload's scheduling constraints can be satisfied.</p>
+  <p><code>kiac gpu inspect</code> joins GPU inventory, DRA ResourceClaims, and Pods across namespaces. It shows each claim's pool, device, share ID, allocated memory, and consumers, together with scheduling or container waiting reasons. It also finds claims generated from ResourceClaimTemplates and extended-resource requests. With the device-plugin backend, it lists GPU workloads without inventing DRA memory accounting.</p>
+  <p>The capacity table reports the published VM window, reservations from allocated claims, and the remaining <em>scheduler accounting</em> capacity. Deleting claims continue to count until their allocation disappears. Missing or inconsistent accounting is reported as unknown. These figures are not physical free memory or hard memory limits: all GPU workers share the same Mac GPU and unified memory. The command uses separate read-only API requests, so allocations can change while the snapshot is collected.</p>
   <p>The complete reproducible walkthrough, including DRA memory, LoadBalancer inference, compatibility mode, and cleanup, lives in <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md"><code>examples/gpu-lab.md</code></a>.</p>
 
   <div class="pn">
