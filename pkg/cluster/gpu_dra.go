@@ -36,7 +36,7 @@ func (m *Manager) installGPUDRA(cp string, cfg Config, gpuNodes []string) error 
 			return fmt.Errorf("reading embedded GPU agent: %w", err)
 		}
 		if err := inParallel(len(gpuNodes), func(i int) error {
-			return m.rt.ExecStdin(gpuNodes[i], bytes.NewReader(binary), "sh", "-euc", `
+			return m.rt.ExecStdinTimeout(gpuNodes[i], transferBudget(cfg.WaitTimeout), bytes.NewReader(binary), "sh", "-euc", `
 install -d -m 0755 /usr/local/libexec/kiac /var/lib/kubelet/plugins /var/lib/kubelet/plugins_registry /etc/cdi
 tmp="$(mktemp /usr/local/libexec/kiac/kiac-gpu-agent.XXXXXX)"
 cat > "$tmp"

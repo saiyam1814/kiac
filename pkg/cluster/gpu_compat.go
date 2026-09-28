@@ -223,7 +223,7 @@ func (m *Manager) uploadGPUAgent(node string) error {
 	if err != nil {
 		return fmt.Errorf("reading embedded GPU agent: %w", err)
 	}
-	return m.rt.ExecStdin(node, bytes.NewReader(binary), "sh", "-euc", `
+	return m.rt.ExecStdinTimeout(node, 2*time.Minute, bytes.NewReader(binary), "sh", "-euc", `
 install -d -m 0755 /usr/local/libexec/kiac
 tmp="$(mktemp /usr/local/libexec/kiac/kiac-gpu-agent.XXXXXX)"
 cat > "$tmp"

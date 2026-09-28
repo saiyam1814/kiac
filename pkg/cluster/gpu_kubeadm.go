@@ -140,7 +140,7 @@ func (m *Manager) createKubeadmGPU(cfg Config) error {
 			if err != nil {
 				return err
 			}
-			return m.provisionKubeadmGPUNode(nodes[i], nodeIP, binaries, isGPUNode(nodes[i]))
+			return m.provisionKubeadmGPUNode(nodes[i], nodeIP, binaries, isGPUNode(nodes[i]), cfg.WaitTimeout)
 		})
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
@@ -317,12 +317,12 @@ ss -lnt 2>&1 || true
 	return strings.TrimSpace(out)
 }
 
-func (m *Manager) provisionKubeadmGPUNode(node, nodeIP string, binaries map[string]string, gpu bool) error {
+func (m *Manager) provisionKubeadmGPUNode(node, nodeIP string, binaries map[string]string, gpu bool, wait time.Duration) error {
 	if net.ParseIP(nodeIP).To4() == nil {
 		return fmt.Errorf("kubeadm node %s has invalid IPv4 address %q", node, nodeIP)
 	}
 	for _, name := range []string{"kubeadm", "kubelet", "kubectl"} {
-		if err := m.uploadFile(node, binaries[name], "/usr/local/bin/"+name, 0o755); err != nil {
+		if err := m.uploadFile(node, binaries[name], "/usr/local/bin/"+name, 0o755, wait); err != nil {
 			return err
 		}
 	}
@@ -385,8 +385,7 @@ EOF
 udevadm trigger --subsystem-match=drm
 `
 	}
-	_, err := m.rt.Exec(node, "sh", "-euc", setup)
-	return err
+	return m.provisionGPUScript(node, wait, setup)
 }
 
 func (m *Manager) installKubeadmGPUCNI(cp string, cfg Config) error {

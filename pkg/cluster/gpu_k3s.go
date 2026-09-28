@@ -136,7 +136,7 @@ func (m *Manager) createK3sGPU(cfg Config) error {
 
 	if err := ui.Step("Provisioning K3s nodes", func() error {
 		return inParallel(len(nodes), func(i int) error {
-			return m.provisionK3sGPUNode(nodes[i], artifacts, isGPUNode(nodes[i]))
+			return m.provisionK3sGPUNode(nodes[i], artifacts, isGPUNode(nodes[i]), cfg.WaitTimeout)
 		})
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)
@@ -331,11 +331,11 @@ func (m *Manager) ensureGPUClusterAbsent(name string) error {
 	return nil
 }
 
-func (m *Manager) provisionK3sGPUNode(node string, artifacts k3sGPUArtifacts, gpu bool) error {
-	if err := m.uploadFile(node, artifacts.Binary, "/usr/local/bin/k3s", 0o755); err != nil {
+func (m *Manager) provisionK3sGPUNode(node string, artifacts k3sGPUArtifacts, gpu bool, wait time.Duration) error {
+	if err := m.uploadFile(node, artifacts.Binary, "/usr/local/bin/k3s", 0o755, wait); err != nil {
 		return err
 	}
-	if err := m.uploadFile(node, artifacts.SELinux, "/var/lib/kiac/"+k3sSELinuxFile, 0o644); err != nil {
+	if err := m.uploadFile(node, artifacts.SELinux, "/var/lib/kiac/"+k3sSELinuxFile, 0o644, wait); err != nil {
 		return err
 	}
 	setup := `
@@ -376,11 +376,10 @@ EOF
 udevadm trigger --subsystem-match=drm
 `
 	}
-	_, err := m.rt.Exec(node, "sh", "-euc", setup)
-	return err
+	return m.provisionGPUScript(node, wait, setup)
 }
 
-func (m *Manager) uploadFile(node, source, destination string, mode os.FileMode) error {
+func (m *Manager) uploadFile(node, source, destination string, mode os.FileMode, wait time.Duration) error {
 	f, err := os.Open(source)
 	if err != nil {
 		return err
@@ -388,7 +387,7 @@ func (m *Manager) uploadFile(node, source, destination string, mode os.FileMode)
 	defer f.Close()
 	dir := filepath.Dir(destination)
 	command := fmt.Sprintf("install -d -m 0755 %s; tmp=$(mktemp %s.XXXXXX); cat > \"$tmp\"; chmod %04o \"$tmp\"; mv \"$tmp\" %s", shQuote(dir), shQuote(destination), mode.Perm(), shQuote(destination))
-	return m.rt.ExecStdin(node, f, "sh", "-euc", command)
+	return m.rt.ExecStdinTimeout(node, transferBudget(wait), f, "sh", "-euc", command)
 }
 
 func (m *Manager) configureK3sGPUNode(node, role, nodeIP, serverIP, token string, cfg Config) error {
