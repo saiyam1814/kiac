@@ -143,7 +143,7 @@ func TestVenusDeviceLine(t *testing.T) {
 }
 
 func TestRunVenusBenchmarkOwnsPodInDefaultNamespace(t *testing.T) {
-	for _, outcome := range []string{"success", "rejected", "lost-response", "malformed-name", "exec-failure", "cleanup-failure", "exec-and-cleanup-failure"} {
+	for _, outcome := range []string{"success", "rejected", "lost-response", "malformed-name", "exec-failure", "cleanup-failure", "exec-and-cleanup-failure", "cpu-fallback", "discovery-only"} {
 		t.Run(outcome, func(t *testing.T) {
 			dir := t.TempDir()
 			log := filepath.Join(dir, "kubectl.log")
@@ -168,7 +168,12 @@ case "$*" in
       exec-failure|exec-and-cleanup-failure) printf 'benchmark execution failed\n' >&2; exit 1 ;;
     esac
     printf '%s\n' 'ggml_vulkan: 0 = Virtio-GPU Venus (Apple M1 Max) (venus) | uma: 1' >&2
-    printf '%s\n' '[{"n_prompt":128,"n_gen":0,"avg_ts":321.5},{"n_prompt":0,"n_gen":64,"avg_ts":42.25}]'
+    if [ "$KIAC_BENCH_TEST_OUTCOME" != discovery-only ]; then printf '%s\n' 'load_tensors: offloaded 23/23 layers to GPU' >&2; fi
+    if [ "$KIAC_BENCH_TEST_OUTCOME" = cpu-fallback ]; then
+      printf '%s\n' '[{"gpu_info":"llvmpipe","n_gpu_layers":99,"n_prompt":128,"avg_ts":321.5},{"gpu_info":"llvmpipe","n_gpu_layers":99,"n_gen":64,"avg_ts":42.25}]'
+      exit 0
+    fi
+    printf '%s\n' '[{"gpu_info":"Virtio-GPU Venus (Apple M1 Max)","n_gpu_layers":99,"n_prompt":128,"n_gen":0,"avg_ts":321.5},{"gpu_info":"Virtio-GPU Venus (Apple M1 Max)","n_gpu_layers":99,"n_prompt":0,"n_gen":64,"avg_ts":42.25}]'
     ;;
   *" delete pods -l "*)
     case "$KIAC_BENCH_TEST_OUTCOME" in
@@ -237,5 +242,25 @@ esac
 				}
 			}
 		})
+	}
+}
+
+func TestVerifiedGPUOffloadRejectsDiscoveryAndFallback(t *testing.T) {
+	for _, tc := range []struct {
+		output string
+		want   int
+	}{
+		{"ggml_vulkan: Found 1 Vulkan devices: Virtio-GPU Venus", 0},
+		{"load_tensors: offloaded 0/23 layers to GPU", 0},
+		{"load_tensors: offloaded 24/23 layers to GPU", 0},
+		{"load_tensors: offloaded 23/23 layers to GPU\nload_tensors: offloaded 0/23 layers to GPU", 0},
+		{"load_tensors: offloaded 23/23 layers to GPU\nload_tensors: offloaded 22/23 layers to GPU", 0},
+		{"load_tensors: offloaded 23/23 layers to GPU", 23},
+		{"load_tensors: offloaded 4/23 layers to GPU", 4},
+	} {
+		got, err := verifiedGPUOffload(tc.output)
+		if got != tc.want || (err != nil) != (tc.want == 0) {
+			t.Errorf("offload(%q)=%d,%v want %d", tc.output, got, err, tc.want)
+		}
 	}
 }

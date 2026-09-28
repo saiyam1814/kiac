@@ -1,0 +1,72 @@
+# Workload-visible DRA metadata, delivered read-only through CDI.
+# Requires a Kiac DRA cluster. This Pod has no Kubernetes API credentials.
+#
+# kubectl apply -f examples/gpu-dra-metadata.yaml
+# kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-gpu-metadata --timeout=5m
+# kubectl logs kiac-gpu-metadata -c inspect
+# kubectl logs kiac-gpu-metadata -c unallocated
+# kubectl delete -f examples/gpu-dra-metadata.yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: kiac-gpu-metadata-8gi
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.kiac.dev
+          capacity:
+            requests:
+              memory: 8Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-gpu-metadata
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+  restartPolicy: Never
+  runtimeClassName: nvidia
+  nodeSelector:
+    kiac.dev/gpu.present: "true"
+  tolerations:
+    - key: kiac.dev/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  resourceClaims:
+    - name: gpu
+      resourceClaimName: kiac-gpu-metadata-8gi
+  containers:
+    - name: inspect
+      image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      command: [sh, -ec]
+      args:
+        - |
+          test -c /dev/dri/renderD128
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          metadata=/var/run/kubernetes.io/dra-device-attributes/resourceclaims/kiac-gpu-metadata-8gi/gpu/gpu.kiac.dev-metadata.json
+          cat "$metadata"
+          grep -q 'venus' "$metadata"
+          grep -q '8Gi' "$metadata"
+          if (echo forbidden >> "$metadata") 2>/dev/null; then
+            echo "metadata unexpectedly writable" >&2
+            exit 1
+          fi
+          echo KIAC_GPU_METADATA_OK
+      resources:
+        claims:
+          - name: gpu
+    - name: unallocated
+      image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
+      command: [sh, -ec]
+      args:
+        - |
+          test ! -e /dev/dri/renderD128
+          test ! -d /var/run/kubernetes.io/dra-device-attributes
+          echo KIAC_UNALLOCATED_CONTAINER_OK

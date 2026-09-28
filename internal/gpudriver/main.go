@@ -23,10 +23,12 @@ import (
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	metadatav1beta1 "k8s.io/dynamic-resource-allocation/api/metadata/v1beta1"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 	"k8s.io/klog/v2"
@@ -58,8 +60,9 @@ type options struct {
 }
 
 type driver struct {
-	nodeName string
-	cancel   context.CancelCauseFunc
+	nodeName  string
+	memoryMiB int
+	cancel    context.CancelCauseFunc
 }
 
 func main() {
@@ -133,7 +136,7 @@ func run() error {
 		return fmt.Errorf("create kubelet plugin directory: %w", err)
 	}
 
-	drv := &driver{nodeName: opts.nodeName, cancel: cancel}
+	drv := &driver{nodeName: opts.nodeName, memoryMiB: memoryMiB, cancel: cancel}
 	helper, err := kubeletplugin.Start(ctx, drv,
 		kubeletplugin.KubeClient(client),
 		kubeletplugin.NodeName(opts.nodeName),
@@ -142,6 +145,8 @@ func run() error {
 		kubeletplugin.PluginDataDirectoryPath(pluginDataDir),
 		kubeletplugin.RollingUpdate(types.UID(opts.podUID)),
 		kubeletplugin.HealthService(false),
+		kubeletplugin.CDIDirectory(opts.cdiRoot),
+		kubeletplugin.EnableDeviceMetadata(true, []schema.GroupVersion{metadatav1beta1.SchemeGroupVersion}),
 	)
 	if err != nil {
 		return fmt.Errorf("start kubelet DRA plugin: %w", err)
@@ -182,17 +187,9 @@ func driverResources(nodeName string, memoryMiB int) (resourceslice.DriverResour
 	defaultMemory := memory.DeepCopy()
 	maxMemory := memory.DeepCopy()
 	allowMultiple := true
-	product := "apple-silicon"
-	api := "venus"
-	actualMemory := int64(memoryMiB)
-
 	device := resourceapi.Device{
-		Name: deviceName,
-		Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-			"product":   {StringValue: &product},
-			"api":       {StringValue: &api},
-			"memoryMiB": {IntValue: &actualMemory},
-		},
+		Name:       deviceName,
+		Attributes: gpuDeviceAttributes(memoryMiB),
 		Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
 			"memory": {
 				Value: memory,
@@ -213,6 +210,37 @@ func driverResources(nodeName string, memoryMiB int) (resourceslice.DriverResour
 			nodeName: {Slices: []resourceslice.Slice{{Devices: []resourceapi.Device{device}}}},
 		},
 	}, nil
+}
+
+func gpuDeviceAttributes(memoryMiB int) map[resourceapi.QualifiedName]resourceapi.DeviceAttribute {
+	product, api := "apple-silicon", "venus"
+	window := int64(memoryMiB)
+	return map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+		"product":   {StringValue: &product},
+		"api":       {StringValue: &api},
+		"memoryMiB": {IntValue: &window},
+	}
+}
+
+// Metadata is a description of the allocation, not an enforcement mechanism.
+// The helper mounts it read-only through CDI without giving Pods API access.
+func (d *driver) deviceMetadata(allocation resourceapi.DeviceRequestAllocationResult) *kubeletplugin.DeviceMetadata {
+	attributes := map[string]resourceapi.DeviceAttribute{}
+	for name, value := range gpuDeviceAttributes(d.memoryMiB) {
+		attributes[string(name)] = value
+	}
+	accounting, isolated := "vm-window", false
+	attributes["memoryAccounting"] = resourceapi.DeviceAttribute{StringValue: &accounting}
+	attributes["memoryIsolated"] = resourceapi.DeviceAttribute{BoolValue: &isolated}
+	if allocation.ShareID != nil {
+		shareID := string(*allocation.ShareID)
+		attributes["shareID"] = resourceapi.DeviceAttribute{StringValue: &shareID}
+	}
+	if memory, ok := allocation.ConsumedCapacity["memory"]; ok {
+		reserved := memory.String()
+		attributes["reservedMemory"] = resourceapi.DeviceAttribute{StringValue: &reserved}
+	}
+	return &kubeletplugin.DeviceMetadata{Attributes: attributes}
 }
 
 func requireCharacterDevice(path string) error {
@@ -302,6 +330,7 @@ func (d *driver) PrepareResourceClaims(_ context.Context, claims []*resourceapi.
 				DeviceName:   allocation.Device,
 				CDIDeviceIDs: []string{cdiDeviceID},
 				ShareID:      allocation.ShareID,
+				Metadata:     d.deviceMetadata(allocation),
 			})
 		}
 		if prepared.Err == nil && len(prepared.Devices) == 0 {

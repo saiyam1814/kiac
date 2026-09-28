@@ -76,6 +76,9 @@ func TestPrepareUsesOnlyRealPublishedDevice(t *testing.T) {
 	if got := prepared.Devices[0].CDIDeviceIDs; len(got) != 1 || got[0] != cdiDeviceID {
 		t.Fatalf("CDI IDs = %v", got)
 	}
+	if got := prepared.Devices[0].Metadata.Attributes["shareID"].StringValue; got == nil || *got != string(share) {
+		t.Fatalf("metadata lost allocation share ID: %v", got)
+	}
 }
 
 func TestPrepareRejectsForeignDevice(t *testing.T) {
@@ -214,5 +217,35 @@ func TestNVIDIACompatibilityRejectsAliasesSplitAcrossRequestsAndLimits(t *testin
 	}}}}
 	if _, _, err := nvidiaCompatibilityPatches(pod); err == nil || !strings.Contains(err.Error(), "multiple NVIDIA") {
 		t.Fatalf("split aliases error = %v", err)
+	}
+}
+
+func TestPreparedMetadataDescribesAllocationWithoutInventingIsolation(t *testing.T) {
+	drv := &driver{nodeName: "gpu-1", memoryMiB: 59392}
+	claim := &resourceapi.ResourceClaim{ObjectMeta: metav1.ObjectMeta{UID: "claim"}, Status: resourceapi.ResourceClaimStatus{Allocation: &resourceapi.AllocationResult{Devices: resourceapi.DeviceAllocationResult{Results: []resourceapi.DeviceRequestAllocationResult{{Driver: driverName, Pool: "gpu-1", Device: deviceName, Request: "gpu", ConsumedCapacity: map[resourceapi.QualifiedName]resource.Quantity{"memory": resource.MustParse("8Gi")}}}}}}}
+	results, err := drv.PrepareResourceClaims(t.Context(), []*resourceapi.ResourceClaim{claim})
+	if err != nil || results[claim.UID].Err != nil {
+		t.Fatalf("prepare=%v %v", err, results[claim.UID].Err)
+	}
+	attrs := results[claim.UID].Devices[0].Metadata.Attributes
+	for name, want := range map[string]string{"api": "venus", "product": "apple-silicon", "reservedMemory": "8Gi", "memoryAccounting": "vm-window"} {
+		if got := attrs[name].StringValue; got == nil || *got != want {
+			t.Errorf("attribute %s=%v want %s", name, got, want)
+		}
+	}
+	if attrs["memoryMiB"].IntValue == nil || *attrs["memoryMiB"].IntValue != 59392 {
+		t.Fatal("lost VM window")
+	}
+	if attrs["memoryIsolated"].BoolValue == nil || *attrs["memoryIsolated"].BoolValue {
+		t.Fatal("metadata invents memory isolation")
+	}
+	// Returning mutable per-claim maps must not leak one claim's reservation to another.
+	other := drv.deviceMetadata(resourceapi.DeviceRequestAllocationResult{})
+	if _, ok := other.Attributes["reservedMemory"]; ok {
+		t.Fatal("invented or leaked reservation")
+	}
+	*attrs["api"].StringValue = "mutated"
+	if *other.Attributes["api"].StringValue != "venus" {
+		t.Fatal("metadata shares mutable attributes")
 	}
 }

@@ -120,6 +120,17 @@ kiac gpu status --name gpu-lab</code></pre>
   <p><code>--gpu-resource-driver dra</code> requires Kubernetes 1.36 or newer. The embedded node agent registers the <code>gpu.kiac.dev</code> driver, publishes a <code>DeviceClass</code> and one <code>ResourceSlice</code> per GPU worker, and uses CDI to inject the render device after allocation. Its <code>extendedResourceName</code> also lets the ordinary <code>kiac.dev/gpu</code> request above allocate through DRA.</p>
   <p>For explicit capacity scheduling, a ResourceClaim can request the reported memory in 1 GiB steps; see <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-dra-memory.yaml"><code>examples/gpu-dra-memory.yaml</code></a>. Capacity is scheduler accounting against krunkit's VM GPU window. It is not dedicated physical VRAM, hard per-process memory isolation, or a compute quota.</p>
 
+  <h3>Read the allocation inside a Pod</h3>
+  <p>The DRA agent mounts Kubernetes <code>DeviceMetadata</code> JSON read-only into each container that requests the claim. Applications can read the assigned driver, pool, device, share ID, Venus API, VM memory window, and reserved memory without Kubernetes API credentials. The <code>memoryAccounting: vm-window</code> and <code>memoryIsolated: false</code> attributes make the accounting limits explicit. Containers that do not request the claim receive neither its device nor its metadata.</p>
+  <pre><code>kubectl apply -f examples/gpu-dra-metadata.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
+  pod/kiac-gpu-metadata --timeout=5m
+kubectl logs kiac-gpu-metadata -c inspect
+kubectl logs kiac-gpu-metadata -c unallocated
+kubectl delete -f examples/gpu-dra-metadata.yaml</code></pre>
+  <p>This example runs as UID 1000 with service-account token mounting disabled and verifies that the metadata cannot be written. Direct claims use <code>/var/run/kubernetes.io/dra-device-attributes/resourceclaims/&lt;claim&gt;/&lt;request&gt;/gpu.kiac.dev-metadata.json</code>. Claims created from templates use <code>resourceclaimtemplates/&lt;pod-claim-name&gt;/&lt;request&gt;/gpu.kiac.dev-metadata.json</code> below the same directory. Kiac writes <code>metadata.resource.k8s.io/v1beta1</code>; attributes describe the prepared allocation, not live GPU utilization.</p>
+  <p>After upgrading Kiac, run <code>kiac resume cluster --name gpu-lab</code> to update the embedded agent. Metadata is supplied when a claim is prepared: existing running containers do not acquire new mounts. Recreate the consuming Pods and their claims to test the new metadata contract.</p>
+
   <h2 id="prove">Prove the GPU path</h2>
   <pre><code>kubectl apply -f examples/gpu-vulkan.yaml
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
@@ -137,6 +148,7 @@ kubectl apply -f examples/gpu-inference.yaml
 kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=10m</code></pre>
   <p>The benchmark uses the same revision-pinned TinyLlama Q4_K_M model and pinned ARM64 llama.cpp container for every run. It performs three repetitions with four CPU threads per backend and, when host <code>llama-bench</code> is available, the same prompt and generation workload on native Metal. Reports preserve build IDs, GPU identity, thread counts, and timing standard deviations when provided by llama.cpp; conflicting metadata is rejected. The host binary is not version-pinned, and differing build IDs trigger a warning in text output. Even matched revisions use different Metal and Vulkan backends, so this is a regression baseline, not an isolated virtualization-overhead measurement. Use <code>--skip-host</code> or <code>-o json</code> for automation.</p>
   <p>Every run creates a uniquely labelled pod in the <code>default</code> namespace, independent of the context's configured namespace. Cleanup targets only that run's label, including after a lost creation response. Cleanup is best-effort when the API is unavailable; the pod's active deadline bounds execution but does not garbage-collect the pod object.</p>
+  <p>The benchmark requires verbose model-loading output to confirm that model layers were actually offloaded to the GPU. The report's <code>offloadedLayers</code> field is the confirmed count; <code>gpuLayers</code> is llama.cpp's requested setting. Device discovery alone, zero-layer offload, and a software Vulkan device are rejected as GPU benchmark results.</p>
 
   <h2 id="integrations">Inference integrations</h2>
   <pre><code>kiac gpu values vllm

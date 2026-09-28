@@ -140,13 +140,13 @@ The default model, container image, and download checksum are pinned.`,
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "\nModel: %s\n", report.Model)
 		writer := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-		fmt.Fprintln(writer, "BACKEND\tDEVICE\tLLAMA BUILD\tTHREADS\tPROMPT TOK/S\tGEN TOK/S")
+		fmt.Fprintln(writer, "BACKEND\tDEVICE\tLLAMA BUILD\tTHREADS\tOFFLOADED LAYERS\tPROMPT TOK/S\tGEN TOK/S")
 		if report.Host != nil {
-			fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%.2f\t%.2f\n", report.Host.Backend, report.Host.Device,
-				orDash(report.Host.BuildCommit), report.Host.Threads, report.Host.PromptTokensPerSecond, report.Host.GenerateTokensPerSecond)
+			fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%d\t%.2f\t%.2f\n", report.Host.Backend, report.Host.Device,
+				orDash(report.Host.BuildCommit), report.Host.Threads, report.Host.OffloadedLayers, report.Host.PromptTokensPerSecond, report.Host.GenerateTokensPerSecond)
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%.2f\t%.2f\n", report.Kubernetes.Backend, report.Kubernetes.Device,
-			orDash(report.Kubernetes.BuildCommit), report.Kubernetes.Threads, report.Kubernetes.PromptTokensPerSecond, report.Kubernetes.GenerateTokensPerSecond)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%d\t%.2f\t%.2f\n", report.Kubernetes.Backend, report.Kubernetes.Device,
+			orDash(report.Kubernetes.BuildCommit), report.Kubernetes.Threads, report.Kubernetes.OffloadedLayers, report.Kubernetes.PromptTokensPerSecond, report.Kubernetes.GenerateTokensPerSecond)
 		if err := writer.Flush(); err != nil {
 			return err
 		}

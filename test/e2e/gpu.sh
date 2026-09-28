@@ -143,6 +143,14 @@ dra_overflow_pending() {
   [[ -z "$(k get resourceclaim kiac-gpu-capacity-overflow -o jsonpath='{.status.allocation}')" ]]
 }
 
+test_dra_metadata() {
+  k apply -f "${ROOT}/examples/gpu-dra-metadata.yaml"
+  k wait --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-gpu-metadata --timeout=5m
+  k logs kiac-gpu-metadata -c inspect | grep -F 'KIAC_GPU_METADATA_OK' >/dev/null
+  k logs kiac-gpu-metadata -c unallocated | grep -F 'KIAC_UNALLOCATED_CONTAINER_OK' >/dev/null
+  k delete -f "${ROOT}/examples/gpu-dra-metadata.yaml" --wait=true
+}
+
 test_dra_capacity() {
   local node memory_mib capacity_gib remainder manifest overflow events
   node="kiac-${CURRENT_CLUSTER}-gpu-1"
@@ -370,6 +378,7 @@ run_gpu_cluster() {
   if [[ "${driver}" == dra ]]; then
     test_dra_memory
     test_dra_capacity
+    test_dra_metadata
     test_gpu_compatibility
   fi
   if [[ "${profile}" == full ]]; then

@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,6 +42,7 @@ type GPUBenchmarkMeasurement struct {
 	BuildNumber             int     `json:"buildNumber,omitempty"`
 	Threads                 int     `json:"threads,omitempty"`
 	GPULayers               int     `json:"gpuLayers,omitempty"`
+	OffloadedLayers         int     `json:"offloadedLayers,omitempty"`
 	PromptTokens            int     `json:"promptTokens"`
 	PromptTokensPerSecond   float64 `json:"promptTokensPerSecond"`
 	PromptStdDev            float64 `json:"promptStdDev,omitempty"`
@@ -203,7 +206,15 @@ func runVenusBenchmark(ctx context.Context, cluster, model string) (measurement 
 	if !strings.Contains(stderr, "Virtio-GPU Venus") {
 		return measurement, fmt.Errorf("llama-bench did not discover the real Venus device; output: %s", strings.TrimSpace(stderr))
 	}
-	return parseLlamaBenchmark("kubernetes-venus", venusDeviceLine(stderr), stdout)
+	measurement, err = parseLlamaBenchmark("kubernetes-venus", venusDeviceLine(stderr), stdout)
+	if err != nil {
+		return measurement, err
+	}
+	if !strings.Contains(measurement.Device, "Virtio-GPU Venus") || measurement.GPULayers <= 0 {
+		return measurement, fmt.Errorf("benchmark did not report Venus with GPU layers enabled")
+	}
+	measurement.OffloadedLayers, err = verifiedGPUOffload(stderr)
+	return measurement, err
 }
 
 func runLlamaBenchmark(ctx context.Context, binary string, prefix []string, backend, device string) (GPUBenchmarkMeasurement, error) {
@@ -222,11 +233,39 @@ func runLlamaBenchmark(ctx context.Context, binary string, prefix []string, back
 	if backend == "host-metal" && !strings.Contains(backendLog, "metal") && !strings.Contains(backendLog, "mtl") {
 		return GPUBenchmarkMeasurement{}, fmt.Errorf("llama-bench completed without reporting a Metal backend")
 	}
-	return parseLlamaBenchmark(backend, device, stdout.String())
+	measurement, err := parseLlamaBenchmark(backend, device, stdout.String())
+	if err != nil {
+		return measurement, err
+	}
+	measurement.OffloadedLayers, err = verifiedGPUOffload(stderr.String())
+	return measurement, err
 }
 
 func benchmarkArguments() []string {
-	return []string{"-p", "128", "-n", "64", "-r", "3", "-t", "4", "-ngl", "99", "-o", "json"}
+	return []string{"-p", "128", "-n", "64", "-r", "3", "-t", "4", "-ngl", "99", "-o", "json", "-v"}
+}
+
+var gpuOffloadPattern = regexp.MustCompile(`offloaded ([0-9]+)/([0-9]+) layers to GPU`)
+
+// A discovered backend or requested -ngl value alone does not prove offload.
+// Verbose llama.cpp model loading must confirm a positive layer count.
+func verifiedGPUOffload(output string) (int, error) {
+	count := 0
+	for _, match := range gpuOffloadPattern.FindAllStringSubmatch(output, -1) {
+		offloaded, err := strconv.Atoi(match[1])
+		total, totalErr := strconv.Atoi(match[2])
+		if err != nil || totalErr != nil || offloaded <= 0 || offloaded > total {
+			return 0, fmt.Errorf("llama-bench did not offload a valid positive number of model layers to the GPU")
+		}
+		if count != 0 && count != offloaded {
+			return 0, fmt.Errorf("llama-bench reported inconsistent GPU offload counts")
+		}
+		count = offloaded
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("llama-bench did not confirm model-layer GPU offload; device discovery alone is insufficient")
+	}
+	return count, nil
 }
 
 func parseLlamaBenchmark(backend, device, raw string) (GPUBenchmarkMeasurement, error) {
