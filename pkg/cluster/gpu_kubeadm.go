@@ -326,8 +326,10 @@ func (m *Manager) provisionKubeadmGPUNode(node, nodeIP string, binaries map[stri
 			return err
 		}
 	}
+	// Use the supported IPv4 path for initial package downloads; incidental
+	// vmnet IPv6 connectivity can stall independently of node readiness.
 	setup := `
-dnf -y install containerd containernetworking-plugins conntrack-tools socat ethtool iptables
+dnf -y --setopt=ip_resolve=4 install containerd containernetworking-plugins conntrack-tools socat ethtool iptables
 ln -sf /dev/null /etc/systemd/zram-generator.conf
 systemctl mask --now dev-zram0.swap >/dev/null 2>&1 || true
 swapoff -a

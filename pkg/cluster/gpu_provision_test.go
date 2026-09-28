@@ -46,7 +46,7 @@ func TestGPUProvisioningBoundsUploadsAndGuestScript(t *testing.T) {
 				t.Fatalf("host timeout=%s", execution.timeout)
 			}
 			args := execution.command
-			if len(args) != 7 || args[0] != "timeout" || args[1] != "--signal=TERM" || args[2] != "--kill-after=10s" || args[4] != "sh" || args[5] != "-euc" || !strings.Contains(args[6], "dnf -y install") {
+			if len(args) != 7 || args[0] != "timeout" || args[1] != "--signal=TERM" || args[2] != "--kill-after=10s" || args[4] != "sh" || args[5] != "-euc" || !strings.Contains(args[6], "dnf -y --setopt=ip_resolve=4 install") {
 				t.Fatalf("guest process group is not bounded: %v", args[:len(args)-1])
 			}
 		}

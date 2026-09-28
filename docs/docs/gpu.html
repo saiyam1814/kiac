@@ -83,7 +83,7 @@ brew trust nirs/vmnet-helper
 brew install vmnet-helper
 kiac gpu doctor</code></pre>
   <p>On macOS 14 or 15, use vmnet-helper's upstream installer and sudoers setup instead of Homebrew. If krunkit came from the old <code>slp/krunkit</code> or <code>slp/krun</code> tap, remove the legacy tap before reinstalling from <code>libkrun/krun</code>. <code>kiac gpu doctor</code> checks the host architecture, tool versions, SSH, disk-image, and host-network tooling, and that a Venus-capable renderer from the official krunkit dependency stack is installed.</p>
-  <p>Initial Kubernetes binary transfers and guest package provisioning are bounded by <code>--wait</code>, with a one-minute minimum. Package provisioning also has a short shutdown grace to stop the guest process after a timeout. Increase <code>--wait</code> for slow first-run downloads; a stalled mirror or SSH transfer will return an error instead of waiting indefinitely.</p>
+  <p>Initial Kubernetes binary transfers and guest package provisioning are bounded by <code>--wait</code>, with a one-minute minimum. Package provisioning also has a short shutdown grace to stop the guest process after a timeout. Package bootstrap uses IPv4, matching Kiac's GPU-node network. Increase <code>--wait</code> for slow first-run downloads; a stalled mirror or SSH transfer will return an error instead of waiting indefinitely.</p>
 
   <h2 id="create">Create a GPU cluster</h2>
   <p>K3s 1.37 with DRA is the shortest path to the complete feature:</p>

@@ -338,8 +338,10 @@ func (m *Manager) provisionK3sGPUNode(node string, artifacts k3sGPUArtifacts, gp
 	if err := m.uploadFile(node, artifacts.SELinux, "/var/lib/kiac/"+k3sSELinuxFile, 0o644, wait); err != nil {
 		return err
 	}
+	// Use the supported IPv4 path for initial package downloads; incidental
+	// vmnet IPv6 connectivity can stall independently of node readiness.
 	setup := `
-dnf -y install container-selinux iptables ethtool /var/lib/kiac/` + k3sSELinuxFile + `
+dnf -y --setopt=ip_resolve=4 install container-selinux iptables ethtool /var/lib/kiac/` + k3sSELinuxFile + `
 install -d -m 0755 /etc/modules-load.d /etc/sysctl.d /etc/rancher/k3s
 printf '%s\n' overlay br_netfilter > /etc/modules-load.d/kiac-k3s.conf
 cat > /etc/sysctl.d/90-kiac-k3s.conf <<'EOF'
