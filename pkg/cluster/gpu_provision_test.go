@@ -18,7 +18,7 @@ func TestGPUProvisioningBoundsUploadsAndGuestScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, distro := range []string{"k3s", "kubeadm"} {
-		for _, wait := range []time.Duration{time.Millisecond, 10 * time.Minute} {
+		for _, wait := range []time.Duration{time.Millisecond, 5 * time.Minute, 20 * time.Minute} {
 			rt := &recordingRuntime{}
 			m := &Manager{rt: rt}
 			var err error
@@ -42,7 +42,7 @@ func TestGPUProvisioningBoundsUploadsAndGuestScript(t *testing.T) {
 				}
 			}
 			execution := rt.execs[0]
-			if execution.timeout != budget+15*time.Second {
+			if execution.timeout != max(wait, 10*time.Minute)+15*time.Second {
 				t.Fatalf("host timeout=%s", execution.timeout)
 			}
 			args := execution.command
