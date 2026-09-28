@@ -93,8 +93,8 @@ func (c *KrunkitClient) State(name string) (KrunkitNodeState, error) {
 }
 
 // Preflight rejects dependency combinations known to boot a VM with a broken
-// Venus device. The official krunkit formula currently uses Homebrew core's
-// Venus-enabled virglrenderer; older supported installs used a tapped formula.
+// Venus device. The official stack has used both virglrenderer and the renamed
+// virglrenderer-krun formula; inspect installed receipts rather than the catalog.
 func (c *KrunkitClient) Preflight() error {
 	if stdruntime.GOOS != "darwin" || stdruntime.GOARCH != "arm64" {
 		return fmt.Errorf("real Apple GPU nodes require macOS on Apple silicon")
@@ -136,29 +136,21 @@ func (c *KrunkitClient) validateVirglrenderer() error {
 	if err != nil {
 		return fmt.Errorf("Homebrew is required to verify krunkit's GPU renderer; install krunkit with: %s", krunkitInstallHint)
 	}
-	out, err := exec.Command(brew, "info", "--json=v2", "virglrenderer").CombinedOutput()
+	out, err := exec.Command(brew, "list", "--formula", "--full-name").Output()
 	if err != nil {
-		return fmt.Errorf("checking virglrenderer: %w\n%s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("checking installed GPU renderer formulae: %w", err)
 	}
-	var info struct {
-		Formulae []struct {
-			FullName  string `json:"full_name"`
-			Installed []any  `json:"installed"`
-		} `json:"formulae"`
+	for _, name := range strings.Split(string(out), "\n") {
+		if supportedVirglFormula(strings.TrimSpace(name)) {
+			return nil
+		}
 	}
-	if err := json.Unmarshal(out, &info); err != nil || len(info.Formulae) == 0 {
-		return fmt.Errorf("checking virglrenderer formula: unexpected brew output")
-	}
-	formula := info.Formulae[0]
-	if !supportedVirglFormula(formula.FullName) || len(formula.Installed) == 0 {
-		return fmt.Errorf("the installed virglrenderer cannot create a krunkit Venus GPU; install the official stack with: %s", krunkitInstallHint)
-	}
-	return nil
+	return fmt.Errorf("no supported virglrenderer or virglrenderer-krun is installed; install the official stack with: %s", krunkitInstallHint)
 }
 
 func supportedVirglFormula(name string) bool {
 	switch name {
-	case "virglrenderer", "homebrew/core/virglrenderer", "libkrun/krun/virglrenderer", "slp/krun/virglrenderer":
+	case "virglrenderer", "homebrew/core/virglrenderer", "libkrun/krun/virglrenderer", "slp/krun/virglrenderer", "libkrun/krun/virglrenderer-krun", "slp/krun/virglrenderer-krun":
 		return true
 	default:
 		return false

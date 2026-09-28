@@ -232,13 +232,48 @@ func TestKrunkitHelpers(t *testing.T) {
 	if got := effectiveGPUMemoryMiB(8*1024, 64*1024); got != 53*1024 {
 		t.Fatalf("effective GPU memory = %d MiB, want %d", got, 53*1024)
 	}
-	for _, formula := range []string{"virglrenderer", "homebrew/core/virglrenderer", "libkrun/krun/virglrenderer", "slp/krun/virglrenderer"} {
+	for _, formula := range []string{"virglrenderer", "homebrew/core/virglrenderer", "libkrun/krun/virglrenderer", "slp/krun/virglrenderer", "libkrun/krun/virglrenderer-krun", "slp/krun/virglrenderer-krun"} {
 		if !supportedVirglFormula(formula) {
 			t.Errorf("supported virglrenderer formula %q was rejected", formula)
 		}
 	}
 	if supportedVirglFormula("unrelated/tap/virglrenderer") {
 		t.Fatal("unrelated virglrenderer formula was accepted")
+	}
+}
+
+func TestKrunkitInstalledRenderer(t *testing.T) {
+	for _, tc := range []struct {
+		name, installed string
+		brewFails       bool
+		wantError       bool
+	}{
+		{name: "renamed official renderer", installed: "libkrun/krun/krunkit\nlibkrun/krun/virglrenderer-krun\n"},
+		{name: "renamed legacy tap", installed: "slp/krun/virglrenderer-krun\n"},
+		{name: "original core renderer", installed: "virglrenderer\n"},
+		{name: "original tapped renderer", installed: "slp/krun/virglrenderer\n"},
+		{name: "unrelated packages", installed: "libkrun/krun/krunkit\nmolten-vk\n", wantError: true},
+		{name: "untrusted tap", installed: "unrelated/tap/virglrenderer-krun\n", wantError: true},
+		{name: "untrusted old name", installed: "unrelated/tap/virglrenderer\n", wantError: true},
+		{name: "empty installation", wantError: true},
+		{name: "inventory failed", installed: "libkrun/krun/virglrenderer-krun\n", brewFails: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			inventory := filepath.Join(dir, "installed.txt")
+			if err := os.WriteFile(inventory, []byte(tc.installed), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			body := "#!/bin/sh\n[ \"$*\" = 'list --formula --full-name' ] || exit 2\ncat " + shellJoin([]string{inventory}) + "\n"
+			if tc.brewFails {
+				body += "exit 1\n"
+			}
+			client := &KrunkitClient{BrewBin: writeExecutable(t, dir, "brew", body)}
+			err := client.validateVirglrenderer()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("validateVirglrenderer() = %v, want error %v", err, tc.wantError)
+			}
+		})
 	}
 }
 
