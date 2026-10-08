@@ -6,11 +6,11 @@ toolchain go1.26.6
 
 require (
 	github.com/distribution/reference v0.6.0
-	github.com/lima-vm/go-qcow2reader v0.7.1
+	github.com/lima-vm/go-qcow2reader v0.8.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
 )
 
 require (
