@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
 )
@@ -848,6 +849,14 @@ func (m *Manager) LoadImages(name string, images []string) error {
 		return fmt.Errorf("no cluster named %q found", name)
 	}
 	for _, img := range images {
+		// Apple retains short build tags in OCI archive annotations, and ctr
+		// imports those names verbatim. CRI resolves the pod's image using
+		// Docker normalization (e.g. swift-agent -> docker.io/library/swift-agent:latest).
+		ref, err := reference.ParseDockerRef(img)
+		if err != nil {
+			return fmt.Errorf("invalid image reference %q: %w", img, err)
+		}
+		imageName := ref.String()
 		tar, err := os.CreateTemp("", "kiac-image-*.tar")
 		if err != nil {
 			return err
@@ -863,10 +872,31 @@ func (m *Manager) LoadImages(name string, images []string) error {
 				if err != nil {
 					return err
 				}
-				err = m.rt.ExecStdin(node.Name, f, "ctr", "-n", "k8s.io", "image", "import", "-")
+				// Each archive contains one requested image. Retaining its index
+				// under the CRI name avoids depending on the exporter's aliases.
+				err = m.rt.ExecStdin(node.Name, f, "ctr", "-n", "k8s.io", "image", "import", "--index-name", imageName, "-")
 				f.Close()
 				if err != nil {
-					return err
+					return fmt.Errorf("importing image %q on node %s: %w", img, node.Name, err)
+				}
+				// ctr registers names synchronously. Check the exact reference
+				// before reporting success; not all node images ship crictl.
+				out, err := m.rt.ExecTimeout(node.Name, 10*time.Second,
+					"ctr", "-n", "k8s.io", "images", "ls", "-q", "name=="+imageName)
+				if err != nil {
+					return fmt.Errorf("verifying image %q on node %s: %w", img, node.Name, err)
+				}
+				found := false
+				// Runtime output combines stdout and stderr, so ctr warnings
+				// may accompany an otherwise successful exact-name lookup.
+				for _, line := range strings.Split(out, "\n") {
+					if strings.TrimSpace(line) == imageName {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("image %q imported on node %s but expected reference %q is missing from containerd", img, node.Name, imageName)
 				}
 			}
 			return nil
