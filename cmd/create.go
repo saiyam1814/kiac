@@ -27,6 +27,7 @@ var createClusterCmd = &cobra.Command{
   kiac create cluster --distro k3s --workers 1 --gpu-workers 1
   kiac create cluster --distro k3s --k3s-controlplane-arg=--tls-san --k3s-controlplane-arg=api.dev.test
   kiac create cluster -p 127.0.0.1:8080:80
+  kiac create cluster --virtualization
   kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ui.Banner(Version)
@@ -73,6 +74,9 @@ var createClusterCmd = &cobra.Command{
 		if createKernel == "" && createCfg.IPFamily.WantsIPv6() {
 			createKernel = "full"
 			ui.Infof("--ip-family %s needs the full node kernel; using --kernel full", createCfg.IPFamily)
+		}
+		if msg := virtualizationKernelWarning(createCfg, createKernel); msg != "" {
+			ui.Warnf("%s", msg)
 		}
 		// Reject a bad --cni before --kernel full can start a download:
 		// a typo should cost a message, not 37MB. Create re-checks.
@@ -162,6 +166,13 @@ var createClusterCmd = &cobra.Command{
 	},
 }
 
+func virtualizationKernelWarning(cfg cluster.Config, kernel string) string {
+	if !cfg.Virtualization || cfg.GPUWorkers > 0 || kernel != "" {
+		return ""
+	}
+	return "--virtualization without --kernel full: the default apple/container kernel has no KVM, so nodes will not get /dev/kvm; add --kernel full for nested virtualization"
+}
+
 func defaultK8sVersion(distro string) string {
 	if distro == "k3s" {
 		return cluster.DefaultK3sVersion
@@ -197,6 +208,7 @@ func init() {
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
 	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
+	f.BoolVar(&createCfg.Virtualization, "virtualization", false, "expose Apple container nested virtualization to every node VM (needs M3 or newer; ordinary clusters need --kernel full for /dev/kvm; GPU clusters use krunkit --nested)")
 	f.StringArrayVar(&createCfg.K3sControlPlaneArgs, "k3s-controlplane-arg", nil, "extra k3s server argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringArrayVar(&createCfg.K3sWorkerArgs, "k3s-worker-arg", nil, "extra k3s agent argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")

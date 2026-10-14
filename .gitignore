@@ -9,3 +9,5 @@ skills-lock.json
 
 # hyperframes video working dir (only final assets/ are committed)
 videos/
+
+.idea/

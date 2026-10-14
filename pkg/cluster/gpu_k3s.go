@@ -127,6 +127,7 @@ func (m *Manager) createK3sGPU(cfg Config) error {
 				Distro: "k3s", K8sVersion: cfg.K8sVersion, GPU: isGPUNode(node),
 				CPUs: cfg.CPUs, Memory: memory, DiskSize: cfg.GPUDiskSize,
 				NetworkID: cfg.Name, DNS: dns, Mounts: cfg.Mounts,
+				Virtualization: cfg.Virtualization,
 			}); err != nil {
 				return err
 			}

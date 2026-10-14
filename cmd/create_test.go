@@ -285,3 +285,29 @@ func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
 		})
 	}
 }
+
+func TestVirtualizationKernelWarning(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    cluster.Config
+		kernel string
+		warn   bool
+	}{
+		{name: "default kernel", cfg: cluster.Config{Virtualization: true}, warn: true},
+		{name: "full kernel", cfg: cluster.Config{Virtualization: true}, kernel: "full"},
+		{name: "custom kernel path", cfg: cluster.Config{Virtualization: true}, kernel: "/tmp/Image"},
+		{name: "gpu cluster", cfg: cluster.Config{Virtualization: true, GPUWorkers: 1}},
+		{name: "virtualization off", cfg: cluster.Config{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := virtualizationKernelWarning(tc.cfg, tc.kernel)
+			if got := msg != ""; got != tc.warn {
+				t.Fatalf("warning = %q, want warning %v", msg, tc.warn)
+			}
+			if tc.warn && !strings.Contains(msg, "--kernel full") {
+				t.Fatalf("warning %q does not name --kernel full", msg)
+			}
+		})
+	}
+}

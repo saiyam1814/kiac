@@ -555,3 +555,40 @@ func TestExecStdinTimeoutDeliversInput(t *testing.T) {
 		t.Fatalf("stdin delivered = %q, %v", data, err)
 	}
 }
+
+func TestRunDetachedPassesVirtualization(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n--virtualization\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:           "kiac-test-control-plane",
+		Image:          "example.invalid/node:v1",
+		Virtualization: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := readArgLines(t, argsFile)
+	want := []string{
+		"run", "-d", "--name", "kiac-test-control-plane", "--virtualization", "--cap-add", "ALL",
+		"example.invalid/node:v1",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("run args = %q, want %q", got, want)
+	}
+}
+
+func TestRunDetachedRejectsVirtualizationWithoutCLISupport(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n", argsFile)
+
+	err := client.RunDetached(RunOpts{
+		Name:           "kiac-test-control-plane",
+		Image:          "example.invalid/node:v1",
+		Virtualization: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--virtualization") {
+		t.Fatalf("RunDetached error = %v, want unsupported --virtualization", err)
+	}
+}

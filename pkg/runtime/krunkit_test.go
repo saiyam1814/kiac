@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -505,5 +506,102 @@ func TestKrunkitRealLifecycle(t *testing.T) {
 	}
 	if c.Owns(name) {
 		t.Fatal("deleted real VM remains in backend inventory")
+	}
+}
+
+func TestKrunkitVirtualizationPassesNestedOnEveryBoot(t *testing.T) {
+	root := t.TempDir()
+	binDir := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "args")
+	krunkit := writeExecutable(t, binDir, "krunkit", "#!/bin/sh\nprintf '%s\\n' '  -n, --nested'\n")
+	vmnetRun := writeExecutable(t, binDir, "vmnet-run", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \""+argsFile+"\"\nsleep 30\n")
+	hdiutil := writeExecutable(t, binDir, "hdiutil", `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then shift; : > "$1"; exit 0; fi
+  shift
+done
+exit 1
+`)
+	arp := writeExecutable(t, binDir, "arp", "#!/bin/sh\nexit 0\n")
+	if err := os.WriteFile(filepath.Join(root, "id_ed25519"), []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "id_ed25519.pub"), []byte("ssh-ed25519 AAAATEST kiac-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(t.TempDir(), "fedora.raw")
+	if err := os.WriteFile(base, []byte("disk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &KrunkitClient{
+		Bin: krunkit, VMNetRunBin: vmnetRun, HDIUtilBin: hdiutil, ARPBin: arp,
+		RootDir: root, HostMemoryMiB: 64 * 1024,
+		StopTimeout: 10 * time.Millisecond, KillTimeout: 10 * time.Millisecond,
+	}
+	name := "kiac-dev-control-plane"
+	if err := c.RunDetached(RunOpts{
+		Backend: BackendKrunkit, Name: name, Image: base,
+		CPUs: "4", Memory: "2G", DiskSize: "2M", NetworkID: "dev",
+		Virtualization: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Remove(name) })
+
+	waitForNested := func(when string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			raw, _ := os.ReadFile(argsFile)
+			if slices.Contains(strings.Split(string(raw), "\n"), "--nested") {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: krunkit args lack --nested: %q", when, raw)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	waitForNested("create")
+	state, err := c.State(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Nested {
+		t.Fatalf("nested virtualization was not persisted: %+v", state)
+	}
+
+	if err := c.Stop(name); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(argsFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(name); err != nil {
+		t.Fatal(err)
+	}
+	waitForNested("restart")
+}
+
+func TestKrunkitVirtualizationRequiresNestedSupport(t *testing.T) {
+	binDir := t.TempDir()
+	base := filepath.Join(t.TempDir(), "fedora.raw")
+	if err := os.WriteFile(base, []byte("disk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &KrunkitClient{
+		Bin:     writeExecutable(t, binDir, "krunkit", "#!/bin/sh\nprintf '%s\\n' '  --cpus'\n"),
+		RootDir: t.TempDir(), HostMemoryMiB: 64 * 1024,
+	}
+	err := c.RunDetached(RunOpts{
+		Backend: BackendKrunkit, Name: "kiac-dev-control-plane", Image: base,
+		CPUs: "4", Memory: "2G", DiskSize: "2M", NetworkID: "dev",
+		Virtualization: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--nested") {
+		t.Fatalf("RunDetached error = %v, want missing --nested support", err)
+	}
+	if c.Owns("kiac-dev-control-plane") {
+		t.Fatal("VM was created despite missing --nested support")
 	}
 }

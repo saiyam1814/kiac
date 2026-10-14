@@ -238,6 +238,12 @@ func (c *KrunkitClient) RunDetached(opts RunOpts) (retErr error) {
 		return fmt.Errorf("krunkit disk size %s is smaller than the %d-byte base image", opts.DiskSize, imageInfo.Size())
 	}
 
+	if opts.Virtualization {
+		if err := c.requireNested(); err != nil {
+			return err
+		}
+	}
+
 	unlock, err := c.lockStore()
 	if err != nil {
 		return err
@@ -295,6 +301,7 @@ func (c *KrunkitClient) RunDetached(opts RunOpts) (retErr error) {
 		Status:       "creating",
 		Created:      time.Now().UTC(),
 		Mounts:       append([]Mount(nil), opts.Mounts...),
+		Nested:       opts.Virtualization,
 	}
 	state.RestSocket, err = c.shortSocketPath(opts.Name)
 	if err != nil {
@@ -474,6 +481,9 @@ func (c *KrunkitClient) startState(state *KrunkitNodeState) error {
 		"--device=virtio-serial,logFilePath=" + filepath.Join(nodeDir, "serial.log"),
 		"--device=virtio-rng",
 		"--device=virtio-net,type=unixgram,fd=4,mac=" + state.MAC + ",offloading=off",
+	}
+	if state.Nested {
+		args = append(args, "--nested")
 	}
 	for i, mount := range state.Mounts {
 		args = append(args, fmt.Sprintf("--device=virtio-fs,sharedDir=%s,mountTag=kiac%d", mount.Source, i))
@@ -1158,4 +1168,16 @@ func (c *KrunkitClient) resolveBinary(value string, candidates ...string) (strin
 		}
 	}
 	return "", fmt.Errorf("executable %q not found", value)
+}
+
+func (c *KrunkitClient) requireNested() error {
+	krunkit, err := c.resolveBinary(c.Bin)
+	if err != nil {
+		return fmt.Errorf("krunkit is not installed; install it with: %s", krunkitInstallHint)
+	}
+	out, _ := exec.Command(krunkit, "--help").CombinedOutput()
+	if !strings.Contains(string(out), "--nested") {
+		return fmt.Errorf("this krunkit does not support --nested; upgrade krunkit to use --virtualization")
+	}
+	return nil
 }

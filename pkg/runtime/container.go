@@ -143,23 +143,24 @@ func (c *Client) SystemStart(installDefaultKernel bool) error {
 
 // RunOpts describes one node VM.
 type RunOpts struct {
-	Backend    string // explicit backend for first creation; empty uses route ownership/default
-	Name       string
-	Image      string // OCI image for container, bootable raw disk for krunkit
-	Distro     string // persisted lifecycle identity (kubeadm or k3s) for non-OCI backends
-	K8sVersion string // persisted Kubernetes version for images that do not encode it
-	GPU        bool   // this node exposes a real GPU device to Kubernetes
-	CPUs       string
-	Memory     string
-	DiskSize   string   // krunkit writable disk size; empty defaults to 20G
-	NetworkID  string   // krunkit nodes with the same ID share one vmnet subnet
-	Env        []string // KEY=VALUE pairs, passed as -e flags
-	Entrypoint string   // overrides the image entrypoint when non-empty
-	Kernel     string   // custom kernel Image path (--kernel), empty = bundled default
-	Args       []string // command arguments appended after the image
-	DNS        []string // nameserver IPs (--dns); empty keeps the runtime default resolv.conf
-	Mounts     []Mount  // host directory bind mounts (--mount)
-	Publish    []string // host-to-container forwards (--publish), e.g. 127.0.0.1:8080:80
+	Backend        string // explicit backend for first creation; empty uses route ownership/default
+	Name           string
+	Image          string // OCI image for container, bootable raw disk for krunkit
+	Distro         string // persisted lifecycle identity (kubeadm or k3s) for non-OCI backends
+	K8sVersion     string // persisted Kubernetes version for images that do not encode it
+	GPU            bool   // this node exposes a real GPU device to Kubernetes
+	CPUs           string
+	Memory         string
+	DiskSize       string   // krunkit writable disk size; empty defaults to 20G
+	NetworkID      string   // krunkit nodes with the same ID share one vmnet subnet
+	Env            []string // KEY=VALUE pairs, passed as -e flags
+	Entrypoint     string   // overrides the image entrypoint when non-empty
+	Kernel         string   // custom kernel Image path (--kernel), empty = bundled default
+	Args           []string // command arguments appended after the image
+	DNS            []string // nameserver IPs (--dns); empty keeps the runtime default resolv.conf
+	Mounts         []Mount  // host directory bind mounts (--mount)
+	Publish        []string // host-to-container forwards (--publish), e.g. 127.0.0.1:8080:80
+	Virtualization bool     // exposes nested virtualization to the node VM
 }
 
 // RunDetached boots a node VM. The kindest/node entrypoint brings up
@@ -168,6 +169,12 @@ type RunOpts struct {
 // CAP_SYS_ADMIN); the VM boundary is the isolation, not capabilities.
 func (c *Client) RunDetached(o RunOpts) error {
 	args := []string{"run", "-d", "--name", o.Name}
+	if o.Virtualization {
+		if !c.supportsVirtualization() {
+			return fmt.Errorf("this apple/container CLI does not support --virtualization; upgrade apple/container")
+		}
+		args = append(args, "--virtualization")
+	}
 	if c.supportsCapAdd() {
 		args = append(args, "--cap-add", "ALL")
 	}
@@ -213,6 +220,12 @@ func (c *Client) RunDetached(o RunOpts) error {
 // (added in 1.0.0); 0.x grants a wider default set and lacks the flag.
 func (c *Client) supportsCapAdd() bool {
 	return strings.Contains(c.runHelpOutput(), "--cap-add")
+}
+
+// supportsVirtualization probes whether this container CLI knows
+// --virtualization (nested virtualization inside the container VM).
+func (c *Client) supportsVirtualization() bool {
+	return strings.Contains(c.runHelpOutput(), "--virtualization")
 }
 
 func (c *Client) supportsSecurityPathOverrides() bool {
