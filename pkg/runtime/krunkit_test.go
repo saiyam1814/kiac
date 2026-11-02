@@ -573,6 +573,16 @@ exit 1
 	if !state.Nested {
 		t.Fatalf("nested virtualization was not persisted: %+v", state)
 	}
+	firstGeneration := state.AddressGeneration
+	if !state.GuestAddressReport || firstGeneration == "" {
+		t.Fatal("new VM is missing guest address reporting state")
+	}
+	nodeDir, _ := c.nodeDir(name)
+	arguments, _ := os.ReadFile(argsFile)
+	wantStatusMount := "--device=virtio-fs,sharedDir=" + filepath.Join(nodeDir, guestAddressDirectory) + ",mountTag=" + guestAddressMountTag
+	if !slices.Contains(strings.Split(string(arguments), "\n"), wantStatusMount) {
+		t.Fatal("VM did not export its dedicated status directory")
+	}
 
 	if err := c.Stop(name); err != nil {
 		t.Fatal(err)
@@ -600,6 +610,10 @@ exit 1
 		t.Fatal(err)
 	}
 	waitForNested("restart")
+	state, err = c.State(name)
+	if err != nil || state.AddressGeneration == "" || state.AddressGeneration == firstGeneration {
+		t.Fatalf("restart did not rotate guest address boot generation: %v", err)
+	}
 }
 
 func TestKrunkitVirtualizationRequiresNestedSupport(t *testing.T) {

@@ -31,7 +31,12 @@ func sshTestClient(t *testing.T, script string) (*KrunkitClient, string) {
 		t.Fatal(err)
 	}
 	name := "kiac-test-gpu-1"
-	if err := c.writeState(KrunkitNodeState{Schema: krunkitStateSchema, Name: name, PID: vm.Process.Pid, ProcessStart: started, ProcessCommandHash: processCommandHash(command), IP: "192.168.120.2", SSHUser: "fedora", Status: "running", Created: time.Now()}); err != nil {
+	network, err := c.ensureNetwork("ssh-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := strings.TrimSuffix(network.Start, ".1") + ".2"
+	if err := c.writeState(KrunkitNodeState{Schema: krunkitStateSchema, Name: name, PID: vm.Process.Pid, ProcessStart: started, ProcessCommandHash: processCommandHash(command), IP: ip, NetworkID: network.ID, NetworkCIDR: network.CIDR, SSHUser: "fedora", Status: "running", Created: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	return c, name

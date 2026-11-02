@@ -7,8 +7,8 @@ Application releases are built only from the current `main` commit. The release 
 3. Generates an SPDX SBOM and SHA-256 checksums.
 4. Uploads everything to a draft GitHub release.
 5. Creates GitHub/Sigstore provenance and SBOM attestations.
-6. Updates the Homebrew tap with its repository-scoped deploy key.
-7. Publishes the release only after every preceding step succeeds.
+6. Publishes the verified draft, then checks the release tag and immutability.
+7. Updates the Homebrew tap with its repository-scoped deploy key only after the published release passes verification.
 
 Published releases and their tags are immutable. If a draft release fails partway through, fix the cause and rerun the failed workflow before publishing it. Never replace an artifact under an existing version; create a new patch release.
 

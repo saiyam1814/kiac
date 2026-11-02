@@ -216,6 +216,9 @@ func (c *KrunkitClient) RunDetached(opts RunOpts) (retErr error) {
 	if err := ValidateMounts(opts.Mounts); err != nil {
 		return err
 	}
+	if err := validateGuestAddressMounts(opts.Mounts); err != nil {
+		return err
+	}
 	cpus, err := parseCPUCount(opts.CPUs)
 	if err != nil {
 		return err
@@ -285,25 +288,26 @@ func (c *KrunkitClient) RunDetached(opts RunOpts) (retErr error) {
 		return err
 	}
 	state := KrunkitNodeState{
-		Schema:       krunkitStateSchema,
-		Name:         opts.Name,
-		Image:        image,
-		Distro:       opts.Distro,
-		K8sVersion:   opts.K8sVersion,
-		GPU:          opts.GPU,
-		Disk:         filepath.Join(nodeDir, "disk.img"),
-		Seed:         filepath.Join(nodeDir, "cidata.iso"),
-		MAC:          mac,
-		CPUs:         cpus,
-		MemoryMiB:    memoryMiB,
-		GPUMemoryMiB: effectiveGPUMemoryMiB(memoryMiB, hostMemoryMiB),
-		NetworkID:    opts.NetworkID,
-		NetworkCIDR:  network.CIDR,
-		SSHUser:      defaultSSHUser,
-		Status:       "creating",
-		Created:      time.Now().UTC(),
-		Mounts:       append([]Mount(nil), opts.Mounts...),
-		Nested:       opts.Virtualization,
+		Schema:             krunkitStateSchema,
+		Name:               opts.Name,
+		Image:              image,
+		Distro:             opts.Distro,
+		K8sVersion:         opts.K8sVersion,
+		GPU:                opts.GPU,
+		Disk:               filepath.Join(nodeDir, "disk.img"),
+		Seed:               filepath.Join(nodeDir, "cidata.iso"),
+		MAC:                mac,
+		CPUs:               cpus,
+		MemoryMiB:          memoryMiB,
+		GPUMemoryMiB:       effectiveGPUMemoryMiB(memoryMiB, hostMemoryMiB),
+		NetworkID:          opts.NetworkID,
+		NetworkCIDR:        network.CIDR,
+		SSHUser:            defaultSSHUser,
+		Status:             "creating",
+		Created:            time.Now().UTC(),
+		Mounts:             append([]Mount(nil), opts.Mounts...),
+		Nested:             opts.Virtualization,
+		GuestAddressReport: true,
 	}
 	state.RestSocket, err = c.shortSocketPath(opts.Name)
 	if err != nil {
@@ -449,6 +453,11 @@ func (c *KrunkitClient) startState(state *KrunkitNodeState) error {
 	if state.Disk != filepath.Join(nodeDir, "disk.img") || state.Seed != filepath.Join(nodeDir, "cidata.iso") {
 		return fmt.Errorf("krunkit VM %s has unsafe disk state; delete and recreate it", state.Name)
 	}
+	if state.GuestAddressReport {
+		if err := validateGuestAddressMounts(state.Mounts); err != nil {
+			return err
+		}
+	}
 	restSocket := state.RestSocket
 	if restSocket == "" {
 		restSocket, err = c.shortSocketPath(state.Name)
@@ -465,10 +474,15 @@ func (c *KrunkitClient) startState(state *KrunkitNodeState) error {
 			return fmt.Errorf("krunkit VM %s has unsafe REST socket state; delete and recreate it", state.Name)
 		}
 	}
+	if state.GuestAddressReport {
+		if err := c.prepareGuestAddressReport(state); err != nil {
+			return err
+		}
+	}
 	_ = os.Remove(restSocket)
 	// Fedora may replace its transient first-boot host key before cloud-init
-	// settles. The target is still authenticated by this node's recorded MAC,
-	// isolated vmnet subnet, and Kiac client key; relearn the host key per boot.
+	// settles. Discovery stays scoped to this VM's identity and owned subnet,
+	// and SSH still requires the Kiac client key; relearn the host key per boot.
 	_ = os.Remove(filepath.Join(nodeDir, "known_hosts"))
 	args := []string{
 		"--operation-mode=shared",
@@ -491,6 +505,9 @@ func (c *KrunkitClient) startState(state *KrunkitNodeState) error {
 	}
 	if state.Nested {
 		args = append(args, "--nested")
+	}
+	if state.GuestAddressReport {
+		args = append(args, "--device=virtio-fs,sharedDir="+filepath.Join(nodeDir, guestAddressDirectory)+",mountTag="+guestAddressMountTag)
 	}
 	for i, mount := range state.Mounts {
 		args = append(args, fmt.Sprintf("--device=virtio-fs,sharedDir=%s,mountTag=kiac%d", mount.Source, i))
@@ -594,14 +611,11 @@ func (c *KrunkitClient) execContext(ctx context.Context, name string, input io.R
 	if !c.processOwned(&state) {
 		return "", fmt.Errorf("krunkit VM %s is not running", name)
 	}
-	ip := c.findARPAddress(state.MAC)
-	if ip == "" {
-		ip = state.IP
+	ip, err := c.nodeAddress(state)
+	if err != nil {
+		return "", err
 	}
 	host := ip
-	if host == "" {
-		host = state.Name + ".local"
-	}
 	ssh, err := c.resolveBinary(c.SSHBin, "/usr/bin/ssh")
 	if err != nil {
 		return "", err
@@ -713,11 +727,14 @@ func (c *KrunkitClient) IP(name string) (string, error) {
 		return "", err
 	}
 	ip := strings.TrimSpace(out)
-	if net.ParseIP(ip).To4() == nil {
-		return "", fmt.Errorf("could not determine IPv4 address of krunkit VM %s", name)
-	}
 	state, err := c.readState(name)
-	if err == nil && state.IP != ip {
+	if err != nil {
+		return "", err
+	}
+	if err := c.validateNodeIPv4(state, ip); err != nil {
+		return "", fmt.Errorf("could not determine IPv4 address of krunkit VM %s: %w", name, err)
+	}
+	if state.IP != ip {
 		_ = c.updateState(name, func(latest *KrunkitNodeState) { latest.IP = ip })
 	}
 	return ip, nil
@@ -843,10 +860,7 @@ func (c *KrunkitClient) List(prefix string) ([]Info, error) {
 		originalProcessCommandHash := state.ProcessCommandHash
 		if c.processOwned(&state) {
 			status = "running"
-			ip = c.findARPAddress(state.MAC)
-			if ip == "" {
-				ip = state.IP
-			}
+			ip, _ = c.nodeAddress(state)
 		}
 		if state.Status != status || (ip != "" && ip != state.IP) ||
 			state.ProcessStart != originalProcessStart || state.ProcessCommandHash != originalProcessCommandHash {

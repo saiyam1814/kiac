@@ -269,14 +269,15 @@ test_data_paths() {
 
 test_inference() {
   k apply -f "${ROOT}/examples/gpu-inference.yaml"
-  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=10m
+  # The pinned model is over 600 MiB; allow the first download on slower links.
+  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=20m
   retry 30 2 wait_for_lb kiac-gpu-demo tinyllama
   local ip response
   ip=$(k -n kiac-gpu-demo get svc tinyllama -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
   response=$(curl --noproxy '*' -fsS --max-time 90 "http://${ip}:8080/completion" \
     -H 'Content-Type: application/json' \
     -d '{"prompt":"Kubernetes on Apple GPUs is","n_predict":16}')
-  grep -F '"tokens_predicted":16' <<<"${response}" >/dev/null
+  printf '%s\n' "${response}" | go -C "${ROOT}" run ./test/e2e/check-inference --max-tokens 16
   k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'Virtio-GPU Venus' >/dev/null
   k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'offloaded 23/23 layers to GPU' >/dev/null
 }
