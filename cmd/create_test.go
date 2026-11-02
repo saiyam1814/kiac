@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,6 +283,93 @@ func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
 				}
 				return nil
 			})
+		})
+	}
+}
+
+func TestVirtualizationKernelWarning(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    cluster.Config
+		kernel string
+		warn   bool
+	}{
+		{name: "default kernel", cfg: cluster.Config{Virtualization: true}, warn: true},
+		{name: "full kernel", cfg: cluster.Config{Virtualization: true}, kernel: "full"},
+		{name: "custom kernel path", cfg: cluster.Config{Virtualization: true}, kernel: "/tmp/Image"},
+		{name: "gpu cluster", cfg: cluster.Config{Virtualization: true, GPUWorkers: 1}},
+		{name: "virtualization off", cfg: cluster.Config{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := virtualizationKernelWarning(tc.cfg, tc.kernel)
+			if got := msg != ""; got != tc.warn {
+				t.Fatalf("warning = %q, want warning %v", msg, tc.warn)
+			}
+			if tc.warn && !strings.Contains(msg, "--kernel full") {
+				t.Fatalf("warning %q does not name --kernel full", msg)
+			}
+		})
+	}
+}
+
+func TestCreateClusterChecksNestedHostBeforeKernelResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		gpuWorkers int
+		config     string
+		flag       string
+		wantProbe  bool
+	}{
+		{name: "ordinary flag", flag: "true", wantProbe: true},
+		{name: "GPU flag", gpuWorkers: 1, flag: "true", wantProbe: true},
+		{name: "config file", config: "virtualization: true\n", wantProbe: true},
+		{name: "explicit false overrides config", config: "virtualization: true\n", flag: "false"},
+		{name: "default disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCfg, oldConfigFile := createCfg, createConfigFile
+			oldKernel, oldIPFamily, oldDistro := createKernel, createIPFamily, createDistro
+			oldCheck := checkNestedVirtualization
+			t.Cleanup(func() {
+				createCfg, createConfigFile = oldCfg, oldConfigFile
+				createKernel, createIPFamily, createDistro = oldKernel, oldIPFamily, oldDistro
+				checkNestedVirtualization = oldCheck
+			})
+			dir := t.TempDir()
+			createCfg = cluster.Config{Name: "dev", GPUWorkers: tc.gpuWorkers, WaitTimeout: time.Minute}
+			createDistro, createIPFamily = "kubeadm", "ipv4"
+			createConfigFile = ""
+			// A nonexistent kernel proves a rejected host is checked before
+			// kernel resolution can download or reach the runtime.
+			createKernel = filepath.Join(dir, "missing-kernel")
+			if tc.gpuWorkers > 0 {
+				createKernel = ""
+			}
+			if tc.config != "" {
+				createConfigFile = filepath.Join(dir, "cluster.yaml")
+				if err := os.WriteFile(createConfigFile, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := &cobra.Command{}
+			command.Flags().BoolVar(&createCfg.Virtualization, "virtualization", false, "")
+			if tc.flag != "" {
+				if err := command.ParseFlags([]string{"--virtualization=" + tc.flag}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			unsupported := errors.New("nested host capability is unavailable")
+			checkNestedVirtualization = func() error { calls++; return unsupported }
+			err := createClusterCmd.RunE(command, nil)
+			if tc.wantProbe {
+				if calls != 1 || !errors.Is(err, unsupported) {
+					t.Fatalf("RunE = %v, host probe calls = %d, want rejection before kernel resolution", err, calls)
+				}
+			} else if calls != 0 || err == nil || !strings.Contains(err.Error(), "kernel file") {
+				t.Fatalf("RunE = %v, host probe calls = %d, want kernel resolution without a host check", err, calls)
+			}
 		})
 	}
 }

@@ -123,6 +123,7 @@ type Config struct {
 	DNS                 []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
 	Mounts              runtime.Mounts
 	Publish             runtime.Publishes // host port forwards for the control-plane VM (--publish)
+	Virtualization      bool              // expose nested virtualization to every node VM (--virtualization)
 	K3sControlPlaneArgs []string          // extra k3s server argv entries, appended after Kiac defaults
 	K3sWorkerArgs       []string          // extra k3s agent argv entries, appended after Kiac defaults
 	NoMetrics           bool
@@ -480,14 +481,15 @@ func (m *Manager) Create(cfg Config) error {
 
 func kubeadmNodeRunOpts(cfg Config, nodeName, memory string, dns []string) runtime.RunOpts {
 	return runtime.RunOpts{
-		Name:    nodeName,
-		Image:   cfg.Image,
-		CPUs:    cfg.CPUs,
-		Memory:  memory,
-		Kernel:  cfg.Kernel,
-		DNS:     dns,
-		Mounts:  cfg.Mounts,
-		Publish: publishForNode(cfg, nodeName),
+		Name:           nodeName,
+		Image:          cfg.Image,
+		CPUs:           cfg.CPUs,
+		Memory:         memory,
+		Kernel:         cfg.Kernel,
+		DNS:            dns,
+		Mounts:         cfg.Mounts,
+		Publish:        publishForNode(cfg, nodeName),
+		Virtualization: cfg.Virtualization,
 	}
 }
 

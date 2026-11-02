@@ -80,6 +80,7 @@ mounts:
   - source: /Users/me/project
     target: /workspace
     readOnly: true
+<span class="c"># virtualization: true  # nested virtualization in every node VM (M3+; ordinary clusters need --kernel full)</span>
 cpus: "4"            <span class="c"># vCPUs per node VM (quote it: YAML reads bare 4 as a number)</span>
 memory: 4G           <span class="c"># memory per worker VM</span>
 wait: 5m             <span class="c"># timeout for nodes to become Ready</span>
@@ -110,6 +111,7 @@ addons:
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
     <tr><td><code>mounts</code></td><td>list of <code>source</code>, <code>target</code>, <code>readOnly</code></td><td>none</td><td><code>--mount</code></td></tr>
     <tr><td><code>publish</code></td><td>list of strings</td><td>none</td><td><code>--publish</code>; ordinary control-plane VM only; use an explicit host IP for loopback binding</td></tr>
+    <tr><td><code>virtualization</code></td><td>bool</td><td><code>false</code></td><td><code>--virtualization</code>; GPU clusters use krunkit's <code>--nested</code></td></tr>
     <tr><td><code>k3sControlplaneArgs</code>, <code>k3sWorkerArgs</code></td><td>lists of strings</td><td>none</td><td><code>--k3s-controlplane-arg</code>, <code>--k3s-worker-arg</code>; each item is one argv token; ordinary K3s only</td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
     <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>

@@ -83,6 +83,13 @@ ipFamily: ipv4
 #   - 127.0.0.1:8080:80
 #   - '[::1]:8443:443/udp'
 
+# Expose nested virtualization (apple/container --virtualization) to every
+# node VM, e.g. for KubeVirt or Kata. Needs an M3 or newer Mac on macOS 15+
+# and, on ordinary clusters, --kernel full on the command line: the default
+# apple/container kernel has no KVM, so nodes get no /dev/kvm without it.
+# GPU clusters pass krunkit --nested and need no extra kernel.
+# virtualization: true
+
 # Extra argv entries for k3s only; each list item is one token.
 # These are appended after kiac's defaults for the respective role.
 # Values are minimally validated; conflicting flags can break the cluster.

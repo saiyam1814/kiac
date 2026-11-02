@@ -43,6 +43,7 @@ type KrunkitNodeState struct {
 	Status             string    `json:"status"`
 	Created            time.Time `json:"created"`
 	Mounts             []Mount   `json:"mounts,omitempty"`
+	Nested             bool      `json:"nested,omitempty"`
 }
 
 // lockStore serializes lifecycle and read-modify-write operations across both
