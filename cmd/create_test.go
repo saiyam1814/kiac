@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,47 @@ func TestCreateClusterRejectsK3sArgsOnGPUK3s(t *testing.T) {
 	}
 }
 
+func TestCreateClusterGPUCapabilitiesFailBeforeHostWork(t *testing.T) {
+	for _, tc := range []struct {
+		name, distro, version, driver, config, want string
+	}{
+		{name: "unavailable kubeadm minor", distro: "kubeadm", version: "1.36", want: "no pinned kubeadm GPU-node binaries"},
+		{name: "unavailable k3s patch", distro: "k3s", version: "1.37.99", want: "no pinned k3s GPU-node binaries"},
+		{name: "old DRA", distro: "k3s", version: "1.35", driver: "dra", want: "requires Kubernetes 1.36 or newer"},
+		{name: "unknown driver", distro: "kubeadm", version: "1.37", driver: "fake", want: "unknown --gpu-resource-driver"},
+		{name: "config file old minor", distro: "kubeadm", config: "gpuWorkers: 1\nk8sVersion: '1.36'\n", want: "no pinned kubeadm GPU-node binaries"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCfg, oldDistro, oldVersion := createCfg, createDistro, k8sVersion
+			oldConfigFile, oldKernel, oldIPFamily := createConfigFile, createKernel, createIPFamily
+			t.Cleanup(func() {
+				createCfg, createDistro, k8sVersion = oldCfg, oldDistro, oldVersion
+				createConfigFile, createKernel, createIPFamily = oldConfigFile, oldKernel, oldIPFamily
+			})
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("PATH", dir)
+			createCfg = cluster.Config{Name: "gpu", GPUWorkers: 1, GPUImage: "missing.raw", WaitTimeout: time.Minute, GPUDriver: tc.driver}
+			createDistro, k8sVersion = tc.distro, tc.version
+			createConfigFile, createKernel, createIPFamily = "", "", "ipv4"
+			if tc.config != "" {
+				createConfigFile = filepath.Join(t.TempDir(), "cluster.yaml")
+				if err := os.WriteFile(createConfigFile, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := createClusterCmd.RunE(&cobra.Command{}, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RunE error = %v, want %q before missing tools/image errors", err, tc.want)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("invalid create modified host/cache files: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
 // TestCreateClusterCNIPrechecksFailFast covers the --cni mistakes users
 // most often make. Every one must fail before a VM boots or a download
 // starts, with a message that names the fix. PATH is emptied so the
@@ -241,6 +283,93 @@ func TestCreateClusterCNIPrechecksFailFast(t *testing.T) {
 				}
 				return nil
 			})
+		})
+	}
+}
+
+func TestVirtualizationKernelWarning(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    cluster.Config
+		kernel string
+		warn   bool
+	}{
+		{name: "default kernel", cfg: cluster.Config{Virtualization: true}, warn: true},
+		{name: "full kernel", cfg: cluster.Config{Virtualization: true}, kernel: "full"},
+		{name: "custom kernel path", cfg: cluster.Config{Virtualization: true}, kernel: "/tmp/Image"},
+		{name: "gpu cluster", cfg: cluster.Config{Virtualization: true, GPUWorkers: 1}},
+		{name: "virtualization off", cfg: cluster.Config{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := virtualizationKernelWarning(tc.cfg, tc.kernel)
+			if got := msg != ""; got != tc.warn {
+				t.Fatalf("warning = %q, want warning %v", msg, tc.warn)
+			}
+			if tc.warn && !strings.Contains(msg, "--kernel full") {
+				t.Fatalf("warning %q does not name --kernel full", msg)
+			}
+		})
+	}
+}
+
+func TestCreateClusterChecksNestedHostBeforeKernelResolution(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		gpuWorkers int
+		config     string
+		flag       string
+		wantProbe  bool
+	}{
+		{name: "ordinary flag", flag: "true", wantProbe: true},
+		{name: "GPU flag", gpuWorkers: 1, flag: "true", wantProbe: true},
+		{name: "config file", config: "virtualization: true\n", wantProbe: true},
+		{name: "explicit false overrides config", config: "virtualization: true\n", flag: "false"},
+		{name: "default disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCfg, oldConfigFile := createCfg, createConfigFile
+			oldKernel, oldIPFamily, oldDistro := createKernel, createIPFamily, createDistro
+			oldCheck := checkNestedVirtualization
+			t.Cleanup(func() {
+				createCfg, createConfigFile = oldCfg, oldConfigFile
+				createKernel, createIPFamily, createDistro = oldKernel, oldIPFamily, oldDistro
+				checkNestedVirtualization = oldCheck
+			})
+			dir := t.TempDir()
+			createCfg = cluster.Config{Name: "dev", GPUWorkers: tc.gpuWorkers, WaitTimeout: time.Minute}
+			createDistro, createIPFamily = "kubeadm", "ipv4"
+			createConfigFile = ""
+			// A nonexistent kernel proves a rejected host is checked before
+			// kernel resolution can download or reach the runtime.
+			createKernel = filepath.Join(dir, "missing-kernel")
+			if tc.gpuWorkers > 0 {
+				createKernel = ""
+			}
+			if tc.config != "" {
+				createConfigFile = filepath.Join(dir, "cluster.yaml")
+				if err := os.WriteFile(createConfigFile, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			command := &cobra.Command{}
+			command.Flags().BoolVar(&createCfg.Virtualization, "virtualization", false, "")
+			if tc.flag != "" {
+				if err := command.ParseFlags([]string{"--virtualization=" + tc.flag}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			unsupported := errors.New("nested host capability is unavailable")
+			checkNestedVirtualization = func() error { calls++; return unsupported }
+			err := createClusterCmd.RunE(command, nil)
+			if tc.wantProbe {
+				if calls != 1 || !errors.Is(err, unsupported) {
+					t.Fatalf("RunE = %v, host probe calls = %d, want rejection before kernel resolution", err, calls)
+				}
+			} else if calls != 0 || err == nil || !strings.Contains(err.Error(), "kernel file") {
+				t.Fatalf("RunE = %v, host probe calls = %d, want kernel resolution without a host check", err, calls)
+			}
 		})
 	}
 }

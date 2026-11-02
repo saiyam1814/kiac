@@ -205,17 +205,18 @@ func k3sAgentEnv(serverIP, token string) []string {
 func k3sServerRunOpts(cfg Config, nodeName, token string, dns []string) runtime.RunOpts {
 	entry, bootArgs := k3sBoot(cfg, k3sServerArgs(cfg, nodeName))
 	return runtime.RunOpts{
-		Name:       nodeName,
-		Image:      cfg.Image,
-		CPUs:       cfg.CPUs,
-		Memory:     cfg.CPMemory,
-		Env:        []string{"K3S_TOKEN=" + token},
-		Entrypoint: entry,
-		Kernel:     cfg.Kernel,
-		Args:       bootArgs,
-		DNS:        dns,
-		Mounts:     cfg.Mounts,
-		Publish:    publishForNode(cfg, nodeName),
+		Name:           nodeName,
+		Image:          cfg.Image,
+		CPUs:           cfg.CPUs,
+		Memory:         cfg.CPMemory,
+		Env:            []string{"K3S_TOKEN=" + token},
+		Entrypoint:     entry,
+		Kernel:         cfg.Kernel,
+		Args:           bootArgs,
+		DNS:            dns,
+		Mounts:         cfg.Mounts,
+		Publish:        publishForNode(cfg, nodeName),
+		Virtualization: cfg.Virtualization,
 	}
 }
 
@@ -223,16 +224,17 @@ func k3sServerRunOpts(cfg Config, nodeName, token string, dns []string) runtime.
 func k3sAgentRunOpts(cfg Config, nodeName string, env []string, dns []string) runtime.RunOpts {
 	entry, bootArgs := k3sBoot(cfg, k3sAgentArgs(cfg, nodeName))
 	return runtime.RunOpts{
-		Name:       nodeName,
-		Image:      cfg.Image,
-		CPUs:       cfg.CPUs,
-		Memory:     cfg.Memory,
-		Env:        env,
-		Entrypoint: entry,
-		Kernel:     cfg.Kernel,
-		Args:       bootArgs,
-		DNS:        dns,
-		Mounts:     cfg.Mounts,
+		Name:           nodeName,
+		Image:          cfg.Image,
+		CPUs:           cfg.CPUs,
+		Memory:         cfg.Memory,
+		Env:            env,
+		Entrypoint:     entry,
+		Kernel:         cfg.Kernel,
+		Args:           bootArgs,
+		DNS:            dns,
+		Mounts:         cfg.Mounts,
+		Virtualization: cfg.Virtualization,
 	}
 }
 

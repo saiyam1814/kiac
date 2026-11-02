@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -553,5 +554,72 @@ func TestExecStdinTimeoutDeliversInput(t *testing.T) {
 	data, err := os.ReadFile(got)
 	if err != nil || string(data) != "hello\n" {
 		t.Fatalf("stdin delivered = %q, %v", data, err)
+	}
+}
+
+func TestRunDetachedPassesVirtualization(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n--virtualization\n", argsFile)
+	client.NestedVirtualizationSupported = func() (bool, error) { return true, nil }
+
+	err := client.RunDetached(RunOpts{
+		Name:           "kiac-test-control-plane",
+		Image:          "example.invalid/node:v1",
+		Virtualization: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := readArgLines(t, argsFile)
+	want := []string{
+		"run", "-d", "--name", "kiac-test-control-plane", "--virtualization", "--cap-add", "ALL",
+		"example.invalid/node:v1",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("run args = %q, want %q", got, want)
+	}
+}
+
+func TestRunDetachedRejectsVirtualizationWithoutCLISupport(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args")
+	client := fakeContainerClient(t, "--cap-add\n", argsFile)
+	client.NestedVirtualizationSupported = func() (bool, error) { return true, nil }
+
+	err := client.RunDetached(RunOpts{
+		Name:           "kiac-test-control-plane",
+		Image:          "example.invalid/node:v1",
+		Virtualization: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--virtualization") {
+		t.Fatalf("RunDetached error = %v, want unsupported --virtualization", err)
+	}
+}
+
+func TestRunDetachedRequiresHostVirtualizationSupport(t *testing.T) {
+	for _, probeErr := range []error{nil, errors.New("native capability API failed")} {
+		t.Run(fmt.Sprint(probeErr), func(t *testing.T) {
+			argsFile := filepath.Join(t.TempDir(), "args")
+			client := fakeContainerClient(t, "--virtualization\n", argsFile)
+			client.NestedVirtualizationSupported = func() (bool, error) { return false, probeErr }
+			err := client.RunDetached(RunOpts{Name: "node", Image: "node-image", Virtualization: true})
+			if err == nil || !strings.Contains(err.Error(), "--virtualization") {
+				t.Fatalf("RunDetached error = %v, want host support rejection", err)
+			}
+			if _, err := os.Stat(argsFile); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("container was invoked despite unsupported or unknown host capability: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunDetachedWithoutVirtualizationSkipsHostProbe(t *testing.T) {
+	client := fakeContainerClient(t, "", filepath.Join(t.TempDir(), "args"))
+	client.NestedVirtualizationSupported = func() (bool, error) {
+		t.Fatal("ordinary node must not require nested virtualization")
+		return false, nil
+	}
+	if err := client.RunDetached(RunOpts{Name: "node", Image: "node-image"}); err != nil {
+		t.Fatal(err)
 	}
 }
