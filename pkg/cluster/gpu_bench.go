@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
 const (
@@ -84,10 +86,11 @@ func (m *Manager) RunGPUBenchmark(ctx context.Context, opts GPUBenchmarkOptions)
 	}
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	if _, err := m.GPUStatusForCluster(opts.Cluster); err != nil {
+	status, err := m.GPUStatusForCluster(opts.Cluster)
+	if err != nil {
 		return GPUBenchmarkReport{}, err
 	}
-	model, pinned, err := resolveGPUBenchmarkModel(opts.Model)
+	model, pinned, err := m.prepareGPUBenchmarkModel(status.Nodes, opts.Model)
 	if err != nil {
 		return GPUBenchmarkReport{}, err
 	}
@@ -119,6 +122,27 @@ func (m *Manager) RunGPUBenchmark(ctx context.Context, opts GPUBenchmarkOptions)
 	}
 	report.Kubernetes = measurement
 	return report, nil
+}
+
+// Validate durable VM sizing before downloading a model or running host work.
+// The 2 GiB Pod request leaves operating-system and driver headroom on 3 GiB VMs.
+func (m *Manager) prepareGPUBenchmarkModel(nodes []GPUNodeStatus, path string) (string, bool, error) {
+	if err := validateGPUBenchmarkTopology(nodes, m.krunkit.State); err != nil {
+		return "", false, err
+	}
+	return resolveGPUBenchmarkModel(path)
+}
+func validateGPUBenchmarkTopology(nodes []GPUNodeStatus, readState func(string) (runtime.KrunkitNodeState, error)) error {
+	for _, node := range nodes {
+		state, err := readState(node.Name)
+		if err != nil {
+			return fmt.Errorf("read benchmark GPU worker %s: %w", node.Name, err)
+		}
+		if state.GPU && state.CPUs >= 2 && state.MemoryMiB >= 3072 {
+			return nil
+		}
+	}
+	return fmt.Errorf("GPU benchmark requires at least one GPU worker with 2 vCPUs and 3 GiB RAM; create GPU workers with --cpus 2 --memory 3G (4G recommended)")
 }
 
 func resolveGPUBenchmarkModel(path string) (string, bool, error) {
@@ -356,6 +380,7 @@ metadata:
     %s: %s
 spec:
   activeDeadlineSeconds: %d
+  automountServiceAccountToken: false
   restartPolicy: Never
   runtimeClassName: nvidia
   nodeSelector:
@@ -377,7 +402,8 @@ spec:
           value: "0"
       resources:
         requests:
-          cpu: "2"
+          # Keep a two-vCPU worker schedulable alongside its GPU driver and probe.
+          cpu: "1"
           memory: 2Gi
           kiac.dev/gpu: "1"
         limits:

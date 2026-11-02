@@ -94,6 +94,9 @@ func (m *Manager) createKubeadmGPU(cfg Config) error {
 	if err := validateGPUNodeNames(cfg.Name, nodes); err != nil {
 		return err
 	}
+	if err := m.krunkit.CheckDiskHeadroom(len(nodes)); err != nil {
+		return err
+	}
 	if err := m.ensureGPUClusterAbsent(cfg.Name); err != nil {
 		return err
 	}

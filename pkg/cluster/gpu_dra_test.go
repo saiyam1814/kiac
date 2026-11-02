@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"bytes"
+	"debug/elf"
 	"strings"
 	"testing"
 )
@@ -69,5 +70,44 @@ func TestValidateGPUClusterConfigRejectsPublish(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "--publish is not supported") {
 		t.Fatalf("validation error = %v, want publish rejection", err)
+	}
+}
+
+func TestGPUAgentRemainsStaticAndNativeProbeIsSeparate(t *testing.T) {
+	for name, load := range map[string]func() ([]byte, error){"agent": gpuAgentBinary, "native-probe": gpuProbeBinary} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary, err := elf.NewFile(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer binary.Close()
+			if binary.Class != elf.ELFCLASS64 {
+				t.Fatalf("ELF class=%s", binary.Class)
+			}
+			if binary.Machine != elf.EM_AARCH64 {
+				t.Fatalf("machine=%s", binary.Machine)
+			}
+			interpreter := false
+			for _, program := range binary.Progs {
+				if program.Type == elf.PT_INTERP {
+					interpreter = true
+				}
+			}
+			libraries, err := binary.ImportedLibraries()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "agent" {
+				if interpreter || len(libraries) != 0 {
+					t.Fatalf("main agent must remain static: interpreter=%t libs=%v", interpreter, libraries)
+				}
+			} else if !interpreter || len(libraries) == 0 {
+				t.Fatal("separate native probe does not include expected loader dependency")
+			}
+		})
 	}
 }

@@ -19,6 +19,7 @@ type ExternalWorkerManager struct {
 	backend   runtime.NodeBackend
 	root      string
 	preflight func() error
+	headroom  func(int) error
 	image     func() (string, error)
 	artifacts func(string) (k3sGPUArtifacts, error)
 	owned     func(ExternalWorkerState) error
@@ -27,8 +28,8 @@ type ExternalWorkerManager struct {
 func NewExternalWorkerManager() *ExternalWorkerManager {
 	manager := NewManager()
 	m := &ExternalWorkerManager{manager: manager, backend: manager.krunkit,
-		preflight: manager.krunkit.Preflight,
-		image:     func() (string, error) { return ResolveGPUImage(DefaultGPUImage) }, artifacts: ensureK3sGPUArtifacts}
+		preflight: manager.krunkit.Preflight, headroom: manager.krunkit.CheckDiskHeadroom,
+		image: func() (string, error) { return ResolveGPUImage(DefaultGPUImage) }, artifacts: ensureK3sGPUArtifacts}
 	m.owned = func(s ExternalWorkerState) error {
 		state, err := manager.krunkit.State(s.VMName)
 		if err != nil {
@@ -51,6 +52,9 @@ func workerFailure(stage string) error {
 func (m *ExternalWorkerManager) Join(cfg ExternalWorkerConfig) (result ExternalWorkerState, retErr error) {
 	p, err := prepareExternalWorker(cfg)
 	if err != nil {
+		return result, err
+	}
+	if err := m.headroom(1); err != nil {
 		return result, err
 	}
 	unlock, err := m.lock()

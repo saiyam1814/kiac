@@ -204,7 +204,7 @@ func init() {
 	f.StringVar(&createConfigFile, "config", "", "cluster config YAML (see examples/cluster.yaml); flags set explicitly on the command line override file values")
 	f.StringVar(&createCfg.Name, "name", "dev", "cluster name")
 	f.IntVar(&createCfg.Workers, "workers", 0, "number of worker nodes (control plane is untainted when 0)")
-	f.IntVar(&createCfg.GPUWorkers, "gpu-workers", 0, "number of real Apple GPU worker VMs (alpha; moves the whole cluster to the krunkit backend)")
+	f.IntVar(&createCfg.GPUWorkers, "gpu-workers", 0, "number of real Apple GPU worker VMs (beta; moves the whole cluster to the krunkit backend)")
 	f.StringVar(&createCfg.GPUImage, "gpu-image", cluster.DefaultGPUImage, "GPU VM boot disk: fedora-44 (verified download) or a raw ARM64 disk path")
 	f.StringVar(&createCfg.GPUDiskSize, "gpu-disk-size", "20G", "writable disk size for each krunkit-backed node")
 	f.StringVar(&createCfg.GPUDriver, "gpu-resource-driver", "device-plugin", "Kubernetes GPU resource driver: device-plugin or dra")

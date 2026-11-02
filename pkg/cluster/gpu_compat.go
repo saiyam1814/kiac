@@ -353,3 +353,20 @@ func validNamespaceName(name string) bool {
 	}
 	return ValidName(name)
 }
+
+func (m *Manager) uploadGPUDriverBinaries(node string) error {
+	if err := m.uploadGPUAgent(node); err != nil {
+		return err
+	}
+	binary, err := gpuProbeBinary()
+	if err != nil {
+		return fmt.Errorf("reading embedded Vulkan probe: %w", err)
+	}
+	return m.rt.ExecStdinTimeout(node, 2*time.Minute, bytes.NewReader(binary), "sh", "-euc", `
+install -d -m 0755 /usr/local/libexec/kiac /var/lib/kubelet/plugins /var/lib/kubelet/plugins_registry /etc/cdi
+tmp="$(mktemp /usr/local/libexec/kiac/kiac-vulkan-probe.XXXXXX)"
+cat > "$tmp"
+chmod 0755 "$tmp"
+mv "$tmp" /usr/local/libexec/kiac/kiac-vulkan-probe
+`)
+}

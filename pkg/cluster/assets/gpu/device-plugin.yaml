@@ -26,33 +26,106 @@ spec:
           operator: Equal
           value: "true"
           effect: NoSchedule
+      automountServiceAccountToken: false
       containers:
         - name: device-plugin
-          image: ghcr.io/squat/generic-device-plugin@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff
+          image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           imagePullPolicy: IfNotPresent
-          args:
-            - --domain=kiac.dev
-            - --device
-            - '{"name":"gpu","groups":[{"count":1,"paths":[{"path":"/dev/dri/renderD128"},{"path":"/dev/dri/card0","optional":true}]}]}'
+          command: [/opt/kiac/kiac-gpu-agent]
+          args: [--mode=device-plugin]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
           securityContext:
             privileged: true
+            readOnlyRootFilesystem: true
           resources:
             requests:
               cpu: 10m
-              memory: 24Mi
+              memory: 32Mi
             limits:
-              memory: 96Mi
+              memory: 128Mi
+          readinessProbe:
+            exec:
+              command: [/opt/kiac/kiac-gpu-agent, --mode=health-check]
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 1
           volumeMounts:
+            - name: agent
+              mountPath: /opt/kiac/kiac-gpu-agent
+              readOnly: true
+            - name: health
+              mountPath: /run/kiac-gpu-health
+              readOnly: true
             - name: device-plugins
               mountPath: /var/lib/kubelet/device-plugins
-            - name: dev
-              mountPath: /dev
+            - name: dri
+              mountPath: /dev/dri
+        - name: health-probe
+          image: quay.io/slopezpa/fedora-vgpu-llama@sha256:f58a677fd617e5a6d0b7f558fd137d63a57aaac70293956ef09a16ec69e210d4
+          imagePullPolicy: IfNotPresent
+          command: [/opt/kiac/kiac-gpu-agent]
+          args: [--mode=health-watchdog, --probe-binary=/opt/kiac/kiac-vulkan-probe]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: MESA_SHADER_CACHE_DISABLE
+              value: "true"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: native-probe
+              mountPath: /opt/kiac/kiac-vulkan-probe
+              readOnly: true
+            - name: agent
+              mountPath: /opt/kiac/kiac-gpu-agent
+              readOnly: true
+            - name: dri
+              mountPath: /dev/dri
+            - name: health
+              mountPath: /run/kiac-gpu-health
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: native-probe
+          hostPath:
+            path: /usr/local/libexec/kiac/kiac-vulkan-probe
+            type: File
+        - name: health
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: agent
+          hostPath:
+            path: /usr/local/libexec/kiac/kiac-gpu-agent
+            type: File
         - name: device-plugins
           hostPath:
             path: /var/lib/kubelet/device-plugins
             type: Directory
-        - name: dev
+        - name: dri
           hostPath:
-            path: /dev
+            path: /dev/dri
             type: Directory

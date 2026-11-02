@@ -32,7 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
-    <a href="gpu.html">Apple GPU (alpha)</a>
+    <a href="gpu.html">Apple GPU (beta)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -75,7 +75,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--config</code></td><td></td><td>cluster config YAML (see <a href="config-file.html">Config file</a>); flags set explicitly on the command line override file values</td></tr>
     <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name (lowercase letters, digits, dashes)</td></tr>
     <tr><td><code>--workers</code></td><td><code>0</code></td><td>number of worker nodes (control plane is untainted when 0)</td></tr>
-    <tr><td><code>--gpu-workers</code></td><td><code>0</code></td><td>real Apple GPU workers (alpha); a positive value runs the complete cluster topology on krunkit while only <code>-gpu-N</code> nodes publish GPU inventory</td></tr>
+    <tr><td><code>--gpu-workers</code></td><td><code>0</code></td><td>real Apple GPU workers (beta); a positive value runs the complete cluster topology on krunkit while only <code>-gpu-N</code> nodes publish GPU inventory</td></tr>
     <tr><td><code>--gpu-image</code></td><td><code>fedora-44</code></td><td>verified GPU VM base-image alias, or a local raw disk path</td></tr>
     <tr><td><code>--gpu-disk-size</code></td><td><code>20G</code></td><td>persistent disk size for every krunkit-backed node in a GPU cluster</td></tr>
     <tr><td><code>--gpu-resource-driver</code></td><td><code>device-plugin</code></td><td><code>device-plugin</code>, or <code>dra</code> on Kubernetes 1.36+; see <a href="gpu.html">Apple GPU</a></td></tr>

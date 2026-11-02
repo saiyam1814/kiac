@@ -2,7 +2,7 @@ package cluster
 
 import _ "embed"
 
-// gpuDevicePluginManifest is rendered from squat/generic-device-plugin 0.2.0.
+// gpuDevicePluginManifest runs the Kiac agent with a bounded Vulkan health probe.
 // The image is pinned to its multi-architecture manifest digest and the
 // DaemonSet is restricted to Kiac's real Venus nodes.
 //

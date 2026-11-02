@@ -59,6 +59,13 @@ var gpuStatusCmd = &cobra.Command{
 		fmt.Printf("\nCluster %s (%s), %s via %s\n", report.Cluster, report.Distro, report.Resource, report.Driver)
 		for _, node := range report.Nodes {
 			detail := fmt.Sprintf("%s, GPU window %.1f GiB, api=%s", node.VMState, float64(node.MemoryMiB)/1024, node.KubernetesAPI)
+			detail += ", Vulkan transfer=" + node.Health
+			if !node.HealthCheckedAt.IsZero() {
+				detail += fmt.Sprintf(" (checked %s ago)", time.Since(node.HealthCheckedAt).Round(time.Second))
+			}
+			if node.Health != "healthy" && node.HealthMessage != "" {
+				detail += ": " + node.HealthMessage
+			}
 			ui.Check(node.RenderDevice && node.Schedulable, node.Name, detail)
 		}
 		compat := "disabled"

@@ -5,6 +5,8 @@ EDGE_PROXY_ASSET := pkg/cluster/assets/kiac-edge-proxy-linux-arm64.gz
 EDGE_PROXY_LDFLAGS := -s -w -buildid=
 GPU_AGENT_BIN := bin/kiac-gpu-agent-linux-arm64
 GPU_AGENT_ASSET := pkg/cluster/assets/kiac-gpu-agent-linux-arm64.gz
+GPU_PROBE_BIN := bin/kiac-vulkan-probe-linux-arm64
+GPU_PROBE_ASSET := pkg/cluster/assets/kiac-vulkan-probe-linux-arm64.gz
 GPU_AGENT_LDFLAGS := -s -w -buildid=
 ASSET_GZIP := go run ./internal/cmd/asset-gzip
 
@@ -30,6 +32,8 @@ gpu-agent-asset:
 	mkdir -p bin pkg/cluster/assets
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go -C internal/gpudriver build -buildvcs=false -trimpath -ldflags "$(GPU_AGENT_LDFLAGS)" -o ../../$(GPU_AGENT_BIN) .
 	$(ASSET_GZIP) $(GPU_AGENT_BIN) $(GPU_AGENT_ASSET)
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go -C internal/gpudriver build -buildvcs=false -trimpath -ldflags "$(GPU_AGENT_LDFLAGS)" -o ../../$(GPU_PROBE_BIN) ./cmd/kiac-vulkan-probe
+	$(ASSET_GZIP) $(GPU_PROBE_BIN) $(GPU_PROBE_ASSET)
 
 gpu-agent-check:
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
@@ -37,6 +41,11 @@ gpu-agent-check:
 	$(ASSET_GZIP) "$$tmp/kiac-gpu-agent" "$$tmp/kiac-gpu-agent.gz"; \
 	cmp -s "$$tmp/kiac-gpu-agent.gz" $(GPU_AGENT_ASSET) || { \
 		echo "$(GPU_AGENT_ASSET) is stale; run: make gpu-agent-asset"; exit 1; \
+	}; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go -C internal/gpudriver build -buildvcs=false -trimpath -ldflags "$(GPU_AGENT_LDFLAGS)" -o "$$tmp/kiac-vulkan-probe" ./cmd/kiac-vulkan-probe; \
+	$(ASSET_GZIP) "$$tmp/kiac-vulkan-probe" "$$tmp/kiac-vulkan-probe.gz"; \
+	cmp -s "$$tmp/kiac-vulkan-probe.gz" $(GPU_PROBE_ASSET) || { \
+		echo "$(GPU_PROBE_ASSET) is stale; run: make gpu-agent-asset"; exit 1; \
 	}
 
 gpu-agent-test:

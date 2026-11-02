@@ -22,7 +22,7 @@ distro: kubeadm
 # workers the control plane is untainted and runs your pods. Default: 0.
 workers: 3
 
-# Real Apple GPU workers are alpha and require krunkit plus vmnet-helper.
+# Real Apple GPU workers are beta and require krunkit plus vmnet-helper.
 # Setting gpuWorkers above zero moves every VM in this cluster to krunkit so
 # all nodes share one reliable network; only -gpu-N nodes publish schedulable
 # GPU inventory and Kiac mounts /dev/dri only into allocated GPU pods. See

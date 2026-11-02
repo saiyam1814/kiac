@@ -57,12 +57,16 @@ type options struct {
 	listenAddress     string
 	tlsCert           string
 	tlsKey            string
+	healthFile        string
+	probeBinary       string
 }
 
 type driver struct {
-	nodeName  string
-	memoryMiB int
-	cancel    context.CancelCauseFunc
+	nodeName     string
+	memoryMiB    int
+	cancel       context.CancelCauseFunc
+	health       *healthMonitor
+	renderDevice string
 }
 
 func main() {
@@ -74,18 +78,20 @@ func main() {
 
 func run() error {
 	opts := options{}
-	flag.StringVar(&opts.mode, "mode", "dra", "agent mode: dra or webhook")
+	flag.StringVar(&opts.mode, "mode", "dra", "agent mode: dra, device-plugin, health-watchdog, health-check, health-status, or webhook")
 	flag.StringVar(&opts.nodeName, "node-name", os.Getenv("NODE_NAME"), "Kubernetes node name")
 	flag.StringVar(&opts.podUID, "pod-uid", os.Getenv("POD_UID"), "driver pod UID for rolling updates")
 	flag.StringVar(&opts.cdiRoot, "cdi-root", defaultCDIRoot, "host CDI specification directory")
 	flag.StringVar(&opts.registrarDir, "registrar-directory", kubeletplugin.KubeletRegistryDir, "kubelet plugin registry directory")
-	flag.StringVar(&opts.pluginsDir, "plugins-directory", kubeletplugin.KubeletPluginsDir, "kubelet plugin data directory")
+	flag.StringVar(&opts.pluginsDir, "plugins-directory", "", "kubelet plugin data directory (mode-specific default)")
 	flag.StringVar(&opts.renderDevice, "render-device", "/dev/dri/renderD128", "Venus render device")
 	flag.StringVar(&opts.optionalCard, "card-device", "/dev/dri/card0", "optional DRM card device")
 	flag.IntVar(&opts.memoryOverrideMiB, "memory-mib", 0, "override detected GPU window in MiB (tests only)")
 	flag.StringVar(&opts.listenAddress, "listen", ":9443", "webhook listen address")
 	flag.StringVar(&opts.tlsCert, "tls-cert", "", "webhook TLS certificate")
 	flag.StringVar(&opts.tlsKey, "tls-key", "", "webhook TLS private key")
+	flag.StringVar(&opts.healthFile, "health-file", defaultHealthFile, "shared Vulkan health report")
+	flag.StringVar(&opts.probeBinary, "probe-binary", "/opt/kiac/kiac-vulkan-probe", "native Vulkan probe executable (health watchdog only)")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flag.Args())
@@ -93,14 +99,51 @@ func run() error {
 	if opts.mode == "webhook" {
 		return runWebhook(opts)
 	}
-	if opts.mode != "dra" {
-		return fmt.Errorf("unknown --mode %q (supported: dra, webhook)", opts.mode)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	switch opts.mode {
+	case "health-watchdog":
+		return runHealthWatchdog(ctx, opts)
+	case "health-check", "health-status":
+		bootID, err := currentBootID()
+		if err != nil {
+			return err
+		}
+		state, err := readHealthReport(opts.healthFile, opts.podUID, opts.nodeName, bootID, time.Now())
+		if opts.mode == "health-status" {
+			return json.NewEncoder(os.Stdout).Encode(summarizeHealth(state, err))
+		}
+		if err != nil {
+			return err
+		}
+		if !state.healthy {
+			return fmt.Errorf("Vulkan probe unhealthy: %s", state.message)
+		}
+		return nil
+	case "dra", "device-plugin":
+	default:
+		return fmt.Errorf("unknown --mode %q", opts.mode)
 	}
 	if opts.nodeName == "" {
 		return errors.New("--node-name is required")
 	}
-	if err := requireCharacterDevice(opts.renderDevice); err != nil {
-		return fmt.Errorf("real Venus render device: %w", err)
+	if opts.podUID == "" {
+		return errors.New("--pod-uid is required")
+	}
+	if opts.pluginsDir == "" {
+		opts.pluginsDir = kubeletplugin.KubeletPluginsDir
+		if opts.mode == "device-plugin" {
+			opts.pluginsDir = "/var/lib/kubelet/device-plugins"
+		}
+	}
+	bootID, err := currentBootID()
+	if err != nil {
+		return err
+	}
+	health := newHealthMonitor(opts.healthFile, opts.podUID, opts.nodeName, bootID)
+	go health.run(ctx)
+	if opts.mode == "device-plugin" {
+		return runDevicePlugin(ctx, opts, health)
 	}
 
 	config, err := rest.InClusterConfig()
@@ -112,8 +155,6 @@ func run() error {
 		return fmt.Errorf("create Kubernetes client: %w", err)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	ctx, cancel := context.WithCancelCause(klog.NewContext(ctx, klog.Background()))
 	defer cancel(nil)
 
@@ -136,7 +177,7 @@ func run() error {
 		return fmt.Errorf("create kubelet plugin directory: %w", err)
 	}
 
-	drv := &driver{nodeName: opts.nodeName, memoryMiB: memoryMiB, cancel: cancel}
+	drv := &driver{nodeName: opts.nodeName, memoryMiB: memoryMiB, cancel: cancel, health: health, renderDevice: opts.renderDevice}
 	helper, err := kubeletplugin.Start(ctx, drv,
 		kubeletplugin.KubeClient(client),
 		kubeletplugin.NodeName(opts.nodeName),
@@ -144,7 +185,7 @@ func run() error {
 		kubeletplugin.RegistrarDirectoryPath(opts.registrarDir),
 		kubeletplugin.PluginDataDirectoryPath(pluginDataDir),
 		kubeletplugin.RollingUpdate(types.UID(opts.podUID)),
-		kubeletplugin.HealthService(false),
+		kubeletplugin.HealthService(true),
 		kubeletplugin.CDIDirectory(opts.cdiRoot),
 		kubeletplugin.EnableDeviceMetadata(true, []schema.GroupVersion{metadatav1beta1.SchemeGroupVersion}),
 	)
@@ -152,10 +193,38 @@ func run() error {
 		return fmt.Errorf("start kubelet DRA plugin: %w", err)
 	}
 	defer helper.Stop()
+	applyResourceHealth(&resources, false)
 	if err := helper.PublishResources(ctx, resources); err != nil {
 		return fmt.Errorf("publish GPU resources: %w", err)
 	}
 
+	go func() {
+		previous := false
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			state, _ := health.snapshot()
+			if state.healthy == previous {
+				continue
+			}
+			updated, err := driverResources(opts.nodeName, memoryMiB)
+			if err != nil {
+				cancel(err)
+				return
+			}
+			applyResourceHealth(&updated, state.healthy)
+			if err := helper.PublishResources(ctx, updated); err != nil {
+				klog.FromContext(ctx).Error(err, "publish GPU health transition")
+				continue
+			}
+			previous = state.healthy
+		}
+	}()
 	klog.FromContext(ctx).Info("published real Apple GPU", "node", opts.nodeName, "driver", driverName, "memoryMiB", memoryMiB)
 	<-ctx.Done()
 	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) {
@@ -310,6 +379,16 @@ func (d *driver) PrepareResourceClaims(_ context.Context, claims []*resourceapi.
 	results := make(map[types.UID]kubeletplugin.PrepareResult, len(claims))
 	for _, claim := range claims {
 		prepared := kubeletplugin.PrepareResult{}
+		if err := d.health.requireHealthy(); err != nil {
+			prepared.Err = err
+			results[claim.UID] = prepared
+			continue
+		}
+		if err := requireCharacterDevice(d.renderDevice); err != nil {
+			prepared.Err = fmt.Errorf("configured Venus render device is unavailable: %w", err)
+			results[claim.UID] = prepared
+			continue
+		}
 		if claim.Status.Allocation == nil {
 			prepared.Err = errors.New("resource claim is not allocated")
 			results[claim.UID] = prepared
@@ -347,10 +426,6 @@ func (*driver) UnprepareResourceClaims(_ context.Context, claims []kubeletplugin
 		results[claim.UID] = nil
 	}
 	return results, nil
-}
-
-func (*driver) WatchHealthStatus(context.Context, chan<- kubeletplugin.DeviceHealthReport) error {
-	return kubeletplugin.ErrHealthNotSupported
 }
 
 func (d *driver) HandleError(ctx context.Context, err error, msg string) {
@@ -573,4 +648,26 @@ func toleratesGPUNode(tolerations []corev1.Toleration) bool {
 		}
 	}
 	return false
+}
+
+// Preserve device identity/capacity while preventing new allocations on failure.
+func applyResourceHealth(resources *resourceslice.DriverResources, healthy bool) {
+	for name, pool := range resources.Pools {
+		for i := range pool.Slices {
+			for j := range pool.Slices[i].Devices {
+				device := &pool.Slices[i].Devices[j]
+				retained := device.Taints[:0]
+				for _, taint := range device.Taints {
+					if taint.Key != healthTaintKey {
+						retained = append(retained, taint)
+					}
+				}
+				device.Taints = retained
+				if !healthy {
+					device.Taints = append(device.Taints, resourceapi.DeviceTaint{Key: healthTaintKey, Effect: resourceapi.DeviceTaintEffectNoSchedule})
+				}
+			}
+		}
+		resources.Pools[name] = pool
+	}
 }

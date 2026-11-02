@@ -42,9 +42,9 @@ func newGPUInspectCommand() *cobra.Command {
 func printGPUInspection(out io.Writer, report cluster.GPUInspection) error {
 	fmt.Fprintf(out, "Cluster %s (%s), %s via %s\n", report.Status.Cluster, report.Status.Distro, report.Status.Resource, report.Status.Driver)
 	writer := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(writer, "\nNODE\tSTATE\tWINDOW GiB\tDRIVER READY\tINVENTORY SCHEDULABLE")
+	fmt.Fprintln(writer, "\nNODE\tSTATE\tWINDOW GiB\tDRIVER READY\tVULKAN TRANSFER\tINVENTORY SCHEDULABLE")
 	for _, node := range report.Status.Nodes {
-		fmt.Fprintf(writer, "%s\t%s\t%.1f\t%t\t%t\n", node.Name, node.VMState, float64(node.MemoryMiB)/1024, node.DriverReady, node.Schedulable)
+		fmt.Fprintf(writer, "%s\t%s\t%.1f\t%t\t%s\t%t\n", node.Name, node.VMState, float64(node.MemoryMiB)/1024, node.DriverReady, node.Health, node.Schedulable)
 	}
 	if len(report.Devices) > 0 {
 		fmt.Fprintln(writer, "\nPOOL / DEVICE\tCAPACITY\tRESERVED\tUNRESERVED (ACCOUNTING)")

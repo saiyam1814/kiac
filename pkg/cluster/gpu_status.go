@@ -10,14 +10,18 @@ import (
 
 // GPUNodeStatus is the real host/guest and Kubernetes view of one GPU node.
 type GPUNodeStatus struct {
-	Name          string `json:"name"`
-	VMState       string `json:"vmState"`
-	MemoryMiB     int    `json:"memoryMiB"`
-	RenderDevice  bool   `json:"renderDevice"`
-	KubernetesAPI string `json:"api,omitempty"`
-	DriverReady   bool   `json:"driverReady"`
-	ResourceSlice bool   `json:"resourceSlice,omitempty"`
-	Schedulable   bool   `json:"schedulable"`
+	Name            string    `json:"name"`
+	VMState         string    `json:"vmState"`
+	MemoryMiB       int       `json:"memoryMiB"`
+	RenderDevice    bool      `json:"renderDevice"`
+	KubernetesAPI   string    `json:"api,omitempty"`
+	DriverReady     bool      `json:"driverReady"`
+	Health          string    `json:"health"`
+	HealthScope     string    `json:"healthScope,omitempty"`
+	HealthMessage   string    `json:"healthMessage,omitempty"`
+	HealthCheckedAt time.Time `json:"healthCheckedAt,omitempty"`
+	ResourceSlice   bool      `json:"resourceSlice,omitempty"`
+	Schedulable     bool      `json:"schedulable"`
 }
 
 // GPUStatus is returned by `kiac gpu status`.
@@ -67,6 +71,10 @@ func (m *Manager) GPUStatusForCluster(name string) (GPUStatus, error) {
 	if err != nil {
 		return GPUStatus{}, err
 	}
+	healthNodes, err := m.gpuDriverHealthNodes(cp, distro, report.Driver, 10*time.Second)
+	if err != nil {
+		return GPUStatus{}, err
+	}
 	draSlices := map[string]bool{}
 	if report.Driver == "dra" {
 		draSlices, err = m.gpuDRAReadyNodes(cp, distro)
@@ -95,7 +103,13 @@ func (m *Manager) GPUStatusForCluster(name string) (GPUStatus, error) {
 		if err != nil {
 			return GPUStatus{}, err
 		}
-		nodeStatus := GPUNodeStatus{Name: info.Name, VMState: info.Status, MemoryMiB: state.GPUMemoryMiB}
+		nodeStatus := GPUNodeStatus{Name: info.Name, VMState: info.Status, MemoryMiB: state.GPUMemoryMiB, Health: "unknown"}
+		if health, ok := healthNodes[info.Name]; ok {
+			nodeStatus.Health = health.State
+			nodeStatus.HealthScope = health.Scope
+			nodeStatus.HealthMessage = health.Message
+			nodeStatus.HealthCheckedAt = health.CheckedAt
+		}
 		if strings.EqualFold(info.Status, "running") {
 			nodeStatus.RenderDevice = m.renderDeviceExists(info.Name)
 		}
@@ -130,7 +144,7 @@ func gpuNodeSchedulable(driver string, status GPUNodeStatus, node kubeNode) bool
 	inventoryReady := status.RenderDevice &&
 		status.KubernetesAPI == "venus" &&
 		node.Metadata.Labels[gpuResourceDomain+"/gpu.present"] == "true"
-	if !inventoryReady || !status.DriverReady {
+	if !inventoryReady || !status.DriverReady || status.Health != "healthy" {
 		return false
 	}
 	if driver == "dra" {
@@ -141,6 +155,11 @@ func gpuNodeSchedulable(driver string, status GPUNodeStatus, node kubeNode) bool
 
 type gpuPodList struct {
 	Items []struct {
+		Metadata struct {
+			Name              string `json:"name"`
+			CreationTimestamp string `json:"creationTimestamp"`
+			DeletionTimestamp string `json:"deletionTimestamp"`
+		} `json:"metadata"`
 		Spec struct {
 			NodeName string `json:"nodeName"`
 		} `json:"spec"`
@@ -191,7 +210,7 @@ func (m *Manager) gpuDRAReadyNodes(cp, distro string) (map[string]bool, error) {
 	}
 	ready := map[string]bool{}
 	for _, item := range list.Items {
-		if item.Spec.Driver == "gpu.kiac.dev" && len(item.Spec.Devices) == 1 && item.Spec.Devices[0].Name == "venus-0" {
+		if item.Spec.Driver == "gpu.kiac.dev" && len(item.Spec.Devices) == 1 && item.Spec.Devices[0].Name == "venus-0" && gpuSliceDeviceSchedulable(item.Spec.Devices[0].Taints) {
 			ready[item.Spec.NodeName] = true
 		}
 	}
@@ -201,4 +220,63 @@ func (m *Manager) gpuDRAReadyNodes(cp, distro string) (map[string]bool, error) {
 func (m *Manager) renderDeviceExists(node string) bool {
 	_, err := m.rt.ExecTimeout(node, 10*time.Second, "test", "-c", "/dev/dri/renderD128")
 	return err == nil
+}
+
+type gpuLiveHealth struct {
+	State     string    `json:"state"`
+	Scope     string    `json:"scope"`
+	CheckedAt time.Time `json:"checkedAt"`
+	Message   string    `json:"message"`
+}
+
+func parseGPULiveHealth(raw string, now time.Time) gpuLiveHealth {
+	var health gpuLiveHealth
+	if err := json.Unmarshal([]byte(raw), &health); err != nil {
+		return gpuLiveHealth{State: "unknown", Message: "cannot parse live Vulkan health"}
+	}
+	if health.Scope != "vulkan-transfer" || (health.State != "healthy" && health.State != "unhealthy" && health.State != "unknown") {
+		return gpuLiveHealth{State: "unknown", Message: "unsupported GPU health report"}
+	}
+	if health.State == "healthy" && (health.CheckedAt.IsZero() || now.Sub(health.CheckedAt) > 20*time.Second || health.CheckedAt.After(now.Add(time.Second))) {
+		health.State = "unknown"
+		health.Message = "Vulkan health report is stale"
+	}
+	return health
+}
+func (m *Manager) gpuDriverHealthNodes(cp, distro, driver string, timeout time.Duration) (map[string]gpuLiveHealth, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	result := map[string]gpuLiveHealth{}
+	if driver == "unknown" {
+		return result, nil
+	}
+	app, container := "kiac-gpu-device-plugin", "device-plugin"
+	if driver == "dra" {
+		app, container = "kiac-gpu-dra", "agent"
+	}
+	out, err := m.diagnosticKubectl(cp, distro, timeout, "get", "pods", "-n", "kube-system", "-l", "app.kubernetes.io/name="+app, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+	var pods gpuPodList
+	if err := json.Unmarshal([]byte(out), &pods); err != nil {
+		return nil, fmt.Errorf("parse GPU health pods: %w", err)
+	}
+	// Prefer the newest non-terminating driver Pod during a rolling update.
+	sort.Slice(pods.Items, func(i, j int) bool {
+		return pods.Items[i].Metadata.CreationTimestamp < pods.Items[j].Metadata.CreationTimestamp
+	})
+	for _, pod := range pods.Items {
+		if pod.Metadata.DeletionTimestamp != "" || pod.Metadata.Name == "" || pod.Spec.NodeName == "" {
+			continue
+		}
+		raw, err := m.diagnosticKubectl(cp, distro, timeout, "exec", "-n", "kube-system", pod.Metadata.Name, "-c", container, "--", "/opt/kiac/kiac-gpu-agent", "--mode=health-status")
+		if err != nil {
+			result[pod.Spec.NodeName] = gpuLiveHealth{State: "unknown", Message: "cannot read live Vulkan health: " + compactError(err)}
+			continue
+		}
+		result[pod.Spec.NodeName] = parseGPULiveHealth(raw, time.Now())
+	}
+	return result, nil
 }

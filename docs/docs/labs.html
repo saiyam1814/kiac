@@ -32,7 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
-    <a href="gpu.html">Apple GPU (alpha)</a>
+    <a href="gpu.html">Apple GPU (beta)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -90,7 +90,7 @@
 
   <h2 id="gpu">Real Apple GPU and inference</h2>
   <p>Create a multi-node krunkit-backed cluster, prove that Vulkan names the real Venus device, allocate GPU memory through Kubernetes DRA, run a pinned TinyLlama inference server behind a LoadBalancer, and compare its llama.cpp throughput with native Metal. The lab also exercises namespace-scoped compatibility for legacy <code>nvidia.com/gpu</code> manifests without claiming CUDA support.</p>
-  <div class="warn"><b>Alpha and explicitly not CUDA</b>
+  <div class="warn"><b>Beta and explicitly not CUDA</b>
   The pod API is Mesa Venus/Vulkan. CUDA, NVML, <code>nvidia-smi</code>, Metal, and MLX are unavailable inside the Linux guest.</div>
   <pre><code>kiac gpu doctor
 kiac create cluster --config examples/gpu-cluster.yaml

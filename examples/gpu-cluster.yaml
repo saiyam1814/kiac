@@ -3,7 +3,7 @@
 #   kiac gpu doctor
 #   kiac create cluster --config examples/gpu-cluster.yaml
 #
-# GPU mode is alpha. It uses krunkit for every VM in this cluster so all nodes
+# GPU mode is beta. It uses krunkit for every VM in this cluster so all nodes
 # share one reliable network. Only gpuWorkers publish GPU labels, a taint, and
 # schedulable kiac.dev/gpu inventory; Kiac mounts /dev/dri only into GPU pods.
 name: gpu-lab
