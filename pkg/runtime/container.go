@@ -15,6 +15,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	utilversion "k8s.io/apimachinery/pkg/util/version"
+)
+
+const (
+	// MinimumNodeRuntimeVersion includes the pinned-digest verification fix.
+	MinimumNodeRuntimeVersion     = "1.6.0"
+	RecommendedNodeRuntimeVersion = "1.6.1"
 )
 
 // Client wraps the apple/container CLI binary.
@@ -103,7 +111,7 @@ func (c *Client) Version() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m := regexp.MustCompile(`(\d+\.\d+\.\d+)`).FindStringSubmatch(out)
+	m := regexp.MustCompile(`(?:^|\s)v?(\d+\.\d+\.\d+[^\s()]*)`).FindStringSubmatch(out)
 	if m == nil {
 		return strings.TrimSpace(out), nil
 	}
@@ -186,8 +194,7 @@ func (c *Client) RunDetached(o RunOpts) error {
 	// container 1.2.0 began applying the OCI default masked/read-only
 	// paths, which make /proc/sys and other paths required by Kubernetes
 	// node images unusable. Version 1.2.1 added these opt-out flags. Probe
-	// the CLI instead of version-gating so older releases remain usable
-	// and future-compatible implementations get the correct node setup.
+	// the CLI so the node setup follows the runtime's supported options.
 	if c.supportsSecurityPathOverrides() {
 		args = append(args, "--masked-path", "NONE", "--read-only-path", "NONE")
 	}
@@ -248,12 +255,16 @@ func (c *Client) runHelpOutput() string {
 	return c.runHelp
 }
 
-// ValidateNodeRuntimeVersion rejects releases that cannot boot Kubernetes
-// node images and offer no CLI escape hatch. container 1.2.1 introduced
-// --masked-path/--read-only-path, so only 1.2.0 is intrinsically broken.
+// ValidateNodeRuntimeVersion requires the digest-verification fix shipped in
+// container 1.6.0. Older releases can silently pull different image content
+// from a registry despite Kiac's pinned digest (CVE-2026-113957).
 func ValidateNodeRuntimeVersion(version string) error {
-	if strings.TrimPrefix(strings.TrimSpace(version), "v") == "1.2.0" {
-		return fmt.Errorf("apple/container 1.2.0 cannot boot Kubernetes node images because required OCI paths are read-only; upgrade to apple/container 1.2.1 or newer")
+	parsed, err := utilversion.ParseSemantic(strings.TrimSpace(version))
+	if err != nil {
+		return fmt.Errorf("cannot verify apple/container version %q; install apple/container %s or newer (%s recommended) from https://github.com/apple/container/releases", version, MinimumNodeRuntimeVersion, RecommendedNodeRuntimeVersion)
+	}
+	if !parsed.AtLeast(utilversion.MustParseSemantic(MinimumNodeRuntimeVersion)) {
+		return fmt.Errorf("apple/container %s does not reliably verify pinned image digests (CVE-2026-113957); upgrade to apple/container %s or newer (%s recommended) before creating or resuming ordinary clusters: https://github.com/apple/container/releases", version, MinimumNodeRuntimeVersion, RecommendedNodeRuntimeVersion)
 	}
 	return nil
 }

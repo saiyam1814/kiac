@@ -99,10 +99,10 @@ Containers are great for packaging software, and kiac depends on them. The point
 
 - An Apple silicon Mac
 - macOS 26+ for multi-node clusters (single-node works on macOS 15, with limitations)
-- [apple/container](https://github.com/apple/container/releases) 1.0.0+ (1.4.1 recommended; 1.2.0 is incompatible)
+- [apple/container](https://github.com/apple/container/releases) 1.6.0+ for ordinary clusters (1.6.1 recommended; earlier releases do not reliably verify pinned image digests)
 - `kubectl`
 
-GPU clusters additionally require [krunkit](https://github.com/libkrun/krunkit) 1.3.2+ and [vmnet-helper](https://github.com/nirs/vmnet-helper) 0.13.0+. These are loaded only when `--gpu-workers` is used, so ordinary cluster startup and resource use are unchanged.
+GPU clusters use a separate backend and do not require apple/container. They require [krunkit](https://github.com/libkrun/krunkit) 1.3.2+ and [vmnet-helper](https://github.com/nirs/vmnet-helper) 0.13.0+. These are loaded only when `--gpu-workers` is used, so ordinary cluster startup and resource use are unchanged.
 
 ### Install
 

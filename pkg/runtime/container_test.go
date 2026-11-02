@@ -474,13 +474,43 @@ func TestSystemStartSelectsKernelInstallMode(t *testing.T) {
 }
 
 func TestValidateNodeRuntimeVersion(t *testing.T) {
-	for _, version := range []string{"0.8.0", "1.0.0", "1.1.0", "1.2.1", "1.2.2", "2.0.0"} {
+	for _, version := range []string{"1.6.0", "v1.6.0", " 1.6.1 ", "1.6.0+build.1", "1.7.0", "2.0.0"} {
 		if err := ValidateNodeRuntimeVersion(version); err != nil {
 			t.Errorf("ValidateNodeRuntimeVersion(%q): %v", version, err)
 		}
 	}
-	if err := ValidateNodeRuntimeVersion("v1.2.0"); err == nil || !strings.Contains(err.Error(), "1.2.1") {
-		t.Fatalf("ValidateNodeRuntimeVersion(1.2.0) = %v, want upgrade error", err)
+	for _, version := range []string{"0.8.0", "1.0.0", "v1.2.0", "1.2.1", "1.4.1", "1.5.99", "1.6.0-rc.1"} {
+		if err := ValidateNodeRuntimeVersion(version); err == nil || !strings.Contains(err.Error(), "CVE-2026-113957") || !strings.Contains(err.Error(), MinimumNodeRuntimeVersion) {
+			t.Errorf("ValidateNodeRuntimeVersion(%q) = %v, want security upgrade error", version, err)
+		}
+	}
+	for _, version := range []string{"", "unknown", "1.6", "1.6.0-", "01.6.0", "1.6.0.1", "1.6.0 trailing"} {
+		if err := ValidateNodeRuntimeVersion(version); err == nil || !strings.Contains(err.Error(), "cannot verify") {
+			t.Errorf("ValidateNodeRuntimeVersion(%q) = %v, want unknown-version error", version, err)
+		}
+	}
+}
+
+func TestContainerVersionPreservesPrereleaseForSecurityCheck(t *testing.T) {
+	for _, tc := range []struct{ output, want string }{
+		{"container CLI version 1.6.0 (build: abcdef)", "1.6.0"},
+		{"container CLI version v1.6.1", "1.6.1"},
+		{"container CLI version 1.6.0-rc.1 (build: abcdef)", "1.6.0-rc.1"},
+		{"container CLI version 1.6.0+local.1", "1.6.0+local.1"},
+		{"container CLI version 1.6.0-", "1.6.0-"},
+		{"unknown", "unknown"},
+	} {
+		t.Run(tc.output, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "container")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$KIAC_TEST_VERSION_OUTPUT\"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("KIAC_TEST_VERSION_OUTPUT", tc.output)
+			got, err := (&Client{Bin: bin}).Version()
+			if err != nil || got != tc.want {
+				t.Fatalf("Version() = %q, %v; want %q", got, err, tc.want)
+			}
+		})
 	}
 }
 
