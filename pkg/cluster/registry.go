@@ -97,9 +97,10 @@ func (cfg *Config) PrepareRegistryCAs() error {
 		if cfg.Distro == "k3s" {
 			for _, mount := range cfg.Mounts {
 				target := path.Clean(mount.Target)
-				const configDir = "/etc/rancher/k3s"
-				if target == "/" || target == configDir || strings.HasPrefix(target, configDir+"/") || strings.HasPrefix(configDir, target+"/") {
-					return fmt.Errorf("--registry-ca cannot be combined with a K3s mount at %q; Kiac must manage /etc/rancher/k3s and its registry configuration", mount.Target)
+				for _, configDir := range []string{"/etc/rancher/k3s", "/var/lib/rancher/k3s/agent/etc/containerd"} {
+					if target == "/" || target == configDir || strings.HasPrefix(target, configDir+"/") || strings.HasPrefix(configDir, target+"/") {
+						return fmt.Errorf("--registry-ca cannot be combined with a K3s mount at %q; Kiac must manage %s", mount.Target, configDir)
+					}
 				}
 			}
 		}
@@ -110,7 +111,7 @@ func (cfg *Config) PrepareRegistryCAs() error {
 					continue
 				}
 				switch strings.TrimLeft(name, "-") {
-				case "private-registry", "container-runtime-endpoint", "image-service-endpoint", "docker", "config", "c":
+				case "private-registry", "container-runtime-endpoint", "image-service-endpoint", "docker", "config", "c", "data-dir", "d", "rootless":
 					return fmt.Errorf("--registry-ca cannot be combined with K3s %s; Kiac must manage the registry configuration and built-in runtime", name)
 				}
 			}
@@ -170,13 +171,19 @@ func (cfg *Config) PrepareRegistryCAs() error {
 
 const registryReadyPath = "/etc/rancher/k3s/.kiac-registry-ready"
 
-// K3s automatically reads its default config and YAML drop-ins even when no
-// config flag was supplied. They can redirect registry/runtime settings away
-// from the files below, so reject them before installing any trust or opening
-// the first-boot gate. Include dangling symlinks instead of ignoring them.
+// K3s automatically reads its default config, YAML drop-ins, and containerd
+// templates. They can redirect registry/runtime settings away from the files
+// below, so reject them before installing trust or opening the first-boot gate.
+// Include dangling symlinks instead of ignoring them.
 const k3sRegistryConfigPreconditions = `for config in /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml; do
   if [ -e "$config" ] || [ -L "$config" ]; then
     echo 'existing K3s config.yaml or YAML drop-in conflicts with --registry-ca; Kiac must manage the registry configuration and built-in runtime' >&2
+    exit 1
+  fi
+done
+for template in /var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl; do
+  if [ -e "$template" ] || [ -L "$template" ]; then
+    echo 'existing K3s containerd template conflicts with --registry-ca; Kiac must manage the registry configuration and built-in runtime' >&2
     exit 1
   fi
 done

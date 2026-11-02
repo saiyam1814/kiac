@@ -320,7 +320,7 @@ func TestRegistryContainerdDumpSeparatesWarningsAndKeepsErrors(t *testing.T) {
 }
 
 func TestRegistryRejectsK3sRuntimeOverrides(t *testing.T) {
-	for _, arg := range []string{"--private-registry=/other.yaml", "-private-registry", "--container-runtime-endpoint=unix:///other.sock", "-image-service-endpoint", "--docker", "--config=/other.yaml", "-c"} {
+	for _, arg := range []string{"--private-registry=/other.yaml", "-private-registry", "--container-runtime-endpoint=unix:///other.sock", "-image-service-endpoint", "--docker", "--config=/other.yaml", "-c", "--data-dir=/other", "-data-dir", "-d=/other", "-d", "--rootless", "--rootless=true"} {
 		for _, server := range []bool{true, false} {
 			cfg := registryTestConfig(t)
 			if server {
@@ -453,6 +453,9 @@ func TestRegistryK3sRejectsConfigurationMountsBeforeProvisioning(t *testing.T) {
 		"/", "/etc", "/etc/", "/etc/rancher", "/etc/rancher/k3s",
 		"/etc/rancher/k3s/config.yaml.d", "/etc/rancher/k3s/data",
 		"/etc/rancher/k3s/../k3s/config.yaml.d", "//etc//rancher/k3s/",
+		"/var", "/var/lib", "/var/lib/rancher/k3s", "/var/lib/rancher/k3s/agent/etc",
+		"/var/lib/rancher/k3s/agent/etc/containerd", "/var/lib/rancher/k3s/agent/etc/containerd/templates",
+		"/var/lib/rancher/k3s/agent/etc/../etc/containerd/",
 	} {
 		t.Run(target, func(t *testing.T) {
 			cfg := registryTestConfig(t)
@@ -476,8 +479,11 @@ func TestRegistryConfigurationMountRestrictionScope(t *testing.T) {
 	}{
 		{"K3s project mount", "k3s", "/workspace", true},
 		{"K3s sibling directory", "k3s", "/etc/rancher/k3s-backup", true},
+		{"K3s template sibling directory", "k3s", "/var/lib/rancher/k3s/agent/etc/containerd-backup", true},
 		{"kubeadm configuration mount", "kubeadm", "/etc/rancher/k3s", true},
+		{"kubeadm template mount", "kubeadm", "/var/lib/rancher/k3s/agent/etc/containerd", true},
 		{"K3s without registry CA", "k3s", "/etc/rancher/k3s", false},
+		{"K3s template mount without registry CA", "k3s", "/var/lib/rancher/k3s/agent/etc/containerd", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := registryTestConfig(t)
@@ -520,8 +526,10 @@ func (r *registryExecutingRuntime) ExecStdinTimeout(node string, timeout time.Du
 		return err
 	}
 	script := strings.ReplaceAll(r.script, "$tmp/etc/", "$tmp/__KIAC_ARCHIVE_ETC__/")
+	script = strings.ReplaceAll(script, "/var/lib/rancher/k3s/agent/etc/containerd/", "__KIAC_TEMPLATE_DIR__/")
 	script = strings.ReplaceAll(script, "/etc/", r.root+"/etc/")
 	script = strings.ReplaceAll(script, "$tmp/__KIAC_ARCHIVE_ETC__/", "$tmp/etc/")
+	script = strings.ReplaceAll(script, "__KIAC_TEMPLATE_DIR__/", r.root+"/var/lib/rancher/k3s/agent/etc/containerd/")
 	script = strings.ReplaceAll(script, "/tmp/kiac-registry.", r.root+"/tmp/kiac-registry.")
 	command := exec.Command("sh", "-ec", script)
 	command.Stdin = bytes.NewReader(payload)
@@ -543,6 +551,10 @@ func TestRegistryK3sExistingConfigCannotOpenGateOrWriteTrust(t *testing.T) {
 		{name: "dangling default config symlink", configPath: "etc/rancher/k3s/config.yaml", symlink: true},
 		{name: "dangling drop-in symlink", configPath: "etc/rancher/k3s/config.yaml.d/10-runtime.yaml", symlink: true},
 		{name: "dangling registries symlink", configPath: "etc/rancher/k3s/registries.yaml", symlink: true, wantError: "registries.yaml already exists"},
+		{name: "v3 containerd template", configPath: "var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl", wantError: "existing K3s containerd template conflicts"},
+		{name: "legacy containerd template", configPath: "var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl", wantError: "existing K3s containerd template conflicts"},
+		{name: "dangling v3 template symlink", configPath: "var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.tmpl", symlink: true, wantError: "existing K3s containerd template conflicts"},
+		{name: "dangling legacy template symlink", configPath: "var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl", symlink: true, wantError: "existing K3s containerd template conflicts"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := registryTestConfig(t)
