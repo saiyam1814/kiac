@@ -58,6 +58,10 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.GPUWorkers < 0 {
 			return fmt.Errorf("--gpu-workers must be >= 0")
 		}
+		createCfg.Distro = selectedDistro
+		if err := createCfg.PrepareRegistryCAs(); err != nil {
+			return err
+		}
 		if !createCfg.IPFamily.Valid() {
 			return fmt.Errorf("invalid ip-family %q (supported: ipv4, dual, ipv6)", createCfg.IPFamily)
 		}
@@ -105,7 +109,6 @@ var createClusterCmd = &cobra.Command{
 		if !cluster.ValidName(createCfg.Name) {
 			return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", createCfg.Name)
 		}
-		createCfg.Distro = selectedDistro
 		switch selectedDistro {
 		case "kubeadm":
 			if len(createCfg.K3sControlPlaneArgs) > 0 || len(createCfg.K3sWorkerArgs) > 0 {
@@ -216,6 +219,7 @@ func init() {
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
 	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
+	f.Var(&createCfg.RegistryCAs, "registry-ca", "trust a PEM CA bundle for HTTPS image pulls on every node (HOST[:PORT]=PEM_FILE); repeatable")
 	f.BoolVar(&createCfg.Virtualization, "virtualization", false, "expose Apple container nested virtualization to every node VM (needs M3 or newer; ordinary clusters need --kernel full for /dev/kvm; GPU clusters use krunkit --nested)")
 	f.StringArrayVar(&createCfg.K3sControlPlaneArgs, "k3s-controlplane-arg", nil, "extra k3s server argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringArrayVar(&createCfg.K3sWorkerArgs, "k3s-worker-arg", nil, "extra k3s agent argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")

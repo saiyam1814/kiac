@@ -65,6 +65,9 @@ func ensureKubeadmGPUArtifacts(version string) (map[string]string, error) {
 }
 
 func (m *Manager) createKubeadmGPU(cfg Config) error {
+	if err := cfg.PrepareRegistryCAs(); err != nil {
+		return err
+	}
 	started := time.Now()
 	cfg = gpuConfigForDistro(cfg, "kubeadm")
 	version, err := ResolveGPUVersion(cfg.Distro, cfg.K8sVersion, cfg.GPUDriver)
@@ -162,6 +165,13 @@ func (m *Manager) createKubeadmGPU(cfg Config) error {
 		m.cleanupOnFailure(cfg.Name)
 		return fmt.Errorf("kubeadm control-plane address %q is not IPv4", serverIP)
 	}
+	if err := ui.Step("Installing registry trust", func() error {
+		return inParallel(len(nodes), func(i int) error { return m.installRegistryTrust(nodes[i], "kubeadm", cfg) })
+	}); err != nil {
+		m.cleanupOnFailure(cfg.Name)
+		return err
+	}
+
 	if err := ui.Step("Pulling Kubernetes control-plane images", func() error {
 		_, err := m.rt.Exec(cp, "sh", "-euc", `
 for attempt in 1 2 3; do

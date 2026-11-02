@@ -123,6 +123,8 @@ type Config struct {
 	DNS                 []string // node VM nameservers; empty = runtime default resolv.conf (see nodeDNS)
 	Mounts              runtime.Mounts
 	Publish             runtime.Publishes // host port forwards for the control-plane VM (--publish)
+	RegistryCAs         RegistryCAs       // HTTPS registry authority to local PEM CA bundle
+	registryCAs         []registryCA      // validated snapshot shared by all node uploads
 	Virtualization      bool              // expose nested virtualization to every node VM (--virtualization)
 	K3sControlPlaneArgs []string          // extra k3s server argv entries, appended after Kiac defaults
 	K3sWorkerArgs       []string          // extra k3s agent argv entries, appended after Kiac defaults
@@ -195,6 +197,9 @@ func gpuWorker(name string, i int) string { return fmt.Sprintf("%sgpu-%d", prefi
 // Create boots the node VMs and brings up Kubernetes. Progress is
 // reported through ui.Step so the caller stays a thin cobra shim.
 func (m *Manager) Create(cfg Config) error {
+	if err := cfg.PrepareRegistryCAs(); err != nil {
+		return err
+	}
 	if cfg.GPUWorkers > 0 {
 		return m.createKubeadmGPU(cfg)
 	}
@@ -284,9 +289,11 @@ func (m *Manager) Create(cfg Config) error {
 				if _, err := m.rt.Exec(n, "sh", "-c", ipv6BootPrep); err != nil {
 					return err
 				}
-				return m.pinKubeletNodeIP(n, cfg.family())
+				if err := m.pinKubeletNodeIP(n, cfg.family()); err != nil {
+					return err
+				}
 			}
-			return nil
+			return m.installRegistryTrust(n, "kubeadm", cfg)
 		})
 	}); err != nil {
 		m.cleanupOnFailure(cfg.Name)

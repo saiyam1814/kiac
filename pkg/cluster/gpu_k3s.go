@@ -75,6 +75,10 @@ func normalizeK3sStateVersion(version string) string {
 }
 
 func (m *Manager) createK3sGPU(cfg Config) error {
+	cfg.Distro = "k3s"
+	if err := cfg.PrepareRegistryCAs(); err != nil {
+		return err
+	}
 	started := time.Now()
 	cfg = gpuConfigForDistro(cfg, "k3s")
 	version, err := ResolveGPUVersion(cfg.Distro, cfg.K8sVersion, cfg.GPUDriver)
@@ -159,6 +163,13 @@ func (m *Manager) createK3sGPU(cfg Config) error {
 		m.cleanupOnFailure(cfg.Name)
 		return err
 	}
+	if err := ui.Step("Installing registry trust", func() error {
+		return inParallel(len(nodes), func(i int) error { return m.installRegistryTrust(nodes[i], "k3s", cfg) })
+	}); err != nil {
+		m.cleanupOnFailure(cfg.Name)
+		return err
+	}
+
 	if err := ui.Step("Initializing K3s control plane", func() error {
 		if err := m.configureK3sGPUNode(cp, "server", serverIP, serverIP, token, cfg); err != nil {
 			return err
