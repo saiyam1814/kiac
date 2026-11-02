@@ -3,20 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>kiac - Real Kubernetes and Apple GPU clusters on your Mac</title>
-<meta name="description" content="Create multi-node Kubernetes clusters on Apple silicon where every node is its own lightweight VM. Run kubeadm, k3s, Cilium, Gateway API, observability, and real Apple GPU workloads through Venus and Kubernetes DRA.">
+<title>kiac - Kubernetes on your Mac, with Apple GPU support in beta</title>
+<meta name="description" content="Kiac v0.11.0 brings local Apple GPU support to beta with Vulkan health and recovery, plus external K3s workers in alpha. Run Kubernetes 1.37 on real VM nodes on Apple silicon.">
 <meta name="theme-color" content="#f5f7fa">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://saiyam1814.github.io/kiac/">
 <meta property="og:title" content="kiac - Kubernetes in Apple Containers">
-<meta property="og:description" content="Real VM-per-node Kubernetes on Apple silicon, now with opt-in Apple GPU workers through Vulkan, Venus, and Kubernetes DRA.">
-<meta property="og:image" content="https://saiyam1814.github.io/kiac/assets/og-v071.jpg">
+<meta property="og:description" content="v0.11.0: local Apple GPU support enters beta, external K3s workers enter alpha, and Kubernetes 1.37 runs on real VM nodes on your Mac.">
+<meta property="og:image" content="https://saiyam1814.github.io/kiac/assets/og-v011.jpg">
+<meta property="og:image:alt" content="Kiac v0.11.0: Apple GPU support enters beta; external K3s workers enter alpha. Apple silicon, Kubernetes 1.37.">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="kiac - Kubernetes in Apple Containers">
-<meta name="twitter:description" content="Real VM-per-node Kubernetes on Apple silicon, now with opt-in Apple GPU workers through Vulkan, Venus, and Kubernetes DRA.">
-<meta name="twitter:image" content="https://saiyam1814.github.io/kiac/assets/og-v071.jpg">
+<meta name="twitter:description" content="v0.11.0: local Apple GPU support enters beta, external K3s workers enter alpha, and Kubernetes 1.37 runs on real VM nodes on your Mac.">
+<meta name="twitter:image" content="https://saiyam1814.github.io/kiac/assets/og-v011.jpg">
+<meta name="twitter:image:alt" content="Kiac v0.11.0: Apple GPU support enters beta; external K3s workers enter alpha. Apple silicon, Kubernetes 1.37.">
 <link rel="canonical" href="https://saiyam1814.github.io/kiac/">
 <link rel="icon" type="image/svg+xml" href="assets/logo-mark.svg">
 <style>
@@ -608,8 +610,8 @@
     <button class="menu-button" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
     <div class="nav-links" id="nav-links">
       <a href="#gpu">GPU beta</a>
-      <a href="#engines">Engines</a>
-      <a href="#capabilities">Capabilities</a>
+      <a href="#external-workers">Worker alpha</a>
+      <a href="#updates">What's new</a>
       <a href="#labs">Labs</a>
       <a href="docs/index.html">Docs</a>
       <a class="nav-cta" href="https://github.com/saiyam1814/kiac">View on GitHub</a>
@@ -620,10 +622,10 @@
 <header class="hero" id="top">
   <img class="hero-art" src="assets/hero-gpu-v071.webp" width="2400" height="1350" alt="Four lightweight virtual-machine nodes connected on an Apple silicon style chip, including one GPU worker" fetchpriority="high">
   <div class="hero-inner">
-    <a class="release-link" href="https://github.com/saiyam1814/kiac/releases/tag/v0.7.1"><span class="release-dot" aria-hidden="true"></span>v0.7.1 is available</a>
+    <a class="release-link" href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0"><span class="release-dot" aria-hidden="true"></span>v0.11.0 &middot; GPU beta + worker alpha</a>
     <h1>kiac</h1>
-    <p class="hero-headline">Real Kubernetes nodes. Now with real Apple GPU access.</p>
-    <p class="hero-copy">Build multi-node clusters on Apple silicon where every node is its own lightweight VM. Choose kubeadm, k3s, or Cilium, then add opt-in GPU workers through krunkit, Venus, Vulkan, and Kubernetes DRA.</p>
+    <p class="hero-headline">Real Kubernetes nodes.<br>Apple GPU support, now in beta.</p>
+    <p class="hero-copy">Build Kubernetes 1.37 clusters on Apple silicon, with a lightweight VM for every node. Schedule local Vulkan workloads with DRA or a device plugin. Or try the new alpha: join a Mac-hosted CPU worker to an existing K3s cluster over WireGuard.</p>
     <div class="hero-actions">
       <a class="button button-primary" href="#install">Create your first cluster</a>
       <a class="button button-secondary" href="docs/gpu.html">Explore Apple GPU nodes</a>
@@ -638,10 +640,25 @@
 <main id="main">
   <section class="proof-strip" aria-label="Project highlights">
     <div class="proof-grid">
-      <div class="proof-item"><strong>Kubernetes 1.37</strong><span>Latest pinned kubeadm release</span></div>
+      <div class="proof-item"><strong>Kubernetes 1.37</strong><span>Pinned for kubeadm and K3s</span></div>
       <div class="proof-item"><strong>2 VM backends</strong><span>apple/container and krunkit</span></div>
       <div class="proof-item"><strong>DRA + device plugin</strong><span>Honest <code>kiac.dev/gpu</code> scheduling</span></div>
       <div class="proof-item"><strong><a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a></strong><span>Listed in the cloud native ecosystem</span></div>
+    </div>
+  </section>
+
+  <section class="band" id="updates">
+    <div class="inner">
+      <div class="section-head">
+        <p class="eyebrow">Recent releases</p>
+        <h2>What's new in kiac.</h2>
+        <p>GPU recovery, a new connection to existing K3s clusters, and improvements to everyday cluster operations.</p>
+      </div>
+      <div class="lab-grid">
+        <a class="lab" href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0"><span class="lab-type">v0.11.0 &middot; Latest</span><h3>GPU beta. Worker alpha.</h3><p>Continuous Vulkan health, allocation recovery, external K3s workers over WireGuard, better benchmark sizing, and disk preflight checks.</p><span class="lab-cta">Read the release &rarr;</span></a>
+        <a class="lab" href="https://github.com/saiyam1814/kiac/releases/tag/v0.10.0"><span class="lab-type">v0.10.0</span><h3>Stronger cluster foundations.</h3><p>Loaded-image fixes, updated Apple runtime requirements, registry CA trust, checked nested virtualization, and GPU address recovery.</p><span class="lab-cta">Read the release &rarr;</span></a>
+        <a class="lab" href="https://github.com/saiyam1814/kiac/releases/tag/v0.9.0"><span class="lab-type">v0.9.0</span><h3>See what the GPU is doing.</h3><p>GPU inspection, read-only DRA allocation metadata inside Pods, confirmed model-layer offloading, and bounded GPU bootstrap.</p><span class="lab-cta">Read the release &rarr;</span></a>
+      </div>
     </div>
   </section>
 
@@ -652,32 +669,32 @@
           <div class="section-head">
             <p class="eyebrow">Beta &middot; Venus/Vulkan</p>
             <h2>Your Mac GPU, scheduled by Kubernetes.</h2>
-            <p>Kiac creates dedicated krunkit workers, maps the Apple GPU through virtio-gpu, and exposes a verified Venus/Vulkan device only to workloads that request it.</p>
+            <p>Kiac creates dedicated krunkit workers and exposes the Apple GPU through Venus/Vulkan. Native queue and transfer checks continuously feed DRA and device-plugin health: failures block new allocations, and successful probes restore availability.</p>
           </div>
-          <div class="truth-note"><strong>Real GPU, precise contract.</strong> This is Vulkan on Apple silicon, not CUDA emulation. Kiac publishes <code>kiac.dev/gpu</code>, supports the <code>gpu.kiac.dev</code> DRA driver, and never pretends that <code>nvidia.com/gpu</code> capacity exists.</div>
+          <div class="truth-note"><strong>Verified recovery on M1 Max.</strong> Full VM stop/resume followed by TinyLlama inference with 23 model layers offloaded passed on K3s DRA, K3s device plugin, and kubeadm device plugin. Existing consumers are not forcibly evicted during health failures. GPU access is Venus/Vulkan; VM memory accounting does not isolate physical GPU memory. Host sleep/wake remains untested.</div>
           <div class="text-links">
-            <a class="text-link" href="docs/gpu.html">Read the GPU architecture &rarr;</a>
+            <a class="text-link" href="docs/gpu.html#beta-validation">See beta validation and limits &rarr;</a>
             <a class="text-link" href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-lab.md">Run the complete GPU lab &rarr;</a>
           </div>
         </div>
-        <div class="terminal" aria-label="GPU cluster creation and Vulkan verification output">
-          <div class="terminal-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span><span class="spacer"></span>gpu-lab</div>
+        <div class="terminal" aria-label="GPU commands and selected benchmark fields from M1 Max validation">
+          <div class="terminal-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span><span class="spacer"></span>M1 Max &middot; selected benchmark fields</div>
           <pre><span class="cmd">$ kiac gpu doctor</span>
-<span class="ok">OK</span>  Apple silicon host
-<span class="ok">OK</span>  krunkit 1.3.2+
-<span class="ok">OK</span>  vmnet-helper 0.13.0+
-<span class="ok">OK</span>  Venus-capable renderer
-
 <span class="cmd">$ kiac create cluster --name gpu-lab \
-    --distro k3s --workers 1 --gpu-workers 1 \
-    --gpu-resource-driver dra</span>
+    --distro k3s --k8s-version 1.37 \
+    --gpu-workers 1 --gpu-resource-driver dra \
+    --memory 4G</span>
 
-<span class="ok">Cluster "gpu-lab" is ready.</span>
+<span class="cmd">$ kiac gpu status --name gpu-lab</span>
+<span class="cmd">$ kiac gpu bench --name gpu-lab --skip-host -o json</span>
 
-<span class="cmd">$ kubectl logs kiac-gpu-vulkan</span>
-<span class="key">deviceName</span> = <span class="value">Virtio-GPU Venus (Apple M1 Max)</span>
-<span class="key">driverName</span> = <span class="value">venus</span>
-<span class="ok">KIAC_REAL_APPLE_GPU_OK</span></pre>
+{
+  <span class="key">"kubernetes"</span>: {
+    <span class="key">"device"</span>: <span class="value">"Virtio-GPU Venus (Apple M1 Max)"</span>,
+    <span class="key">"threads"</span>: 4,
+    <span class="key">"offloadedLayers"</span>: <span class="ok">23</span>
+  }
+}</pre>
         </div>
       </div>
 
@@ -691,12 +708,40 @@
     </div>
   </section>
 
+  <section class="band" id="external-workers">
+    <div class="inner gpu-layout">
+      <div>
+        <div class="section-head">
+          <p class="eyebrow">New in v0.11.0 &middot; Alpha</p>
+          <h2>Give an existing K3s cluster a worker on your Mac.</h2>
+          <p><code>kiac join worker</code> boots a Linux ARM64 VM and joins it through an operator-managed WireGuard peer. The first alpha supports IPv4 K3s with Flannel VXLAN and CPU workloads.</p>
+        </div>
+        <p>Workers start with a <code>NoSchedule</code> taint so you can opt intended workloads in. Kiac verifies Node identity and the current guest boot before reporting readiness. Networking, remote draining, and remote Node deletion remain operator responsibilities.</p>
+        <a class="button button-secondary" href="docs/external-workers.html">Read the external-worker guide &rarr;</a>
+      </div>
+      <div class="terminal" aria-label="External K3s worker join and lifecycle commands">
+        <div class="terminal-bar"><span class="window-dot"></span><span class="window-dot"></span><span class="window-dot"></span><span class="spacer"></span>After preparing your VPN peer</div>
+        <pre><span class="cmd">$ chmod 600 agent-token worker.conf</span>
+<span class="cmd">$ kiac join worker --name remote-lab \
+    --server https://10.250.76.1:6443 \
+    --token-file ./agent-token \
+    --wireguard-config ./worker.conf \
+    --node-ip 10.250.76.2 --k8s-version 1.37</span>
+
+<span class="cmd">$ kiac get workers</span>
+<span class="cmd">$ kiac logs worker remote-lab</span>
+<span class="cmd">$ kiac stop worker remote-lab</span>
+<span class="cmd">$ kiac start worker remote-lab</span></pre>
+      </div>
+    </div>
+  </section>
+
   <section class="band band-soft" id="engines">
     <div class="inner">
       <div class="section-head">
         <p class="eyebrow">One binary, deliberate choices</p>
         <h2>Use the cluster engine the work deserves.</h2>
-        <p>Ordinary clusters stay on the fast apple/container path. The krunkit stack is loaded only when a cluster asks for GPU workers.</p>
+        <p>Ordinary clusters use apple/container. GPU clusters and external workers use the optional krunkit backend.</p>
       </div>
       <div class="engine-grid">
         <article class="engine engine-accent">
@@ -767,7 +812,7 @@
         <div class="architecture-points">
           <div class="architecture-point"><b>01</b><div><strong>Hypervisor isolation</strong><span>Nodes do not share one hidden Linux kernel.</span></div></div>
           <div class="architecture-point"><b>02</b><div><strong>Independent failure domains</strong><span>A stopped worker becomes genuinely NotReady.</span></div></div>
-          <div class="architecture-point"><b>03</b><div><strong>Native host stack</strong><span>Apple runtime for everyday nodes, krunkit only for GPU clusters.</span></div></div>
+          <div class="architecture-point"><b>03</b><div><strong>Native host stack</strong><span>Apple runtime for everyday nodes; krunkit for GPU clusters and external workers.</span></div></div>
         </div>
       </div>
       <img class="architecture-image" src="assets/apple-container-anatomy.png" width="3733" height="2080" loading="lazy" alt="Diagram explaining how an Apple container becomes a lightweight virtual machine with its own kernel, root filesystem, and IP">
@@ -802,11 +847,12 @@
           <li><strong>Host:</strong> Apple silicon Mac</li>
           <li><strong>Everyday clusters:</strong> apple/container 1.6.0+ (1.6.1 recommended) and kubectl</li>
           <li><strong>Multi-node:</strong> macOS 26+</li>
-          <li><strong>GPU beta:</strong> krunkit 1.3.2+ and vmnet-helper 0.13.0+</li>
+          <li><strong>GPU beta / worker alpha:</strong> krunkit 1.3.2+, vmnet-helper 0.13.0+, and renderer dependencies; see the backend guides</li>
         </ul>
       </div>
       <div class="install-stack">
         <div class="install-block"><span>01 &middot; Install kiac</span><code>brew install --cask saiyam1814/tap/kiac</code></div>
+        <div class="install-block"><span>Already installed? &middot; Upgrade to v0.11.0</span><code>brew update &amp;&amp; brew upgrade --cask kiac</code></div>
         <div class="install-block"><span>02 &middot; Check the host</span><code>kiac doctor</code></div>
         <div class="install-block"><span>03 &middot; Create a daily cluster</span><code>kiac create cluster --name dev --workers 2</code></div>
         <div class="install-block"><span>GPU beta &middot; Check optional dependencies</span><code>kiac gpu doctor</code></div>
@@ -841,7 +887,7 @@
     </div>
     <div class="footer-links">
       <a href="docs/index.html">Documentation</a>
-      <a href="https://github.com/saiyam1814/kiac/releases/tag/v0.7.1">v0.7.1 release</a>
+      <a href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0">v0.11.0 release</a>
       <a href="https://github.com/saiyam1814/kiac">GitHub</a>
       <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">CNCF Landscape</a>
     </div>

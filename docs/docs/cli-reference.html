@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CLI reference · kiac docs</title>
-<meta name="description" content="Every kiac command and flag: create, delete, get, resume, stop/start node, load image, doctor, ui, completion, version.">
+<meta name="description" content="Kiac commands and flags: local clusters, Apple GPU beta, external K3s worker alpha, resume, node lifecycle, image loading, diagnostics and the web console.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
 </head>
@@ -33,6 +33,7 @@
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
     <a href="gpu.html">Apple GPU (beta)</a>
+    <a href="external-workers.html">External workers (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -67,7 +68,7 @@ kiac create cluster --memory 8G --cpus 4
 kiac create cluster --distro k3s --workers 1
 kiac create cluster --cni cilium --kernel full
 kiac create cluster --cni flannel --kernel full
-kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra
+kiac create cluster --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra --memory 4G
 kiac create cluster --mount type=bind,source="$PWD",target=/workspace,readonly
 kiac create cluster --config cluster.yaml</code></pre>
   <table>
@@ -198,11 +199,38 @@ kiac doctor --fix</code></pre>
     <tr><td><code>--fix</code></td><td><code>false</code></td><td>attempt to fix failed checks (starts the container system service)</td></tr>
   </table>
 
+  <h2 id="external-workers">External worker commands (alpha)</h2>
+  <p><code>kiac join worker</code> provisions one Mac-hosted CPU worker for an existing IPv4 K3s cluster using Flannel VXLAN and an operator-managed WireGuard peer. Read the <a href="external-workers.html">requirements and full workflow</a> before joining; this command does not set up remote routes or register a GPU resource.</p>
+  <pre><code>kiac join worker --name remote-lab \
+  --server https://10.250.76.1:6443 \
+  --token-file ./agent-token --wireguard-config ./worker.conf \
+  --node-ip 10.250.76.2 --k8s-version 1.37
+kiac get workers
+kiac get workers -o json
+kiac logs worker remote-lab
+kiac stop worker remote-lab
+kiac start worker remote-lab --wait 10m
+kiac delete worker remote-lab</code></pre>
+  <table>
+    <tr><th>Join flag</th><th>Requirement or default</th></tr>
+    <tr><td><code>--name</code></td><td>required local external-worker name</td></tr>
+    <tr><td><code>--server</code></td><td>required HTTPS IPv4:PORT endpoint reachable over the tunnel</td></tr>
+    <tr><td><code>--token-file</code></td><td>required owner-private full CA-pinned K3s secure token file</td></tr>
+    <tr><td><code>--wireguard-config</code></td><td>required owner-private single-peer, split-route WireGuard configuration</td></tr>
+    <tr><td><code>--node-ip</code></td><td>required stable worker WireGuard IPv4 address</td></tr>
+    <tr><td><code>--k8s-version</code></td><td>required pinned K3s minor or exact release matching the server</td></tr>
+    <tr><td><code>--pod-cidr</code>, <code>--service-cidr</code></td><td>existing cluster CIDRs; defaults <code>10.42.0.0/16</code> and <code>10.43.0.0/16</code></td></tr>
+    <tr><td><code>--cpus</code>, <code>--memory</code>, <code>--disk</code></td><td>defaults <code>2</code>, <code>2G</code>, <code>20G</code></td></tr>
+    <tr><td><code>--wait</code></td><td>bounded readiness wait, default <code>10m</code>; also accepted by <code>start worker</code></td></tr>
+  </table>
+  <p>External workers have separate inventory and start with a <code>NoSchedule</code> taint. Cluster commands and the web console do not manage them. Stopping and deleting affect only the local VM; drain workloads and remove the remote Node with your external-cluster credentials first.</p>
+
   <h2 id="gpu">kiac gpu</h2>
   <p>Inspect and configure the optional real Apple GPU backend. See <a href="gpu.html">Real Apple GPU nodes</a> for the architecture, prerequisites, and complete lab.</p>
   <pre><code>kiac gpu doctor
 kiac gpu status --name gpu-lab
 kiac gpu status --name gpu-lab -o json
+kiac gpu inspect --name gpu-lab
 kiac gpu bench --name gpu-lab
 kiac gpu bench --name gpu-lab --skip-host -o json
 kiac gpu values vllm
@@ -214,6 +242,7 @@ kiac gpu compat disable --name gpu-lab --namespace demo</code></pre>
     <tr><th>Command</th><th>Purpose</th></tr>
     <tr><td><code>gpu doctor</code></td><td>validate krunkit, vmnet-helper, SSH/cloud-init tools, and the Venus-capable renderer</td></tr>
     <tr><td><code>gpu status</code></td><td>show persisted GPU windows, render devices, driver health, schedulability, and compatibility namespaces; supports <code>-o text|json</code></td></tr>
+    <tr><td><code>gpu inspect</code></td><td>show read-only GPU topology and allocation information, including live health and diagnostics; see the <a href="gpu.html#operations">inspection guide</a></td></tr>
     <tr><td><code>gpu bench</code></td><td>run the pinned Venus llama.cpp benchmark and, when installed, the same workload with host Metal; accepts <code>--model</code>, <code>--skip-host</code>, <code>--timeout</code>, and <code>-o text|json</code></td></tr>
     <tr><td><code>gpu values TARGET</code></td><td>print scheduling fragments for <code>vllm</code>, <code>ollama</code>, or <code>kserve</code>; application images must still support Venus/Vulkan</td></tr>
     <tr><td><code>gpu compat enable|disable</code></td><td>manage the explicit namespace-scoped NVIDIA resource-name rewrite; <code>enable</code> also accepts <code>--rotate-certificate</code></td></tr>
