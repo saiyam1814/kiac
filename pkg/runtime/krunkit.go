@@ -49,6 +49,8 @@ type KrunkitClient struct {
 	HostMemoryMiB int // test override; zero reads hw.memsize from the host
 	StopTimeout   time.Duration
 	KillTimeout   time.Duration
+	// Optional host capability probe; nil queries the native platform API.
+	NestedVirtualizationSupported func() (bool, error)
 
 	mu sync.Mutex
 }
@@ -422,6 +424,11 @@ func (c *KrunkitClient) startState(state *KrunkitNodeState) error {
 	if c.processOwned(state) {
 		state.Status = "running"
 		return c.writeState(*state)
+	}
+	if state.Nested {
+		if err := c.requireNested(); err != nil {
+			return err
+		}
 	}
 	vmnetRun, err := c.resolveVMNetRun()
 	if err != nil {
@@ -1171,6 +1178,9 @@ func (c *KrunkitClient) resolveBinary(value string, candidates ...string) (strin
 }
 
 func (c *KrunkitClient) requireNested() error {
+	if err := requireNestedVirtualization(c.NestedVirtualizationSupported); err != nil {
+		return err
+	}
 	krunkit, err := c.resolveBinary(c.Bin)
 	if err != nil {
 		return fmt.Errorf("krunkit is not installed; install it with: %s", krunkitInstallHint)
