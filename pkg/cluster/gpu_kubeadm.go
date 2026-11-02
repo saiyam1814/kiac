@@ -67,6 +67,11 @@ func ensureKubeadmGPUArtifacts(version string) (map[string]string, error) {
 func (m *Manager) createKubeadmGPU(cfg Config) error {
 	started := time.Now()
 	cfg = gpuConfigForDistro(cfg, "kubeadm")
+	version, err := ResolveGPUVersion(cfg.Distro, cfg.K8sVersion, cfg.GPUDriver)
+	if err != nil {
+		return err
+	}
+	cfg.K8sVersion = version
 	if err := validateGPUClusterConfig(cfg); err != nil {
 		return err
 	}
