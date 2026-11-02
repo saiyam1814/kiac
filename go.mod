@@ -6,6 +6,7 @@ toolchain go1.26.6
 
 require (
 	github.com/distribution/reference v0.6.0
+	github.com/ebitengine/purego v0.11.2
 	github.com/lima-vm/go-qcow2reader v0.8.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1

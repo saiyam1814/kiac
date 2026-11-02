@@ -5,11 +5,14 @@ import (
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/cluster"
+	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
 	"github.com/spf13/cobra"
 )
 
 var createCfg = cluster.Config{}
+
+var checkNestedVirtualization = runtime.CheckNestedVirtualization
 
 var createCmd = &cobra.Command{
 	Use:   "create",
@@ -84,6 +87,11 @@ var createClusterCmd = &cobra.Command{
 			pre := createCfg
 			pre.Kernel = createKernel
 			if err := cluster.ValidateCNI(pre); err != nil {
+				return err
+			}
+		}
+		if createCfg.Virtualization {
+			if err := checkNestedVirtualization(); err != nil {
 				return err
 			}
 		}

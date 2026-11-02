@@ -20,6 +20,8 @@ import (
 // Client wraps the apple/container CLI binary.
 type Client struct {
 	Bin string
+	// Optional host capability probe; nil queries the native platform API.
+	NestedVirtualizationSupported func() (bool, error)
 
 	runHelpOnce sync.Once
 	runHelp     string
@@ -170,6 +172,9 @@ type RunOpts struct {
 func (c *Client) RunDetached(o RunOpts) error {
 	args := []string{"run", "-d", "--name", o.Name}
 	if o.Virtualization {
+		if err := requireNestedVirtualization(c.NestedVirtualizationSupported); err != nil {
+			return err
+		}
 		if !c.supportsVirtualization() {
 			return fmt.Errorf("this apple/container CLI does not support --virtualization; upgrade apple/container")
 		}
