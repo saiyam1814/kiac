@@ -74,6 +74,13 @@ func (c *KrunkitClient) createCloudInitISO(nodeDir string, state KrunkitNodeStat
 			{"udevadm", "trigger", "--subsystem-match=drm"},
 		},
 	}
+	if state.GuestAddressReport {
+		config.WriteFiles = append(config.WriteFiles, guestAddressCloudInitFiles(state)...)
+		config.RunCmd = append(config.RunCmd,
+			[]string{"systemctl", "daemon-reload"},
+			[]string{"systemctl", "enable", "--now", "run-kiac-status.mount", "kiac-network-report.timer"},
+		)
+	}
 
 	if len(state.Mounts) > 0 {
 		var fstab strings.Builder
