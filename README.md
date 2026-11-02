@@ -194,7 +194,7 @@ brew trust nirs/vmnet-helper
 brew install vmnet-helper
 kiac gpu doctor
 kiac create cluster --name gpu-lab --distro k3s --workers 1 \
-  --gpu-workers 1 --gpu-resource-driver dra
+  --gpu-workers 1 --gpu-resource-driver dra --memory 4G
 kubectl apply -f examples/gpu-vulkan.yaml
 kubectl logs -f pod/kiac-gpu-vulkan
 ```

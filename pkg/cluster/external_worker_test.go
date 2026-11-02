@@ -228,7 +228,7 @@ func workerManagerFixture(t *testing.T) (*ExternalWorkerManager, *workerRuntime)
 	if err := os.WriteFile(artifact, []byte("pinned fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := &ExternalWorkerManager{manager: &Manager{rt: r}, backend: r, root: t.TempDir(), preflight: func() error { return nil }, image: func() (string, error) { return "verified-fedora", nil }, artifacts: func(string) (k3sGPUArtifacts, error) {
+	m := &ExternalWorkerManager{manager: &Manager{rt: r}, backend: r, root: t.TempDir(), preflight: func() error { return nil }, headroom: func(int) error { return nil }, image: func() (string, error) { return "verified-fedora", nil }, artifacts: func(string) (k3sGPUArtifacts, error) {
 		return k3sGPUArtifacts{Binary: artifact, SELinux: artifact}, nil
 	}}
 	m.owned = func(s ExternalWorkerState) error {
