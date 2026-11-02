@@ -269,7 +269,8 @@ test_data_paths() {
 
 test_inference() {
   k apply -f "${ROOT}/examples/gpu-inference.yaml"
-  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=10m
+  # The pinned model is over 600 MiB; allow the first download on slower links.
+  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=20m
   retry 30 2 wait_for_lb kiac-gpu-demo tinyllama
   local ip response
   ip=$(k -n kiac-gpu-demo get svc tinyllama -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
