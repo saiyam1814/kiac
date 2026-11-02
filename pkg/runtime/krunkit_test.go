@@ -398,7 +398,21 @@ while [ "$#" -gt 0 ]; do
 done
 exit 1
 `)
-	badPS := writeExecutable(t, binDir, "ps", "#!/bin/sh\nexit 1\n")
+	// Let the child publish its PID before triggering rollback. Otherwise the
+	// cleanup can stop it before the shell writes the file we inspect below.
+	badPS := writeExecutable(t, binDir, "ps", `#!/bin/sh
+remaining=500
+while [ ! -s "`+pidFile+`" ]; do
+  if [ "$remaining" -eq 0 ]; then
+    echo "vmnet-run did not publish its PID" >&2
+    exit 2
+  fi
+  remaining=$((remaining - 1))
+  sleep 0.01
+done
+echo "injected process identity failure" >&2
+exit 1
+`)
 	if err := os.WriteFile(filepath.Join(root, "id_ed25519"), []byte("private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +429,7 @@ exit 1
 		KillTimeout: 500 * time.Millisecond,
 	}
 	err := c.RunDetached(RunOpts{Name: "kiac-fail-gpu-1", Image: base, CPUs: "2", Memory: "2G", DiskSize: "2M", NetworkID: "fail"})
-	if err == nil || !strings.Contains(err.Error(), "recording process identity") {
+	if err == nil || !strings.Contains(err.Error(), "recording process identity") || !strings.Contains(err.Error(), "injected process identity failure") {
 		t.Fatalf("RunDetached error = %v", err)
 	}
 	rawPID, readErr := os.ReadFile(pidFile)

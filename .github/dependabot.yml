@@ -13,6 +13,18 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: gomod
+    directory: /internal/gpudriver
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+    groups:
+      gpu-driver-dependencies:
+        patterns:
+          - "*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
