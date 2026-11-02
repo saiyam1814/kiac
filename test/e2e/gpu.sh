@@ -276,7 +276,7 @@ test_inference() {
   response=$(curl --noproxy '*' -fsS --max-time 90 "http://${ip}:8080/completion" \
     -H 'Content-Type: application/json' \
     -d '{"prompt":"Kubernetes on Apple GPUs is","n_predict":16}')
-  grep -F '"tokens_predicted":16' <<<"${response}" >/dev/null
+  printf '%s\n' "${response}" | go -C "${ROOT}" run ./test/e2e/check-inference --max-tokens 16
   k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'Virtio-GPU Venus' >/dev/null
   k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'offloaded 23/23 layers to GPU' >/dev/null
 }
