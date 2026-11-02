@@ -153,6 +153,47 @@ func TestCreateClusterRejectsK3sArgsOnGPUK3s(t *testing.T) {
 	}
 }
 
+func TestCreateClusterGPUCapabilitiesFailBeforeHostWork(t *testing.T) {
+	for _, tc := range []struct {
+		name, distro, version, driver, config, want string
+	}{
+		{name: "unavailable kubeadm minor", distro: "kubeadm", version: "1.36", want: "no pinned kubeadm GPU-node binaries"},
+		{name: "unavailable k3s patch", distro: "k3s", version: "1.37.99", want: "no pinned k3s GPU-node binaries"},
+		{name: "old DRA", distro: "k3s", version: "1.35", driver: "dra", want: "requires Kubernetes 1.36 or newer"},
+		{name: "unknown driver", distro: "kubeadm", version: "1.37", driver: "fake", want: "unknown --gpu-resource-driver"},
+		{name: "config file old minor", distro: "kubeadm", config: "gpuWorkers: 1\nk8sVersion: '1.36'\n", want: "no pinned kubeadm GPU-node binaries"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCfg, oldDistro, oldVersion := createCfg, createDistro, k8sVersion
+			oldConfigFile, oldKernel, oldIPFamily := createConfigFile, createKernel, createIPFamily
+			t.Cleanup(func() {
+				createCfg, createDistro, k8sVersion = oldCfg, oldDistro, oldVersion
+				createConfigFile, createKernel, createIPFamily = oldConfigFile, oldKernel, oldIPFamily
+			})
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("PATH", dir)
+			createCfg = cluster.Config{Name: "gpu", GPUWorkers: 1, GPUImage: "missing.raw", WaitTimeout: time.Minute, GPUDriver: tc.driver}
+			createDistro, k8sVersion = tc.distro, tc.version
+			createConfigFile, createKernel, createIPFamily = "", "", "ipv4"
+			if tc.config != "" {
+				createConfigFile = filepath.Join(t.TempDir(), "cluster.yaml")
+				if err := os.WriteFile(createConfigFile, []byte(tc.config), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := createClusterCmd.RunE(&cobra.Command{}, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("RunE error = %v, want %q before missing tools/image errors", err, tc.want)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("invalid create modified host/cache files: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
 // TestCreateClusterCNIPrechecksFailFast covers the --cni mistakes users
 // most often make. Every one must fail before a VM boots or a download
 // starts, with a message that names the fix. PATH is emptied so the
