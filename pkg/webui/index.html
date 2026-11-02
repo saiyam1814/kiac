@@ -144,7 +144,7 @@
     <form id="f">
       <div class="full"><label>Name</label><input id="name" value="dev" pattern="[a-z0-9-]+"></div>
       <div><label>Workers</label><input id="workers" type="number" min="0" max="6" value="2"></div>
-      <div><label>Kubernetes</label><select id="version"></select></div>
+      <div><label>Kubernetes</label><select id="version" required></select></div>
       <div><label>Distro</label><select id="distro"></select></div>
       <div><label>CNI</label><select id="cni"></select></div>
       <div><label>CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
@@ -207,12 +207,15 @@ async function loadMeta() {
   $('gpu-image').value = m.defaultGPUImage || 'fedora-44';
   $('gpu-driver').innerHTML = (m.gpuDrivers || ['device-plugin', 'dra']).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
   const syncVersions = (useDefault = false) => {
-    const k3s = $('distro').value === 'k3s';
-    const versions = k3s ? (m.k3sVersions || m.versions) : m.versions;
-    const fallback = k3s ? (m.defaultK3sVersion || m.defaultVersion) : m.defaultVersion;
+    const backend = $('gpu').checked ? 'krunkit' : 'container';
+    const capability = m.capabilities.find(c => c.backend === backend && c.distro === $('distro').value);
+    const versions = capability.gpuDrivers ? capability.gpuDrivers[$('gpu-driver').value] : capability.versions;
+    const fallback = versions.includes(capability.defaultVersion) ? capability.defaultVersion : versions[0];
     const current = $('version').value;
+    const minor = v => v.replace(/^v/, '').split('.').slice(0, 2).join('.');
+    const selected = versions.find(v => v === current) || versions.find(v => minor(v) === minor(current));
     $('version').innerHTML = versions.map(v => `<option>${esc(v)}</option>`).join('');
-    $('version').value = !useDefault && versions.includes(current) ? current : fallback;
+    $('version').value = !useDefault && selected ? selected : (fallback || '');
   };
   const syncForm = () => {
     const k3s = $('distro').value === 'k3s';
@@ -236,7 +239,8 @@ async function loadMeta() {
   };
   $('distro').addEventListener('change', () => { syncVersions(true); syncForm(); });
   $('cni').addEventListener('change', syncForm);
-  $('gpu').addEventListener('change', syncForm);
+  $('gpu').addEventListener('change', () => { syncVersions(); syncForm(); });
+  $('gpu-driver').addEventListener('change', () => syncVersions());
   syncVersions();
   syncForm();
 }

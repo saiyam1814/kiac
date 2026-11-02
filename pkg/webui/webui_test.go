@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,13 +93,14 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 	(&server{}).meta(rec, req)
 
 	var got struct {
-		Versions          []string `json:"versions"`
-		DefaultVersion    string   `json:"defaultVersion"`
-		K3sVersions       []string `json:"k3sVersions"`
-		DefaultK3sVersion string   `json:"defaultK3sVersion"`
-		GPUImages         []string `json:"gpuImages"`
-		DefaultGPUImage   string   `json:"defaultGPUImage"`
-		GPUDrivers        []string `json:"gpuDrivers"`
+		Versions          []string                    `json:"versions"`
+		DefaultVersion    string                      `json:"defaultVersion"`
+		K3sVersions       []string                    `json:"k3sVersions"`
+		DefaultK3sVersion string                      `json:"defaultK3sVersion"`
+		GPUImages         []string                    `json:"gpuImages"`
+		DefaultGPUImage   string                      `json:"defaultGPUImage"`
+		GPUDrivers        []string                    `json:"gpuDrivers"`
+		Capabilities      []cluster.ClusterCapability `json:"capabilities"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
@@ -114,6 +116,9 @@ func TestMetaHasDistroSpecificVersionDefaults(t *testing.T) {
 	}
 	if len(got.GPUImages) == 0 || got.DefaultGPUImage == "" || strings.Join(got.GPUDrivers, ",") != "device-plugin,dra" {
 		t.Fatalf("GPU metadata = images %v default %q drivers %v", got.GPUImages, got.DefaultGPUImage, got.GPUDrivers)
+	}
+	if !reflect.DeepEqual(got.Capabilities, cluster.SupportedClusterCapabilities()) {
+		t.Fatalf("UI capabilities = %+v, want artifact-derived capabilities", got.Capabilities)
 	}
 }
 
@@ -463,6 +468,53 @@ func TestCreateClusterArgsForRealGPU(t *testing.T) {
 	}
 	if _, err := createClusterArgs(createReq{Name: "gpu", GPUWorkers: 1, CNI: "flannel"}); err == nil {
 		t.Fatal("GPU kubeadm cluster with flannel was accepted; flannel needs the apple/container full kernel")
+	}
+}
+
+func TestCreateClusterRejectsUnsupportedGPUCapabilitiesBeforeJob(t *testing.T) {
+	for _, tc := range []struct {
+		name, distro, version, driver, want string
+	}{
+		{name: "old kubeadm minor", distro: "kubeadm", version: "1.36", want: "no pinned kubeadm GPU-node binaries"},
+		{name: "unknown k3s patch", distro: "k3s", version: "1.37.99", want: "no pinned k3s GPU-node binaries"},
+		{name: "old k3s DRA", distro: "k3s", version: "1.35", driver: "dra", want: "requires Kubernetes 1.36 or newer"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(createReq{Name: "gpu", GPUWorkers: 1, Distro: tc.distro, K8sVersion: tc.version, GPUResourceDriver: tc.driver})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// An uninitialized server cannot start a job. Unsupported
+			// requests must return synchronously, before any subprocess.
+			s := &server{}
+			rec := httptest.NewRecorder()
+			s.createCluster(rec, httptest.NewRequest(http.MethodPost, "/api/clusters", bytes.NewReader(body)))
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("create response = %d %s, want 400 containing %q", rec.Code, rec.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestCreateClusterArgsResolveGPUAliasesAndKeepOrdinaryVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name, distro, version, driver, wantVersion string
+		gpuWorkers                                 int
+	}{
+		{name: "kubeadm GPU minor", distro: "kubeadm", version: "1.37", gpuWorkers: 1, wantVersion: "v1.37.0"},
+		{name: "k3s GPU minor", distro: "k3s", version: "1.36", driver: "dra", gpuWorkers: 1, wantVersion: "v1.36.4-k3s1"},
+		{name: "ordinary kubeadm explicit patch", distro: "kubeadm", version: "1.36.99", wantVersion: "1.36.99"},
+		{name: "ordinary k3s explicit patch", distro: "k3s", version: "1.35.99+k3s2", wantVersion: "1.35.99+k3s2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, err := createClusterArgs(createReq{Name: "dev", Distro: tc.distro, K8sVersion: tc.version, GPUResourceDriver: tc.driver, GPUWorkers: tc.gpuWorkers})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.Join(args, " "), "--k8s-version "+tc.wantVersion) {
+				t.Fatalf("create args = %v, want Kubernetes version %s", args, tc.wantVersion)
+			}
+		})
 	}
 }
 
