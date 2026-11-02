@@ -58,6 +58,7 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.GPUWorkers < 0 {
 			return fmt.Errorf("--gpu-workers must be >= 0")
 		}
+		createCfg.Distro = selectedDistro
 		if err := createCfg.PrepareRegistryCAs(); err != nil {
 			return err
 		}
@@ -108,7 +109,6 @@ var createClusterCmd = &cobra.Command{
 		if !cluster.ValidName(createCfg.Name) {
 			return fmt.Errorf("invalid cluster name %q: use lowercase letters, digits, and dashes", createCfg.Name)
 		}
-		createCfg.Distro = selectedDistro
 		switch selectedDistro {
 		case "kubeadm":
 			if len(createCfg.K3sControlPlaneArgs) > 0 || len(createCfg.K3sWorkerArgs) > 0 {

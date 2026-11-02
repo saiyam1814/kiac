@@ -189,6 +189,12 @@ func TestRegistryTrustUsesScopedSnapshotForBothDistros(t *testing.T) {
 					if !strings.Contains(rt.script, "systemctl restart containerd") {
 						t.Fatal("daemon config not reloaded")
 					}
+					for _, namespace := range []string{ca.host, "registry.example.test_5443_"} {
+						path := shQuote("/etc/containerd/certs.d/" + namespace)
+						if !strings.Contains(rt.script, "test ! -e "+path+" && test ! -L "+path) {
+							t.Fatalf("namespace %s can hide a dangling configuration symlink", namespace)
+						}
+					}
 				} else {
 					trust := string(rt.files["etc/rancher/k3s/registries.yaml"])
 					if !strings.Contains(trust, ca.host) || !strings.Contains(trust, ca.path) {
@@ -439,5 +445,169 @@ func TestRegistryReviewV4RawConfiguration(t *testing.T) {
 	checked, err := containerdRegistryConfig(out)
 	if err != nil || checked != out {
 		t.Fatalf("v4 config is not idempotent: %v", err)
+	}
+}
+
+func TestRegistryK3sRejectsConfigurationMountsBeforeProvisioning(t *testing.T) {
+	for _, target := range []string{
+		"/", "/etc", "/etc/", "/etc/rancher", "/etc/rancher/k3s",
+		"/etc/rancher/k3s/config.yaml.d", "/etc/rancher/k3s/data",
+		"/etc/rancher/k3s/../k3s/config.yaml.d", "//etc//rancher/k3s/",
+	} {
+		t.Run(target, func(t *testing.T) {
+			cfg := registryTestConfig(t)
+			// The direct creation methods must set their distro even when
+			// callers omit it, before accessing any backend or create asset.
+			cfg.Mounts = runtime.Mounts{{Source: t.TempDir(), Target: target}}
+			for _, create := range []func(Config) error{(&Manager{}).CreateK3s, (&Manager{}).createK3sGPU} {
+				err := create(cfg)
+				if err == nil || !strings.Contains(err.Error(), "K3s mount") {
+					t.Fatalf("target %q: error = %v, want early configuration-mount rejection", target, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRegistryConfigurationMountRestrictionScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, distro, target string
+		withCA               bool
+	}{
+		{"K3s project mount", "k3s", "/workspace", true},
+		{"K3s sibling directory", "k3s", "/etc/rancher/k3s-backup", true},
+		{"kubeadm configuration mount", "kubeadm", "/etc/rancher/k3s", true},
+		{"K3s without registry CA", "k3s", "/etc/rancher/k3s", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := registryTestConfig(t)
+			cfg.Distro = tc.distro
+			cfg.Mounts = runtime.Mounts{{Source: t.TempDir(), Target: tc.target}}
+			if !tc.withCA {
+				cfg.RegistryCAs = nil
+			}
+			if err := cfg.PrepareRegistryCAs(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	// Cached certificate snapshots must not bypass a newly added mount check.
+	cfg := registryTestConfig(t)
+	cfg.Distro = "k3s"
+	if err := cfg.PrepareRegistryCAs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Mounts = runtime.Mounts{{Source: t.TempDir(), Target: "/etc"}}
+	if err := cfg.PrepareRegistryCAs(); err == nil {
+		t.Fatal("prepared snapshot bypassed configuration-mount rejection")
+	}
+}
+
+// Execute the actual generated archive-install script against a temporary guest
+// tree. Only absolute guest destinations are remapped; archive member paths and
+// their $tmp sources stay unchanged, so precondition/write ordering is tested.
+type registryExecutingRuntime struct {
+	registryRuntime
+	root string
+}
+
+func (r *registryExecutingRuntime) ExecStdinTimeout(node string, timeout time.Duration, in io.Reader, args ...string) error {
+	payload, err := io.ReadAll(in)
+	if err != nil {
+		return err
+	}
+	if err := r.registryRuntime.ExecStdinTimeout(node, timeout, bytes.NewReader(payload), args...); err != nil {
+		return err
+	}
+	script := strings.ReplaceAll(r.script, "$tmp/etc/", "$tmp/__KIAC_ARCHIVE_ETC__/")
+	script = strings.ReplaceAll(script, "/etc/", r.root+"/etc/")
+	script = strings.ReplaceAll(script, "$tmp/__KIAC_ARCHIVE_ETC__/", "$tmp/etc/")
+	script = strings.ReplaceAll(script, "/tmp/kiac-registry.", r.root+"/tmp/kiac-registry.")
+	command := exec.Command("sh", "-ec", script)
+	command.Stdin = bytes.NewReader(payload)
+	out, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("guest install script: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func TestRegistryK3sExistingConfigCannotOpenGateOrWriteTrust(t *testing.T) {
+	for _, tc := range []struct {
+		name, configPath, wantError string
+		symlink                     bool
+	}{
+		{name: "clean configuration"},
+		{name: "default configuration", configPath: "etc/rancher/k3s/config.yaml"},
+		{name: "runtime override drop-in", configPath: "etc/rancher/k3s/config.yaml.d/10-runtime.yaml"},
+		{name: "dangling default config symlink", configPath: "etc/rancher/k3s/config.yaml", symlink: true},
+		{name: "dangling drop-in symlink", configPath: "etc/rancher/k3s/config.yaml.d/10-runtime.yaml", symlink: true},
+		{name: "dangling registries symlink", configPath: "etc/rancher/k3s/registries.yaml", symlink: true, wantError: "registries.yaml already exists"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := registryTestConfig(t)
+			cfg.Distro = "k3s"
+			if err := cfg.PrepareRegistryCAs(); err != nil {
+				t.Fatal(err)
+			}
+			root := t.TempDir()
+			for _, dir := range []string{"tmp", "etc/rancher/k3s"} {
+				if err := os.MkdirAll(filepath.Join(root, dir), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.configPath != "" {
+				config := filepath.Join(root, tc.configPath)
+				if err := os.MkdirAll(filepath.Dir(config), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if tc.symlink {
+					if err := os.Symlink(filepath.Join(root, "missing-config"), config); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(config, []byte("private-registry: /custom/registries.yaml\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rt := &registryExecutingRuntime{root: root}
+			err := (&Manager{rt: rt}).installRegistryTrust("node", "k3s", cfg)
+			wantRejection := tc.configPath != ""
+			if wantRejection {
+				wantError := tc.wantError
+				if wantError == "" {
+					wantError = "existing K3s config.yaml or YAML drop-in conflicts"
+				}
+				if err == nil || !strings.Contains(err.Error(), wantError) {
+					t.Fatalf("error = %v, want existing-config rejection", err)
+				}
+				for _, path := range []string{cfg.registryCAs[0].path, "/etc/rancher/k3s/registries.yaml", registryReadyPath} {
+					if strings.TrimPrefix(path, "/") == tc.configPath {
+						continue // This preexisting path must be preserved below.
+					}
+					if _, err := os.Lstat(filepath.Join(root, strings.TrimPrefix(path, "/"))); !os.IsNotExist(err) {
+						t.Fatalf("rejected configuration wrote %s: %v", path, err)
+					}
+				}
+				if _, err := os.Lstat(filepath.Join(root, tc.configPath)); err != nil {
+					t.Fatalf("existing configuration was changed: %v", err)
+				}
+				if tc.symlink {
+					if target, err := os.Readlink(filepath.Join(root, tc.configPath)); err != nil || target != filepath.Join(root, "missing-config") {
+						t.Fatalf("existing configuration symlink was overwritten: target=%q, error=%v", target, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ca, err := os.ReadFile(filepath.Join(root, strings.TrimPrefix(cfg.registryCAs[0].path, "/")))
+			if err != nil || !bytes.Equal(ca, cfg.registryCAs[0].pem) {
+				t.Fatalf("clean configuration did not install CA snapshot: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(root, strings.TrimPrefix(registryReadyPath, "/"))); err != nil {
+				t.Fatalf("clean configuration did not open boot gate: %v", err)
+			}
+		})
 	}
 }

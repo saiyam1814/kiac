@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -93,6 +94,15 @@ type registryCA struct {
 // The snapshot is reused by all nodes, so files cannot change between uploads.
 func (cfg *Config) PrepareRegistryCAs() error {
 	if len(cfg.RegistryCAs) > 0 {
+		if cfg.Distro == "k3s" {
+			for _, mount := range cfg.Mounts {
+				target := path.Clean(mount.Target)
+				const configDir = "/etc/rancher/k3s"
+				if target == "/" || target == configDir || strings.HasPrefix(target, configDir+"/") || strings.HasPrefix(configDir, target+"/") {
+					return fmt.Errorf("--registry-ca cannot be combined with a K3s mount at %q; Kiac must manage /etc/rancher/k3s and its registry configuration", mount.Target)
+				}
+			}
+		}
 		for _, args := range [][]string{cfg.K3sControlPlaneArgs, cfg.K3sWorkerArgs} {
 			for _, arg := range args {
 				name, _, _ := strings.Cut(strings.TrimSpace(arg), "=")
@@ -160,6 +170,18 @@ func (cfg *Config) PrepareRegistryCAs() error {
 
 const registryReadyPath = "/etc/rancher/k3s/.kiac-registry-ready"
 
+// K3s automatically reads its default config and YAML drop-ins even when no
+// config flag was supplied. They can redirect registry/runtime settings away
+// from the files below, so reject them before installing any trust or opening
+// the first-boot gate. Include dangling symlinks instead of ignoring them.
+const k3sRegistryConfigPreconditions = `for config in /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml; do
+  if [ -e "$config" ] || [ -L "$config" ]; then
+    echo 'existing K3s config.yaml or YAML drop-in conflicts with --registry-ca; Kiac must manage the registry configuration and built-in runtime' >&2
+    exit 1
+  fi
+done
+`
+
 // Runtime Exec combines stdout/stderr. Keep successful migration warnings out
 // of the TOML document while retaining stderr when config loading fails.
 const containerdRegistryDumpScript = `log=$(mktemp /tmp/kiac-containerd.XXXXXX)
@@ -207,20 +229,23 @@ func (m *Manager) installRegistryTrust(node, distro string, cfg Config) error {
 			path := "/etc/containerd/certs.d/" + ca.host + "/hosts.toml"
 			if i := strings.LastIndex(ca.host, ":"); i > 0 {
 				encoded := ca.host[:i] + "_" + ca.host[i+1:] + "_"
-				fmt.Fprintf(&preconditions, "test ! -e %s || { echo 'encoded registry directory already exists; refusing to shadow it' >&2; exit 1; }\n", shQuote("/etc/containerd/certs.d/"+encoded))
+				encodedPath := shQuote("/etc/containerd/certs.d/" + encoded)
+				fmt.Fprintf(&preconditions, "test ! -e %s && test ! -L %s || { echo 'encoded registry directory already exists; refusing to shadow it' >&2; exit 1; }\n", encodedPath, encodedPath)
 			}
 			endpoint := "https://" + ca.host
 			if ca.host == "docker.io" {
 				endpoint = "https://registry-1.docker.io"
 			}
 			files[strings.TrimPrefix(path, "/")] = []byte(fmt.Sprintf("server = %q\n[host.%q]\n  capabilities = [\"pull\", \"resolve\"]\n  ca = %q\n", endpoint, endpoint, ca.path))
-			fmt.Fprintf(&preconditions, "test ! -e %s || { echo 'registry directory already exists; refusing to overwrite' >&2; exit 1; }\n", shQuote("/etc/containerd/certs.d/"+ca.host))
+			registryPath := shQuote("/etc/containerd/certs.d/" + ca.host)
+			fmt.Fprintf(&preconditions, "test ! -e %s && test ! -L %s || { echo 'registry directory already exists; refusing to overwrite' >&2; exit 1; }\n", registryPath, registryPath)
 			fmt.Fprintf(&script, "install -d -m 0755 %s\ninstall -m 0644 \"$tmp/%s\" %s\n", shQuote("/etc/containerd/certs.d/"+ca.host), strings.TrimPrefix(path, "/"), shQuote(path))
 		}
 	}
 	if distro == "k3s" {
 		files["etc/rancher/k3s/registries.yaml"], _ = yaml.Marshal(map[string]any{"configs": configs})
-		preconditions.WriteString("test ! -e /etc/rancher/k3s/registries.yaml || { echo 'registries.yaml already exists; refusing to overwrite' >&2; exit 1; }\n")
+		preconditions.WriteString(k3sRegistryConfigPreconditions)
+		preconditions.WriteString("test ! -e /etc/rancher/k3s/registries.yaml && test ! -L /etc/rancher/k3s/registries.yaml || { echo 'registries.yaml already exists; refusing to overwrite' >&2; exit 1; }\n")
 		script.WriteString("install -d -m 0755 /etc/rancher/k3s\nnew=$(mktemp /etc/rancher/k3s/registries.yaml.kiac.XXXXXX)\ninstall -m 0600 \"$tmp/etc/rancher/k3s/registries.yaml\" \"$new\"\nmv -f \"$new\" /etc/rancher/k3s/registries.yaml\n: > " + registryReadyPath + "\n")
 	} else {
 		remaining := time.Until(deadline)

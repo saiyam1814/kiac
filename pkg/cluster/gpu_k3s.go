@@ -75,6 +75,7 @@ func normalizeK3sStateVersion(version string) string {
 }
 
 func (m *Manager) createK3sGPU(cfg Config) error {
+	cfg.Distro = "k3s"
 	if err := cfg.PrepareRegistryCAs(); err != nil {
 		return err
 	}

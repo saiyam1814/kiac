@@ -266,6 +266,7 @@ func k3sToken() (string, error) {
 // a supervised process (single binary, sqlite datastore, no systemd). The
 // kubeadm path's systemd-based readiness and addon installs do not apply here.
 func (m *Manager) CreateK3s(cfg Config) error {
+	cfg.Distro = "k3s"
 	if err := cfg.PrepareRegistryCAs(); err != nil {
 		return err
 	}
