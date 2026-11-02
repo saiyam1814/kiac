@@ -83,6 +83,10 @@ ipFamily: ipv4
 #   - 127.0.0.1:8080:80
 #   - '[::1]:8443:443/udp'
 
+# Registry-specific HTTPS CA trust for workload pulls on every node.
+# registryCAs:
+#   "registry.example.com:5443": /Users/me/certs/company-ca.pem
+
 # Extra argv entries for k3s only; each list item is one token.
 # These are appended after kiac's defaults for the respective role.
 # Values are minimally validated; conflicting flags can break the cluster.

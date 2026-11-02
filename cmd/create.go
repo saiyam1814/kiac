@@ -54,6 +54,9 @@ var createClusterCmd = &cobra.Command{
 		if createCfg.GPUWorkers < 0 {
 			return fmt.Errorf("--gpu-workers must be >= 0")
 		}
+		if err := createCfg.PrepareRegistryCAs(); err != nil {
+			return err
+		}
 		if !createCfg.IPFamily.Valid() {
 			return fmt.Errorf("invalid ip-family %q (supported: ipv4, dual, ipv6)", createCfg.IPFamily)
 		}
@@ -189,6 +192,7 @@ func init() {
 	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
 	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
+	f.Var(&createCfg.RegistryCAs, "registry-ca", "trust a PEM CA bundle for HTTPS image pulls on every node (HOST[:PORT]=PEM_FILE); repeatable")
 	f.StringArrayVar(&createCfg.K3sControlPlaneArgs, "k3s-controlplane-arg", nil, "extra k3s server argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringArrayVar(&createCfg.K3sWorkerArgs, "k3s-worker-arg", nil, "extra k3s agent argument (k3s distro only); repeatable, minimally validated, and conflicting values can break the cluster")
 	f.StringVar(&createCfg.CPUs, "cpus", "4", "vCPUs per node VM")

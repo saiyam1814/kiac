@@ -93,6 +93,16 @@ addons:
   observability: false   <span class="c"># Prometheus + Grafana + node-exporter</span>
   gateway: false         <span class="c"># Gateway API CRDs + Traefik</span></code></pre>
 
+  <h2 id="registry-trust">Private registry CA trust</h2>
+  <p>Configure HTTPS registry trust before creating a kubeadm or K3s cluster, including GPU clusters. Kiac validates and snapshots PEM CA bundles before setup, then installs registry-specific trust on every control-plane and worker node. The guest files survive stop/start and resume; the original Mac files are not needed afterward.</p>
+  <pre><code>kiac create cluster --name private --workers 1 \
+  --registry-ca registry.example.com:5443=/Users/me/certs/company-ca.pem</code></pre>
+  <p>The matching config-file key is a map. File paths are relative to the current working directory unless absolute:</p>
+  <pre><code>registryCAs:
+  "registry.example.com:5443": /Users/me/certs/company-ca.pem</code></pre>
+  <p>This configures workload image pulls inside nodes. It does not configure the Mac's image downloader or registry authentication; use Kubernetes image pull secrets when credentials are required. CA bundles must contain CA certificates only. Trust stays scoped to the specified registry, and TLS certificate verification remains enabled.</p>
+  <p>Kiac refuses conflicting existing registry directories/configuration and custom containerd registry paths, and verifies that containerd activates the configured trust path. With registry trust enabled, K3s arguments that select a different registry file, external runtime/image service, Docker runtime, or config file are rejected. This prevents a successful create from silently ignoring the requested CA.</p>
+
   <h2 id="schema">Schema</h2>
   <table>
     <tr><th>Key</th><th>Type</th><th>Default</th><th>Maps to flag</th></tr>
@@ -110,6 +120,7 @@ addons:
     <tr><td><code>dns</code></td><td>list of IPs (max 3)</td><td>runtime default</td><td><code>--dns</code></td></tr>
     <tr><td><code>mounts</code></td><td>list of <code>source</code>, <code>target</code>, <code>readOnly</code></td><td>none</td><td><code>--mount</code></td></tr>
     <tr><td><code>publish</code></td><td>list of strings</td><td>none</td><td><code>--publish</code>; ordinary control-plane VM only; use an explicit host IP for loopback binding</td></tr>
+    <tr><td><code>registryCAs</code></td><td>map of registry authority to PEM file</td><td>none</td><td><code>--registry-ca</code>; explicit CLI values replace the entire file map</td></tr>
     <tr><td><code>k3sControlplaneArgs</code>, <code>k3sWorkerArgs</code></td><td>lists of strings</td><td>none</td><td><code>--k3s-controlplane-arg</code>, <code>--k3s-worker-arg</code>; each item is one argv token; ordinary K3s only</td></tr>
     <tr><td><code>cpus</code></td><td>string</td><td><code>"4"</code></td><td><code>--cpus</code></td></tr>
     <tr><td><code>memory</code></td><td>string</td><td><code>2G</code></td><td><code>--memory</code> (worker VMs)</td></tr>
