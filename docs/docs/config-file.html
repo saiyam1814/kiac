@@ -32,7 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
-    <a href="gpu.html">Apple GPU (alpha)</a>
+    <a href="gpu.html">Apple GPU (beta)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -66,7 +66,7 @@
 distro: kubeadm      <span class="c"># kubeadm or k3s</span>
 workers: 2           <span class="c"># worker node count; 0 untaints the control plane</span>
 k8sVersion: "1.37"   <span class="c"># default for both distros</span>
-<span class="c"># gpuWorkers: 1                 # alpha: real Apple GPU workers</span>
+<span class="c"># gpuWorkers: 1                 # beta: real Apple GPU workers</span>
 <span class="c"># gpuImage: fedora-44           # verified cloud image alias</span>
 <span class="c"># gpuDiskSize: 20G              # persistent disk per krunkit VM</span>
 <span class="c"># gpuResourceDriver: dra        # device-plugin, or dra on Kubernetes 1.36+</span>

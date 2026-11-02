@@ -4,11 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/saiyam1814/kiac/pkg/runtime"
+	"gopkg.in/yaml.v3"
+	apps "k8s.io/api/apps/v1"
+	core "k8s.io/api/core/v1"
 )
 
 func TestParseLlamaBenchmark(t *testing.T) {
@@ -262,5 +268,138 @@ func TestVerifiedGPUOffloadRejectsDiscoveryAndFallback(t *testing.T) {
 		if got != tc.want || (err != nil) != (tc.want == 0) {
 			t.Errorf("offload(%q)=%d,%v want %d", tc.output, got, err, tc.want)
 		}
+	}
+}
+
+func TestGPUBenchmarkFitsTwoCPUWorkerWithHealthDriver(t *testing.T) {
+	decodePods := func(manifest string) []core.PodSpec {
+		t.Helper()
+		decoder := yaml.NewDecoder(strings.NewReader(manifest))
+		var pods []core.PodSpec
+		for {
+			var document map[string]any
+			if err := decoder.Decode(&document); err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch document["kind"] {
+			case "Pod":
+				var pod core.Pod
+				if err := json.Unmarshal(raw, &pod); err != nil {
+					t.Fatal(err)
+				}
+				pods = append(pods, pod.Spec)
+			case "DaemonSet":
+				var ds apps.DaemonSet
+				if err := json.Unmarshal(raw, &ds); err != nil {
+					t.Fatal(err)
+				}
+				pods = append(pods, ds.Spec.Template.Spec)
+			}
+		}
+		return pods
+	}
+	benchmark := decodePods(gpuBenchmarkPodManifest("minimum-cpu", 1200))
+	if len(benchmark) != 1 || len(benchmark[0].Containers) != 1 {
+		t.Fatal("benchmark Pod missing")
+	}
+	pod := benchmark[0]
+	bench := pod.Containers[0]
+	if got := bench.Resources.Requests.Cpu().MilliValue(); got != 1000 {
+		t.Fatalf("benchmark CPU request=%dm, want1000m", got)
+	}
+	if !bench.Resources.Limits.Cpu().IsZero() {
+		t.Fatal("benchmark CPU should remain available for bursting")
+	}
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Fatal("benchmark has no API credential requirement")
+	}
+	for name, manifest := range map[string]string{"dra": gpuDRAManifest, "device-plugin": gpuDevicePluginManifest} {
+		t.Run(name, func(t *testing.T) {
+			drivers := decodePods(manifest)
+			if len(drivers) != 1 {
+				t.Fatal("driver DaemonSet missing")
+			}
+			var overhead int64
+			for _, container := range drivers[0].Containers {
+				overhead += container.Resources.Requests.Cpu().MilliValue()
+			}
+			total := bench.Resources.Requests.Cpu().MilliValue() + overhead
+			if total >= 2000 {
+				t.Fatalf("benchmark+driver reserve%dm on a two-vCPU worker; leave room for system Pods", total)
+			}
+		})
+	}
+}
+
+func TestGPUBenchmarkTopologyRequiresOneSufficientWorker(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		states []runtime.KrunkitNodeState
+		want   bool
+	}{
+		{"minimum", []runtime.KrunkitNodeState{{GPU: true, CPUs: 2, MemoryMiB: 3072}}, true},
+		{"more memory", []runtime.KrunkitNodeState{{GPU: true, CPUs: 2, MemoryMiB: 4096}}, true},
+		{"one CPU", []runtime.KrunkitNodeState{{GPU: true, CPUs: 1, MemoryMiB: 4096}}, false},
+		{"below memory boundary", []runtime.KrunkitNodeState{{GPU: true, CPUs: 2, MemoryMiB: 3071}}, false},
+		{"not GPU", []runtime.KrunkitNodeState{{CPUs: 2, MemoryMiB: 4096}}, false},
+		{"mixed workers", []runtime.KrunkitNodeState{{GPU: true, CPUs: 1, MemoryMiB: 2048}, {GPU: true, CPUs: 2, MemoryMiB: 3072}}, true},
+		{"cannot combine resources", []runtime.KrunkitNodeState{{GPU: true, CPUs: 1, MemoryMiB: 4096}, {GPU: true, CPUs: 2, MemoryMiB: 2048}}, false},
+		{"none", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nodes []GPUNodeStatus
+			states := map[string]runtime.KrunkitNodeState{}
+			for i, state := range tc.states {
+				name := fmt.Sprintf("kiac-bench-gpu-%d", i+1)
+				nodes = append(nodes, GPUNodeStatus{Name: name})
+				state.Name = name
+				states[name] = state
+			}
+			err := validateGPUBenchmarkTopology(nodes, func(name string) (runtime.KrunkitNodeState, error) { return states[name], nil })
+			if (err == nil) != tc.want {
+				t.Fatalf("topology error=%v want valid=%t", err, tc.want)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "--cpus 2 --memory 3G") || !strings.Contains(err.Error(), "4G recommended")) {
+				t.Fatalf("not actionable: %v", err)
+			}
+		})
+	}
+}
+func TestGPUBenchmarkRejectsSmallWorkerBeforeResolvingModel(t *testing.T) {
+	root := t.TempDir()
+	name := "kiac-bench-gpu-1"
+	dir := filepath.Join(root, "nodes", name)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	client := &runtime.KrunkitClient{RootDir: root}
+	m := &Manager{krunkit: client}
+	write := func(memory int) {
+		t.Helper()
+		raw, _ := json.Marshal(runtime.KrunkitNodeState{Schema: 1, Name: name, GPU: true, CPUs: 2, MemoryMiB: memory})
+		if err := os.WriteFile(filepath.Join(dir, "state.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	missingModel := filepath.Join(root, "missing.gguf")
+	write(2048)
+	if _, _, err := m.prepareGPUBenchmarkModel([]GPUNodeStatus{{Name: name}}, missingModel); err == nil || !strings.Contains(err.Error(), "requires at least one GPU worker") {
+		t.Fatalf("undersized worker reached model resolution: %v", err)
+	}
+	write(3072)
+	if _, _, err := m.prepareGPUBenchmarkModel([]GPUNodeStatus{{Name: name}}, missingModel); err == nil || !strings.Contains(err.Error(), "reading benchmark model") {
+		t.Fatalf("sufficient worker did not reach model resolution: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "state.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.prepareGPUBenchmarkModel([]GPUNodeStatus{{Name: name}}, missingModel); err == nil || !strings.Contains(err.Error(), "read benchmark GPU worker") {
+		t.Fatalf("missing durable inventory accepted: %v", err)
 	}
 }

@@ -1,7 +1,13 @@
 package cluster
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"github.com/saiyam1814/kiac/pkg/runtime"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +24,7 @@ func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
 		RenderDevice:  true,
 		KubernetesAPI: "venus",
 		DriverReady:   true,
+		Health:        "healthy",
 		ResourceSlice: true,
 	}
 
@@ -29,6 +36,8 @@ func TestGPUNodeSchedulableRequiresRealInventory(t *testing.T) {
 			func(status *GPUNodeStatus) { status.RenderDevice = false },
 			func(status *GPUNodeStatus) { status.KubernetesAPI = "" },
 			func(status *GPUNodeStatus) { status.DriverReady = false },
+			func(status *GPUNodeStatus) { status.Health = "unknown" },
+			func(status *GPUNodeStatus) { status.Health = "unhealthy" },
 		} {
 			status := base
 			mutate(&status)
@@ -75,7 +84,7 @@ func TestGPUNodeSchedulableRejectsUnavailableNodes(t *testing.T) {
 			}
 			node.Metadata.Labels = map[string]string{gpuResourceDomain + "/gpu.present": "true"}
 			node.Status.Allocatable = map[string]string{gpuResourceName: "1"}
-			status := GPUNodeStatus{RenderDevice: true, KubernetesAPI: "venus", DriverReady: true, ResourceSlice: true}
+			status := GPUNodeStatus{RenderDevice: true, KubernetesAPI: "venus", DriverReady: true, ResourceSlice: true, Health: "healthy"}
 			for _, driver := range []string{"device-plugin", "dra"} {
 				if gpuNodeSchedulable(driver, status, node) {
 					t.Errorf("%s reported a %s node as schedulable", driver, tc.name)
@@ -106,5 +115,85 @@ func TestGPUInventoryReadsAreBounded(t *testing.T) {
 		if (distro == "kubeadm") != strings.Contains(command, "--kubeconfig "+adminConf) {
 			t.Fatalf("wrong kubeconfig: %s", command)
 		}
+	}
+}
+
+func TestGPULiveHealthRejectsStaleAndUnsupportedResults(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, state, scope string
+		age                time.Duration
+		want               string
+	}{
+		{"fresh", "healthy", "vulkan-transfer", time.Second, "healthy"},
+		{"failed", "unhealthy", "vulkan-transfer", time.Second, "unhealthy"},
+		{"stale", "healthy", "vulkan-transfer", 21 * time.Second, "unknown"},
+		{"future", "healthy", "vulkan-transfer", -time.Minute, "unknown"},
+		{"wrong scope", "healthy", "file-exists", time.Second, "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(gpuLiveHealth{State: tc.state, Scope: tc.scope, CheckedAt: now.Add(-tc.age)})
+			if got := parseGPULiveHealth(string(raw), now); got.State != tc.want {
+				t.Fatalf("health=%+v want %s", got, tc.want)
+			}
+		})
+	}
+	if got := parseGPULiveHealth("not json", now); got.State != "unknown" {
+		t.Fatal("invalid JSON accepted")
+	}
+}
+func TestGPUResourceSliceTaintsPreventScheduling(t *testing.T) {
+	for _, effect := range []string{"NoSchedule", "NoExecute"} {
+		var list resourceSliceList
+		raw := `{"items":[{"spec":{"driver":"gpu.kiac.dev","nodeName":"gpu","devices":[{"name":"venus-0","taints":[{"key":"other.example/maintenance","effect":"` + effect + `"}]}]}}]}`
+		if err := json.Unmarshal([]byte(raw), &list); err != nil {
+			t.Fatal(err)
+		}
+		if gpuSliceDeviceSchedulable(list.Items[0].Spec.Devices[0].Taints) {
+			t.Fatalf("ignored %s device taint", effect)
+		}
+	}
+}
+
+func TestGPULiveHealthReadsHonorDiagnosticTimeout(t *testing.T) {
+	for _, stage := range []string{"list", "exec"} {
+		t.Run(stage, func(t *testing.T) {
+			binary := filepath.Join(t.TempDir(), "container")
+			script := `#!/bin/sh
+case "$*" in
+ *"get pods"*)
+  if [ "$KIAC_HEALTH_HANG" = list ]; then exec sleep 30; fi
+  printf '%s\n' '{"items":[{"metadata":{"name":"agent"},"spec":{"nodeName":"gpu"}}]}'
+  ;;
+ *"--mode=health-status"*) exec sleep 30 ;;
+ *) exit 0 ;;
+esac
+`
+			if err := os.WriteFile(binary, []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			// Warm the newly created executable before measuring a sub-second
+			// command deadline; macOS may inspect a new script on first exec.
+			warmCtx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			if err := exec.CommandContext(warmCtx, binary, "warmup").Run(); err != nil {
+				stop()
+				t.Fatal(err)
+			}
+			stop()
+			t.Setenv("KIAC_HEALTH_HANG", stage)
+			m := &Manager{rt: &runtime.Client{Bin: binary}}
+			start := time.Now()
+			health, err := m.gpuDriverHealthNodes("cp", "kubeadm", "dra", 250*time.Millisecond)
+			if elapsed := time.Since(start); elapsed > 2*time.Second {
+				t.Fatalf("diagnostic ignored short deadline: %s", elapsed)
+			}
+			if stage == "list" {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("list timeout=%v", err)
+				}
+			} else if err != nil || health["gpu"].State != "unknown" || !strings.Contains(health["gpu"].Message, "deadline exceeded") {
+				t.Fatalf("exec timeout health=%+v err=%v", health, err)
+			}
+		})
 	}
 }

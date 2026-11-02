@@ -4,7 +4,7 @@ This lab creates a multi-node Kubernetes cluster with a real Apple GPU worker,
 proves the pod sees the Venus Vulkan device, runs a reproducible Metal-versus-
 Venus LLM benchmark, and serves TinyLlama through a LoadBalancer.
 
-This is an alpha feature for Apple silicon. It is not GPU emulation: krunkit
+This is a beta feature for Apple silicon. It is not GPU emulation: krunkit
 maps the Mac's Apple GPU into its Linux VMs as `/dev/dri` through
 virtio-gpu/Venus. Only designated `-gpu-N` workers publish Kubernetes GPU
 inventory. It also is not CUDA compatibility. Kiac never advertises
@@ -62,7 +62,7 @@ kiac create cluster --name gpu-ka --distro kubeadm --k8s-version 1.37 \
 ```
 
 The default `--gpu-resource-driver device-plugin` exposes one
-`kiac.dev/gpu` extended resource per GPU worker. Experimental
+`kiac.dev/gpu` extended resource per GPU worker. Opt-in
 `--gpu-resource-driver dra` on Kubernetes 1.36+ publishes a
 `gpu.kiac.dev` DeviceClass and one memory-capacity ResourceSlice per worker.
 Both modes accept the ordinary `kiac.dev/gpu: 1` pod resources below.
@@ -91,6 +91,10 @@ enumerate no Venus device due to an upstream blob-alignment gap. Do not replace
 it with a random Vulkan image and assume `/dev/dri` alone is sufficient.
 
 ## 4. Measure real model inference
+
+The benchmark needs at least one GPU worker with two vCPUs and 3 GiB RAM.
+Create it with `--cpus 2 --memory 3G`; `--memory 4G` is recommended. Kiac
+checks this sizing before any model download or host benchmark.
 
 ```sh
 kiac gpu bench --name gpu-lab

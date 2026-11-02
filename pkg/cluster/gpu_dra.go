@@ -13,9 +13,12 @@ import (
 )
 
 const gpuAgentNodePath = "/usr/local/libexec/kiac/kiac-gpu-agent"
+const gpuProbeNodePath = "/usr/local/libexec/kiac/kiac-vulkan-probe"
 
-func gpuAgentBinary() ([]byte, error) {
-	reader, err := gzip.NewReader(bytes.NewReader(gpuAgentLinuxARM64Gzip))
+func gpuAgentBinary() ([]byte, error) { return decompressGPUBinary(gpuAgentLinuxARM64Gzip) }
+func gpuProbeBinary() ([]byte, error) { return decompressGPUBinary(gpuProbeLinuxARM64Gzip) }
+func decompressGPUBinary(compressed []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, err
 	}
@@ -31,19 +34,7 @@ func (m *Manager) installGPUDRA(cp string, cfg Config, gpuNodes []string) error 
 		if err := m.ensureNVIDIARuntimeClass(cp, cfg.Distro); err != nil {
 			return err
 		}
-		binary, err := gpuAgentBinary()
-		if err != nil {
-			return fmt.Errorf("reading embedded GPU agent: %w", err)
-		}
-		if err := inParallel(len(gpuNodes), func(i int) error {
-			return m.rt.ExecStdinTimeout(gpuNodes[i], transferBudget(cfg.WaitTimeout), bytes.NewReader(binary), "sh", "-euc", `
-install -d -m 0755 /usr/local/libexec/kiac /var/lib/kubelet/plugins /var/lib/kubelet/plugins_registry /etc/cdi
-tmp="$(mktemp /usr/local/libexec/kiac/kiac-gpu-agent.XXXXXX)"
-cat > "$tmp"
-chmod 0755 "$tmp"
-mv "$tmp" /usr/local/libexec/kiac/kiac-gpu-agent
-`)
-		}); err != nil {
+		if err := inParallel(len(gpuNodes), func(i int) error { return m.uploadGPUDriverBinaries(gpuNodes[i]) }); err != nil {
 			return err
 		}
 		if _, err := m.gpuKubectl(cp, cfg.Distro, "delete", "daemonset", "kiac-gpu-device-plugin", "-n", "kube-system", "--ignore-not-found"); err != nil {
@@ -52,7 +43,7 @@ mv "$tmp" /usr/local/libexec/kiac/kiac-gpu-agent
 		if err := m.gpuKubectlStdin(cp, cfg.Distro, strings.NewReader(gpuDRAManifest), "apply", "-f", "-"); err != nil {
 			return err
 		}
-		_, err = m.gpuKubectl(cp, cfg.Distro, "rollout", "status", "daemonset/kiac-gpu-dra",
+		_, err := m.gpuKubectl(cp, cfg.Distro, "rollout", "status", "daemonset/kiac-gpu-dra",
 			"-n", "kube-system", fmt.Sprintf("--timeout=%ds", int(cfg.WaitTimeout.Seconds())))
 		return err
 	}); err != nil {
@@ -90,7 +81,11 @@ type resourceSliceList struct {
 			Driver   string `json:"driver"`
 			NodeName string `json:"nodeName"`
 			Devices  []struct {
-				Name       string `json:"name"`
+				Name   string `json:"name"`
+				Taints []struct {
+					Key    string `json:"key"`
+					Effect string `json:"effect"`
+				} `json:"taints"`
 				Attributes map[string]struct {
 					String *string `json:"string"`
 				} `json:"attributes"`
@@ -113,7 +108,7 @@ func (m *Manager) waitGPUDRA(cp, distro string, gpuNodes []string, timeout time.
 			if err := json.Unmarshal([]byte(out), &list); err == nil {
 				ready := map[string]bool{}
 				for _, item := range list.Items {
-					if item.Spec.Driver == "gpu.kiac.dev" && want[item.Spec.NodeName] && len(item.Spec.Devices) == 1 && item.Spec.Devices[0].Name == "venus-0" {
+					if item.Spec.Driver == "gpu.kiac.dev" && want[item.Spec.NodeName] && len(item.Spec.Devices) == 1 && item.Spec.Devices[0].Name == "venus-0" && gpuSliceDeviceSchedulable(item.Spec.Devices[0].Taints) {
 						ready[item.Spec.NodeName] = true
 					}
 				}
@@ -130,4 +125,16 @@ func (m *Manager) waitGPUDRA(cp, distro string, gpuNodes []string, timeout time.
 		time.Sleep(2 * time.Second)
 	}
 	return fmt.Errorf("DRA inventory did not become ready in %s: %s", timeout, last)
+}
+
+func gpuSliceDeviceSchedulable(taints []struct {
+	Key    string `json:"key"`
+	Effect string `json:"effect"`
+}) bool {
+	for _, taint := range taints {
+		if taint.Effect == "NoSchedule" || taint.Effect == "NoExecute" {
+			return false
+		}
+	}
+	return true
 }

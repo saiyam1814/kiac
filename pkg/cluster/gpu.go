@@ -77,6 +77,9 @@ func (m *Manager) installGPUResources(cp string, cfg Config, gpuNodes []string) 
 		if err := m.ensureNVIDIARuntimeClass(cp, cfg.Distro); err != nil {
 			return err
 		}
+		if err := inParallel(len(gpuNodes), func(i int) error { return m.uploadGPUDriverBinaries(gpuNodes[i]) }); err != nil {
+			return err
+		}
 		if err := m.gpuKubectlStdin(cp, cfg.Distro, strings.NewReader(gpuDevicePluginManifest), "apply", "-f", "-"); err != nil {
 			return err
 		}
@@ -211,7 +214,7 @@ func (m *Manager) reconcileInstalledGPUResources(cp, distro string, gpuNodes []s
 			return err
 		}
 		if err := inParallel(len(gpuNodes), func(i int) error {
-			return m.uploadGPUAgent(gpuNodes[i])
+			return m.uploadGPUDriverBinaries(gpuNodes[i])
 		}); err != nil {
 			return err
 		}
@@ -233,6 +236,9 @@ func (m *Manager) reconcileInstalledGPUResources(cp, distro string, gpuNodes []s
 			return fmt.Errorf("cluster has GPU nodes but no kiac GPU resource driver")
 		}
 		if err := m.ensureNVIDIARuntimeClass(cp, distro); err != nil {
+			return err
+		}
+		if err := inParallel(len(gpuNodes), func(i int) error { return m.uploadGPUDriverBinaries(gpuNodes[i]) }); err != nil {
 			return err
 		}
 		if err := m.gpuKubectlStdin(cp, distro, strings.NewReader(gpuDevicePluginManifest), "apply", "-f", "-"); err != nil {

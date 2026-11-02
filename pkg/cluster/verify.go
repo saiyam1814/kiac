@@ -606,6 +606,7 @@ func (m *Manager) verifyGPUChecks(report *VerificationReport, infos []runtime.In
 	}
 
 	driverMode, driverHealthy, driverNodesReady := m.verifyGPUDriver(report, gpuNodes, cp, timeout)
+	healthNodes, healthErr := m.gpuDriverHealthNodes(cp, report.Distro, driverMode, timeout)
 
 	out, err := m.diagnosticKubectl(cp, report.Distro, timeout, "get", "nodes", "-o", "json")
 	if err != nil {
@@ -630,7 +631,7 @@ func (m *Manager) verifyGPUChecks(report *VerificationReport, infos []runtime.In
 	var invalid []string
 	for _, info := range gpuNodes {
 		node, ok := nodesByName[info.Name]
-		valid := driverHealthy && driverNodesReady[info.Name] && ok && node.Metadata.Labels[gpuResourceDomain+"/gpu.present"] == "true" &&
+		valid := healthErr == nil && healthNodes[info.Name].State == "healthy" && driverHealthy && driverNodesReady[info.Name] && ok && node.Metadata.Labels[gpuResourceDomain+"/gpu.present"] == "true" &&
 			node.Metadata.Labels[gpuResourceDomain+"/gpu.api"] == "venus" &&
 			node.Status.Capacity["nvidia.com/gpu"] == "" && node.Status.Allocatable["nvidia.com/gpu"] == ""
 		if driverMode == "device-plugin" {
@@ -658,11 +659,17 @@ func (m *Manager) verifyGPUChecks(report *VerificationReport, infos []runtime.In
 			continue
 		}
 		_, nodeExists := nodesByName[info.Name]
-		if !nodeExists || !driverHealthy || !driverNodesReady[info.Name] {
-			report.add(VerificationFail, id, "Apple GPU: "+info.Name, "render device exists, but schedulable GPU capacity is unhealthy", "kubectl describe node "+info.Name)
+		if !nodeExists || !driverHealthy || !driverNodesReady[info.Name] || healthErr != nil || healthNodes[info.Name].State != "healthy" {
+			detail := "render device exists, but schedulable GPU capacity or live Vulkan transfer health is unavailable"
+			if healthErr != nil {
+				detail += ": " + compactError(healthErr)
+			} else if health := healthNodes[info.Name]; health.Message != "" {
+				detail += ": " + health.Message
+			}
+			report.add(VerificationFail, id, "Apple GPU: "+info.Name, detail, "kubectl describe node "+info.Name)
 			continue
 		}
-		report.add(VerificationPass, id, "Apple GPU: "+info.Name, "Venus render device and schedulable capacity are healthy", "")
+		report.add(VerificationPass, id, "Apple GPU: "+info.Name, "Vulkan queue/transfer probe and schedulable capacity are healthy", "")
 	}
 }
 
@@ -709,7 +716,7 @@ func (m *Manager) verifyGPUDriver(report *VerificationReport, gpuNodes []runtime
 			return "dra", false, readyNodes
 		}
 		for _, slice := range slices.Items {
-			if expectedNodes[slice.Spec.NodeName] && slice.Spec.Driver == "gpu.kiac.dev" && len(slice.Spec.Devices) == 1 && slice.Spec.Devices[0].Name == "venus-0" {
+			if expectedNodes[slice.Spec.NodeName] && slice.Spec.Driver == "gpu.kiac.dev" && len(slice.Spec.Devices) == 1 && slice.Spec.Devices[0].Name == "venus-0" && gpuSliceDeviceSchedulable(slice.Spec.Devices[0].Taints) {
 				readyNodes[slice.Spec.NodeName] = true
 			}
 		}

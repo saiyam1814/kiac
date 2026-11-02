@@ -82,6 +82,7 @@ spec:
         app.kubernetes.io/part-of: kiac
     spec:
       serviceAccountName: kiac-gpu-dra
+      automountServiceAccountToken: false
       priorityClassName: system-node-critical
       nodeSelector:
         kiac.dev/gpu.present: "true"
@@ -116,7 +117,19 @@ spec:
               memory: 32Mi
             limits:
               memory: 128Mi
+          readinessProbe:
+            exec:
+              command: [/opt/kiac/kiac-gpu-agent, --mode=health-check]
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 1
           volumeMounts:
+            - name: api-credentials
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: health
+              mountPath: /run/kiac-gpu-health
+              readOnly: true
             - name: agent
               mountPath: /opt/kiac/kiac-gpu-agent
               readOnly: true
@@ -130,7 +143,69 @@ spec:
               mountPath: /dev/dri
             - name: tmp
               mountPath: /tmp
+        - name: health-probe
+          image: quay.io/slopezpa/fedora-vgpu-llama@sha256:f58a677fd617e5a6d0b7f558fd137d63a57aaac70293956ef09a16ec69e210d4
+          imagePullPolicy: IfNotPresent
+          command: [/opt/kiac/kiac-gpu-agent]
+          args: [--mode=health-watchdog, --probe-binary=/opt/kiac/kiac-vulkan-probe]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: MESA_SHADER_CACHE_DISABLE
+              value: "true"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: native-probe
+              mountPath: /opt/kiac/kiac-vulkan-probe
+              readOnly: true
+            - name: agent
+              mountPath: /opt/kiac/kiac-gpu-agent
+              readOnly: true
+            - name: dri
+              mountPath: /dev/dri
+            - name: health
+              mountPath: /run/kiac-gpu-health
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: native-probe
+          hostPath:
+            path: /usr/local/libexec/kiac/kiac-vulkan-probe
+            type: File
+        - name: health
+          emptyDir: {}
+        - name: api-credentials
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
         - name: agent
           hostPath:
             path: /usr/local/libexec/kiac/kiac-gpu-agent

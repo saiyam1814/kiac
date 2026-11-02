@@ -607,7 +607,7 @@
     <a class="brand" href="#top" aria-label="kiac home"><img src="assets/logo-mark.svg" alt="">kiac</a>
     <button class="menu-button" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
     <div class="nav-links" id="nav-links">
-      <a href="#gpu">GPU alpha</a>
+      <a href="#gpu">GPU beta</a>
       <a href="#engines">Engines</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#labs">Labs</a>
@@ -650,7 +650,7 @@
       <div class="gpu-layout">
         <div>
           <div class="section-head">
-            <p class="eyebrow">New in v0.7.1 &middot; Alpha</p>
+            <p class="eyebrow">Beta &middot; Venus/Vulkan</p>
             <h2>Your Mac GPU, scheduled by Kubernetes.</h2>
             <p>Kiac creates dedicated krunkit workers, maps the Apple GPU through virtio-gpu, and exposes a verified Venus/Vulkan device only to workloads that request it.</p>
           </div>
@@ -802,15 +802,15 @@
           <li><strong>Host:</strong> Apple silicon Mac</li>
           <li><strong>Everyday clusters:</strong> apple/container 1.6.0+ (1.6.1 recommended) and kubectl</li>
           <li><strong>Multi-node:</strong> macOS 26+</li>
-          <li><strong>GPU alpha:</strong> krunkit 1.3.2+ and vmnet-helper 0.13.0+</li>
+          <li><strong>GPU beta:</strong> krunkit 1.3.2+ and vmnet-helper 0.13.0+</li>
         </ul>
       </div>
       <div class="install-stack">
         <div class="install-block"><span>01 &middot; Install kiac</span><code>brew install --cask saiyam1814/tap/kiac</code></div>
         <div class="install-block"><span>02 &middot; Check the host</span><code>kiac doctor</code></div>
         <div class="install-block"><span>03 &middot; Create a daily cluster</span><code>kiac create cluster --name dev --workers 2</code></div>
-        <div class="install-block"><span>GPU alpha &middot; Check optional dependencies</span><code>kiac gpu doctor</code></div>
-        <div class="install-block"><span>GPU alpha &middot; Create a DRA cluster</span><code>kiac create cluster --name gpu --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra</code></div>
+        <div class="install-block"><span>GPU beta &middot; Check optional dependencies</span><code>kiac gpu doctor</code></div>
+        <div class="install-block"><span>GPU beta &middot; Create a DRA cluster</span><code>kiac create cluster --name gpu --distro k3s --workers 1 --gpu-workers 1 --gpu-resource-driver dra</code></div>
         <div class="hero-actions">
           <a class="button button-primary" href="docs/getting-started.html">Follow the getting started guide</a>
           <a class="button button-secondary" href="docs/cli-reference.html">CLI reference</a>

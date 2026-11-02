@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Real Apple GPU nodes (alpha) · kiac docs</title>
+<title>Real Apple GPU nodes (beta) · kiac docs</title>
 <meta name="description" content="Run real Apple GPU Vulkan workloads and inference in Kiac Kubernetes clusters through krunkit, Venus, a device plugin, or Kubernetes DRA.">
 <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
 <link rel="stylesheet" href="docs.css">
@@ -32,7 +32,7 @@
   <div class="group"><div class="glabel">Distros &amp; kernels</div>
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
-    <a class="on" href="gpu.html">Apple GPU (alpha)</a>
+    <a class="on" href="gpu.html">Apple GPU (beta)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -54,7 +54,7 @@
   </div>
 </aside>
 <main>
-  <div class="kicker">Alpha · Apple silicon</div>
+  <div class="kicker">Beta · Apple silicon</div>
   <h1>Real Apple GPU nodes</h1>
   <p class="lede">Kiac can map the Mac's Apple GPU into krunkit Linux VMs and expose selected workers' Venus Vulkan devices to Kubernetes workloads through the honest <code>kiac.dev/gpu</code> resource.</p>
 
@@ -64,6 +64,17 @@
   <h2 id="architecture">Architecture</h2>
   <p>Ordinary Kiac clusters keep using the fast apple/container backend. A cluster with <code>--gpu-workers</code> uses krunkit and vmnet-helper for its complete topology: control plane, ordinary workers, and GPU workers. This keeps every node on one reliable VM network. Only nodes named <code>-gpu-N</code> publish GPU labels, receive the <code>kiac.dev/gpu=true:NoSchedule</code> taint, and provide schedulable GPU inventory. Kiac mounts <code>/dev/dri</code> only into workloads allocated through its GPU driver.</p>
   <p>GPU mode is opt-in, so its dependencies, larger disk image, and longer first boot add no startup or idle overhead to an ordinary cluster. Existing LoadBalancer, edge proxy, storage, metrics, Gateway API, observability, verify, support, stop/start, delete, and resume paths work through the same cluster manager.</p>
+
+  <h2 id="beta-validation">Beta validation</h2>
+  <p>This beta covers local Venus/Vulkan integration with Kubernetes. The following profiles were exercised on an Apple M1 Max running macOS 27.0.1. These results do not establish production support, an SLA, or validation across all Apple silicon models, macOS releases, and workloads.</p>
+  <table>
+    <tr><th>Profile</th><th>Completed validation</th></tr>
+    <tr><td>K3s 1.37, DRA, two GPU workers</td><td>Native Vulkan queue submission and 64-byte transfer readback; healthy, failed, and recovered live status; allocated Pod device-health transitions; blocked and recovered new claims; existing workloads retained during probe failure; stale-report withdrawal after pausing the probe; driver Pod replacement; full VM stop and cluster resume.</td></tr>
+    <tr><td>K3s 1.36.4, DRA</td><td>Healthy, failed, and recovered live status; allocation health and blocking/recovery of new claims; stale-report withdrawal; driver Pod replacement.</td></tr>
+    <tr><td>kubeadm 1.37, device plugin</td><td>Probe failure withdraws allocatable GPU capacity to zero; fresh health restores it; kubelet device-plugin socket replacement and a new workload allocation; full VM stop and cluster resume.</td></tr>
+    <tr><td>Pinned TinyLlama on Venus</td><td>Inference confirmed 23 offloaded model layers before VM restart in both the K3s 1.37 DRA and kubeadm 1.37 device-plugin profiles. This validates an actual GPU workload in addition to the transfer probe.</td></tr>
+  </table>
+  <p>Health means a bounded queue and transfer operation completed; it does not prove compute-shader correctness or application performance. Guest access is Venus/Vulkan, not CUDA or direct Metal passthrough. DRA memory requests account against each VM's GPU window, not dedicated physical memory or a hard isolation boundary between workers sharing the Mac GPU. Host sleep/wake has not been validated. Native Metal comparison remains an optional benchmark function and was not rerun as part of this beta recovery matrix.</p>
 
   <h2 id="requirements">Requirements</h2>
   <table>
@@ -147,6 +158,7 @@ KIAC_REAL_APPLE_GPU_OK</span></code></pre>
   <pre><code>kiac gpu bench --name gpu-lab
 kubectl apply -f examples/gpu-inference.yaml
 kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=10m</code></pre>
+  <p>The benchmark requires at least one GPU worker provisioned with two vCPUs and 3 GiB RAM: use <code>--cpus 2 --memory 3G</code> when creating the cluster; <code>--memory 4G</code> is recommended. Kiac checks persisted VM sizing before downloading the model or running the host benchmark. The benchmark Pod requests one CPU and 2 GiB RAM so the GPU driver and health probe have scheduling headroom.</p>
   <p>The benchmark uses the same revision-pinned TinyLlama Q4_K_M model and pinned ARM64 llama.cpp container for every run. It performs three repetitions with four CPU threads per backend and, when host <code>llama-bench</code> is available, the same prompt and generation workload on native Metal. Reports preserve build IDs, GPU identity, thread counts, and timing standard deviations when provided by llama.cpp; conflicting metadata is rejected. The host binary is not version-pinned, and differing build IDs trigger a warning in text output. Even matched revisions use different Metal and Vulkan backends, so this is a regression baseline, not an isolated virtualization-overhead measurement. Use <code>--skip-host</code> or <code>-o json</code> for automation.</p>
   <p>Every run creates a uniquely labelled pod in the <code>default</code> namespace, independent of the context's configured namespace. Cleanup targets only that run's label, including after a lost creation response. Cleanup is best-effort when the API is unavailable; the pod's active deadline bounds execution but does not garbage-collect the pod object.</p>
   <p>The benchmark requires verbose model-loading output to confirm that model layers were actually offloaded to the GPU. The report's <code>offloadedLayers</code> field is the confirmed count; <code>gpuLayers</code> is llama.cpp's requested setting. Device discovery alone, zero-layer offload, and a software Vulkan device are rejected as GPU benchmark results.</p>
@@ -172,6 +184,7 @@ kiac start node gpu-1 --name gpu-lab
 kiac resume cluster --name gpu-lab
 kiac delete cluster --name gpu-lab</code></pre>
   <p><code>kiac gpu status</code> checks node readiness and cordon state as well as render-device and resource-driver inventory. Cordoned, deleting, or NotReady nodes are not reported as schedulable. This is not a measure of unused GPU capacity or a guarantee that a particular workload's scheduling constraints can be satisfied.</p>
+  <p>Both resource drivers continuously check real Venus Vulkan queue submission and transfer readback in a separate probe container. Missing, failed, stale, or mismatched Pod/VM-boot reports block new allocations: DRA retains the device and its capacity with a <code>NoSchedule</code> taint, while the device plugin reports it unhealthy. A successful fresh probe restores availability without restarting the driver. Existing workloads are not evicted. Status and verify read the live report and distinguish this transfer check from driver readiness; this check does not prove compute-shader correctness or workload performance.</p>
   <p>New GPU clusters report each VM's DHCP address through a private per-node VirtioFS status share. A persistent guest timer refreshes the report on every boot and after address changes; Kiac validates the node identity, boot generation, and owned subnet before using it for SSH. This avoids relying on ARP visibility, which macOS 27 can restrict when Kiac runs from an app. Existing GPU VMs retain ARP and saved-address discovery because their first-boot configuration has already run. If an older cluster cannot be discovered, recreate it with the current Kiac version to install the reporting service.</p>
   <p><code>kiac gpu inspect</code> joins GPU inventory, DRA ResourceClaims, and Pods across namespaces. It shows each claim's pool, device, share ID, allocated memory, and consumers, together with scheduling or container waiting reasons. It also finds claims generated from ResourceClaimTemplates and extended-resource requests. With the device-plugin backend, it lists GPU workloads without inventing DRA memory accounting.</p>
   <p>The capacity table reports the published VM window, reservations from allocated claims, and the remaining <em>scheduler accounting</em> capacity. Deleting claims continue to count until their allocation disappears. Missing or inconsistent accounting is reported as unknown. These figures are not physical free memory or hard memory limits: all GPU workers share the same Mac GPU and unified memory. The command uses separate read-only API requests, so allocations can change while the snapshot is collected.</p>

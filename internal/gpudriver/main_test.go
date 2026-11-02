@@ -51,7 +51,7 @@ func TestDriverResourcesRejectTinyWindow(t *testing.T) {
 }
 
 func TestPrepareUsesOnlyRealPublishedDevice(t *testing.T) {
-	drv := &driver{nodeName: "kiac-test-gpu-1"}
+	drv := &driver{nodeName: "kiac-test-gpu-1", health: testHealthyMonitor(), renderDevice: "/dev/null"}
 	share := types.UID("share-one")
 	claim := &resourceapi.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: "claim", UID: types.UID("claim-one")},
@@ -82,7 +82,7 @@ func TestPrepareUsesOnlyRealPublishedDevice(t *testing.T) {
 }
 
 func TestPrepareRejectsForeignDevice(t *testing.T) {
-	drv := &driver{nodeName: "kiac-test-gpu-1"}
+	drv := &driver{nodeName: "kiac-test-gpu-1", health: testHealthyMonitor(), renderDevice: "/dev/null"}
 	claim := &resourceapi.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{UID: types.UID("claim-one")},
 		Status: resourceapi.ResourceClaimStatus{
@@ -221,7 +221,7 @@ func TestNVIDIACompatibilityRejectsAliasesSplitAcrossRequestsAndLimits(t *testin
 }
 
 func TestPreparedMetadataDescribesAllocationWithoutInventingIsolation(t *testing.T) {
-	drv := &driver{nodeName: "gpu-1", memoryMiB: 59392}
+	drv := &driver{nodeName: "gpu-1", memoryMiB: 59392, health: testHealthyMonitor(), renderDevice: "/dev/null"}
 	claim := &resourceapi.ResourceClaim{ObjectMeta: metav1.ObjectMeta{UID: "claim"}, Status: resourceapi.ResourceClaimStatus{Allocation: &resourceapi.AllocationResult{Devices: resourceapi.DeviceAllocationResult{Results: []resourceapi.DeviceRequestAllocationResult{{Driver: driverName, Pool: "gpu-1", Device: deviceName, Request: "gpu", ConsumedCapacity: map[resourceapi.QualifiedName]resource.Quantity{"memory": resource.MustParse("8Gi")}}}}}}}
 	results, err := drv.PrepareResourceClaims(t.Context(), []*resourceapi.ResourceClaim{claim})
 	if err != nil || results[claim.UID].Err != nil {
