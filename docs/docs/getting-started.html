@@ -60,8 +60,8 @@
 
   <h2 id="doctor">1. Check your setup</h2>
   <pre><code>kiac doctor</code></pre>
-  <p>Doctor verifies five things: macOS 26+ (multi-node networking needs it; single-node may still work on older versions), the <code>apple/container</code> CLI at 1.0.0 or newer (1.4.1 recommended; excluding incompatible 1.2.0), the container system service, <code>kubectl</code> on your PATH, and an arm64 CPU.</p>
-  <p>If the container system service is stopped:</p>
+  <p>Doctor verifies five things: macOS 26+ (multi-node networking needs it; single-node may still work on older versions), the <code>apple/container</code> CLI at 1.6.0 or newer (1.6.1 recommended; fixes pinned image digest verification), the container system service, <code>kubectl</code> on your PATH, and an arm64 CPU.</p>
+  <p>After installing a supported CLI, if the container system service is stopped:</p>
   <pre><code>kiac doctor --fix    <span class="c"># runs: container system start</span></code></pre>
 
   <h2 id="create">2. Create a cluster</h2>
@@ -85,7 +85,7 @@ kiac create cluster --observability --gateway <span class="c"># everything on; s
 kiac create cluster --config cluster.yaml    <span class="c"># declarative; see Config file</span></code></pre>
   <p>A failed create cleans up its half-built node VMs automatically, so your machine never ends up with orphans.</p>
   <div class="note"><b>GPU mode has a separate preflight</b>
-  Install the optional krunkit/Venus dependencies and run <code>kiac gpu doctor</code> before using <code>--gpu-workers</code>. Ordinary clusters keep the faster apple/container path. The <a href="gpu.html">Apple GPU guide</a> explains the topology and the Vulkan-not-CUDA contract.</div>
+  GPU clusters do not require apple/container. Install the optional krunkit/Venus dependencies and run <code>kiac gpu doctor</code> before using <code>--gpu-workers</code>. Ordinary clusters keep the faster apple/container path. The <a href="gpu.html">Apple GPU guide</a> explains the topology and the Vulkan-not-CUDA contract.</div>
 
   <h2 id="kubeconfig">3. The kubeconfig</h2>
   <p>On create, kiac merges the cluster's credentials into your kubeconfig (<code>~/.kube/config</code>, or <code>$KUBECONFIG</code> when it points at a single file) and switches the current context:</p>

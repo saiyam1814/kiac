@@ -31,26 +31,27 @@ var doctorCmd = &cobra.Command{
 
 		cliOK := rt.Available()
 		ver := ""
+		var versionErr error
 		if cliOK {
-			ver, _ = rt.Version()
+			ver, versionErr = rt.Version()
+			if versionErr == nil {
+				versionErr = runtime.ValidateNodeRuntimeVersion(ver)
+			}
 		}
 		switch {
 		case !cliOK:
 			failures++
 			ui.Check(false, "apple/container CLI", "not found - install from https://github.com/apple/container/releases")
-		case runtime.ValidateNodeRuntimeVersion(ver) != nil:
+		case versionErr != nil:
 			failures++
-			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.2.1 or newer; 1.2.0 cannot boot Kubernetes nodes")
-		case majorVersion(ver) < 1:
-			failures++
-			ui.Check(false, "apple/container CLI", ver+" - upgrade to 1.0.0+ for best results")
+			ui.Check(false, "apple/container CLI", versionErr.Error())
 		default:
 			ui.Check(true, "apple/container CLI", ver)
 		}
 
 		if cliOK {
 			running := rt.SystemRunning()
-			if doctorFix {
+			if doctorFix && versionErr == nil {
 				if !running {
 					ui.Check(false, "container system service", "stopped - fixing: container system start")
 				}
@@ -75,9 +76,18 @@ var doctorCmd = &cobra.Command{
 			} else {
 				if running {
 					ui.Check(true, "container system service", "running")
-					ui.Hintf("default kernel is not verified without --fix; run: kiac doctor --fix")
+					if versionErr == nil {
+						ui.Hintf("default kernel is not verified without --fix; run: kiac doctor --fix")
+					}
 				} else {
-					ui.Check(false, "container system service", "stopped - kiac will start it automatically on create, or run: kiac doctor --fix")
+					detail := "stopped - kiac will start it automatically on create, or run: kiac doctor --fix"
+					if versionErr != nil {
+						detail = "stopped - upgrade apple/container before starting the service"
+					}
+					ui.Check(false, "container system service", detail)
+				}
+				if doctorFix && versionErr != nil {
+					ui.Hintf("upgrade apple/container before rerunning kiac doctor --fix; the service and kernel were left unchanged")
 				}
 			}
 		}
