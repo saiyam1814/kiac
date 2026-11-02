@@ -502,8 +502,10 @@ func (r *resumeEdgeProxyRuntime) resetEvents() {
 	r.failAt = ""
 }
 
-func (r *resumeEdgeProxyRuntime) Available() bool          { return true }
-func (r *resumeEdgeProxyRuntime) Version() (string, error) { return "1.2.1", nil }
+func (r *resumeEdgeProxyRuntime) Available() bool { return true }
+func (r *resumeEdgeProxyRuntime) Version() (string, error) {
+	return runtime.RecommendedNodeRuntimeVersion, nil
+}
 func (r *resumeEdgeProxyRuntime) SystemStart(installDefaultKernel bool) error {
 	if installDefaultKernel {
 		return errors.New("unexpected kernel installation")

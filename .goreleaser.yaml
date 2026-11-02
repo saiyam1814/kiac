@@ -54,7 +54,7 @@ homebrew_casks:
         end
       end
     caveats: |
-      kiac needs apple/container 1.0+ (1.4.1 recommended; skip 1.2.0):
+      Ordinary kiac clusters need apple/container 1.6.0+ (1.6.1 recommended):
         https://github.com/apple/container/releases
       Then: kiac doctor
 
