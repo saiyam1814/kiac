@@ -77,6 +77,11 @@ func normalizeK3sStateVersion(version string) string {
 func (m *Manager) createK3sGPU(cfg Config) error {
 	started := time.Now()
 	cfg = gpuConfigForDistro(cfg, "k3s")
+	version, err := ResolveGPUVersion(cfg.Distro, cfg.K8sVersion, cfg.GPUDriver)
+	if err != nil {
+		return err
+	}
+	cfg.K8sVersion = version
 	if err := validateGPUClusterConfig(cfg); err != nil {
 		return err
 	}

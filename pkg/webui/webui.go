@@ -146,6 +146,7 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		"gpuImages":         cluster.SupportedGPUImages(),
 		"defaultGPUImage":   cluster.DefaultGPUImage,
 		"gpuDrivers":        cluster.SupportedGPUResourceDrivers(),
+		"capabilities":      cluster.SupportedClusterCapabilities(),
 	})
 }
 
@@ -439,6 +440,13 @@ func createClusterArgs(req createReq) ([]string, error) {
 	}
 	if req.GPUResourceDriver != "" && req.GPUResourceDriver != "device-plugin" && req.GPUResourceDriver != "dra" {
 		return nil, fmt.Errorf("GPU resource driver must be device-plugin or dra")
+	}
+	if req.GPUWorkers > 0 {
+		version, err := cluster.ResolveGPUVersion(req.Distro, req.K8sVersion, req.GPUResourceDriver)
+		if err != nil {
+			return nil, err
+		}
+		req.K8sVersion = version
 	}
 	if req.Gateway && req.NoLB {
 		return nil, fmt.Errorf("Gateway API needs the built-in LoadBalancer")

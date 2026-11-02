@@ -114,7 +114,13 @@ var createClusterCmd = &cobra.Command{
 			if createCfg.GPUWorkers > 0 && createCfg.Image != "" {
 				return fmt.Errorf("--image is an OCI node image and cannot boot real GPU VMs; use --gpu-image for the Fedora disk")
 			}
-			if createCfg.GPUWorkers > 0 || createCfg.Image == "" {
+			if createCfg.GPUWorkers > 0 {
+				version, err := cluster.ResolveGPUVersion(selectedDistro, selectedK8sVersion, createCfg.GPUDriver)
+				if err != nil {
+					return err
+				}
+				createCfg.K8sVersion = version
+			} else if createCfg.Image == "" {
 				if selectedK8sVersion == "" {
 					selectedK8sVersion = defaultK8sVersion(selectedDistro)
 				}
@@ -123,9 +129,7 @@ var createClusterCmd = &cobra.Command{
 					return err
 				}
 				createCfg.K8sVersion = cluster.K8sVersionFromImage(img)
-				if createCfg.GPUWorkers == 0 {
-					createCfg.Image = img
-				}
+				createCfg.Image = img
 			} else {
 				// --image owns the version contract for ordinary clusters. Do
 				// not record an unrelated default Kubernetes version beside it.
@@ -144,7 +148,13 @@ var createClusterCmd = &cobra.Command{
 			if createCfg.GPUWorkers > 0 && (len(createCfg.K3sControlPlaneArgs) > 0 || len(createCfg.K3sWorkerArgs) > 0) {
 				return fmt.Errorf("custom k3s args are not supported on real GPU clusters yet")
 			}
-			if createCfg.GPUWorkers > 0 || createCfg.Image == "" {
+			if createCfg.GPUWorkers > 0 {
+				version, err := cluster.ResolveGPUVersion(selectedDistro, selectedK8sVersion, createCfg.GPUDriver)
+				if err != nil {
+					return err
+				}
+				createCfg.K8sVersion = version
+			} else if createCfg.Image == "" {
 				if selectedK8sVersion == "" {
 					selectedK8sVersion = defaultK8sVersion(selectedDistro)
 				}
@@ -153,9 +163,7 @@ var createClusterCmd = &cobra.Command{
 					return err
 				}
 				createCfg.K8sVersion = cluster.K8sVersionFromImage(img)
-				if createCfg.GPUWorkers == 0 {
-					createCfg.Image = img
-				}
+				createCfg.Image = img
 			} else {
 				createCfg.K8sVersion = cluster.K8sVersionFromImage(createCfg.Image)
 			}
