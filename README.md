@@ -83,6 +83,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - ⚡ **Two distros** — kubeadm on `kindest/node` by default, or `--distro k3s` for `rancher/k3s` under a lightweight supervisor in every VM: sqlite datastore, a 2-node cluster in 22-54 seconds, about 3.7GB of host memory total.
 - 🐝 **Cilium and eBPF, one flag pair** — `--cni cilium --kernel full` downloads a published, sha-pinned kernel build (VXLAN, eBPF, br_netfilter) and drives the official Cilium installer. Cross-node pod traffic runs at ~285MB/s and Mac-to-pod at ~1GB/s on Cilium's vxlan datapath.
 - **Real Apple GPU nodes (alpha)** — `--gpu-workers N` creates krunkit-backed worker VMs with the Mac's Apple GPU exposed through virtio-gpu/Venus. Kubernetes advertises only the honest `kiac.dev/gpu` resource through a device plugin or DRA; `kiac gpu bench` proves the Vulkan path with a pinned llama.cpp workload and can compare it with native Metal.
+- **External K3s worker (alpha)** — `kiac join worker` joins one owned Fedora/krunkit VM to an existing IPv4 K3s/Flannel VXLAN cluster through an operator-prepared WireGuard peer. It uses a CA-pinned token, separate management and advertised node addresses, and a default scheduling taint. See [the requirements and local-only lifecycle](docs/external-worker-alpha.md).
 - 🔁 **Clusters survive reboots** — `kiac resume cluster` restarts kubeadm or k3s VMs after a host reboot and heals every stale control-plane, node, kubeconfig, and networking address. It is idempotent and upgrades existing k3s clusters in place.
 - 📈 **Observability built in** — `--observability` installs Prometheus and Grafana on a real LoadBalancer IP, with Cluster Overview and Nodes dashboards already provisioned.
 - 🌍 **IPv6 and dual-stack** — `--ip-family dual` (or `ipv6`) gives pods, Services, and nodes real IPv6, with kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer rules on the full kernel. kiac-lb hands out both families, the edge proxy fixes v6 large uploads too, and `kiac resume` heals both. See [docs/design/ipv6-dual-stack.md](docs/design/ipv6-dual-stack.md).
@@ -102,7 +103,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - [apple/container](https://github.com/apple/container/releases) 1.6.0+ for ordinary clusters (1.6.1 recommended; earlier releases do not reliably verify pinned image digests)
 - `kubectl`
 
-GPU clusters use a separate backend and do not require apple/container. They require [krunkit](https://github.com/libkrun/krunkit) 1.3.2+ and [vmnet-helper](https://github.com/nirs/vmnet-helper) 0.13.0+. These are loaded only when `--gpu-workers` is used, so ordinary cluster startup and resource use are unchanged.
+GPU clusters and the external-worker alpha use a separate backend and do not require apple/container. They require [krunkit](https://github.com/libkrun/krunkit) 1.3.2+ and [vmnet-helper](https://github.com/nirs/vmnet-helper) 0.13.0+. These are loaded only for those opt-in paths, so ordinary cluster startup and resource use are unchanged.
 
 ### Install
 
