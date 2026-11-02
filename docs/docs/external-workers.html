@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>External K3s workers (alpha) · kiac docs</title>
+<meta name="description" content="Join a Mac-hosted Linux worker to an existing IPv4 K3s cluster through operator-managed WireGuard. External workers are an alpha feature in Kiac v0.11.0.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (beta)</a>
+    <a class="on" href="external-workers.html">External workers (alpha)</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Hands-on</div>
+    <a href="labs.html">Integration labs</a>
+    <a href="portainer.html">Portainer on kiac</a>
+    <a href="rancher.html">Rancher on kiac</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Alpha · Available in v0.11.0</div>
+  <h1>External K3s workers</h1>
+  <p class="lede">Use a Linux VM on your Mac as a worker in an existing K3s cluster. <code>kiac join worker</code> provisions one owned Fedora/krunkit VM and connects it through an operator-managed WireGuard peer.</p>
+
+  <div class="warn"><b>Alpha scope</b>
+  This path supports IPv4 K3s with its existing Flannel VXLAN network and an exact matching pinned K3s release. Kubeadm, other CNIs, dual-stack and remote GPU registration are outside this alpha. The external cluster's routing and WireGuard peer must already be prepared.</div>
+
+  <h2 id="topology">How it connects</h2>
+  <p>The worker advertises its stable WireGuard address as its Kubernetes InternalIP. Kiac retains a separate private vmnet DHCP address for local VM management. The tunnel runs inside the guest; Kiac does not alter your Mac's routes, firewall or VPN.</p>
+  <table>
+    <tr><th>Connection</th><th>Purpose</th></tr>
+    <tr><td>Mac → private vmnet address</td><td>Kiac provisions and manages its owned worker VM.</td></tr>
+    <tr><td>Guest <code>kiacwg0</code> → existing WireGuard peer</td><td>The worker reaches the external API and cluster routes through the tunnel.</td></tr>
+    <tr><td>Existing cluster nodes ↔ worker VPN address</td><td>Bidirectional node and Flannel traffic uses the routes prepared by the operator.</td></tr>
+  </table>
+  <p>This is a CPU worker. Krunkit exposes Venus to its guests, but the external-worker path installs no GPU resource driver and advertises no Kiac GPU resource. For local GPU scheduling, see <a href="gpu.html">Apple GPU (beta)</a>.</p>
+
+  <h2 id="requirements">Requirements</h2>
+  <ul>
+    <li><b>Apple silicon Mac and optional VM backend.</b> Install krunkit 1.3.2+, vmnet-helper 0.13.0+, its helper service and the renderer dependencies described in the <a href="gpu.html#requirements">backend setup</a>. Apple/container is not required for this path. Kiac uses its verified Fedora 44 image and pinned K3s ARM64 binary.</li>
+    <li><b>Available host disk space.</b> Joining requires at least 7 GiB on the krunkit state filesystem before downloads or boot: 4 GiB reserve plus 3 GiB for the new VM. This is a thin-provisioning estimate; it does not reserve space or guarantee that later guest-disk growth will fit.</li>
+    <li><b>Matching external cluster.</b> The server must use one of Kiac's pinned K3s releases, IPv4 and Flannel VXLAN. The exact server and worker releases must match. Supply the cluster's actual pod and service CIDRs.</li>
+    <li><b>Prepared WireGuard peer.</b> Use a reachable numeric IPv4 endpoint and a peer already authorized for this worker. The API's TLS certificate must cover the VPN API address. Every remote node must have bidirectional VPN routes to the worker, and Flannel must use reachable node addresses and interfaces.</li>
+    <li><b>Trusted secure token.</b> Obtain the full CA-pinned K3s secure token through your trusted cluster administration channel. Prefer the agent token from the server's <code>/var/lib/rancher/k3s/server/agent-token</code>. Short tokens are refused. Treat the token and WireGuard private key as secrets.</li>
+  </ul>
+  <p>A suitable peer is a reachable Linux gateway or control plane forwarding the existing cluster's node, pod and service routes. The guest initiates UDP through vmnet NAT and sends periodic keepalives. The peer must route return traffic to the worker's <code>/32</code> while preserving the node addresses used by Flannel. The outer WireGuard endpoint must remain outside the tunnel routes.</p>
+  <p>Flannel nodes exchange UDP 8472 through the tunnel. K3s normally carries control-plane-to-kubelet requests through the agent's outbound WebSocket tunnel; direct inbound kubelet TCP 10250 requirements depend on the cluster's egress-selector mode. Opening the API port alone does not establish pod-network reachability.</p>
+
+  <h2 id="credentials">Prepare private files</h2>
+  <p>Store the secure token as <code>agent-token</code> and the single-peer WireGuard configuration as <code>worker.conf</code>, with owner-only permissions:</p>
+  <pre><code>chmod 600 agent-token worker.conf</code></pre>
+  <p>For example, <code>worker.conf</code> contains:</p>
+  <pre><code>[Interface]
+Address = 10.250.76.2/32
+PrivateKey = &lt;worker-private-key&gt;
+
+[Peer]
+PublicKey = &lt;gateway-public-key&gt;
+Endpoint = 192.0.2.10:51820
+AllowedIPs = 10.250.76.0/24, 10.42.0.0/16, 10.43.0.0/16
+PersistentKeepalive = 25</code></pre>
+  <p>Replace the example endpoint and keys with your peer's details. <code>AllowedIPs</code> must cover the VPN API and the complete declared pod and service CIDRs. Those CIDRs must be distinct from the API address, worker VPN range and VM management range. Tunnel routes must not overlap the guest's vmnet management <code>/24</code>.</p>
+  <p>Kiac refuses symlinks, special files, hooks, DNS endpoints, default routes, multiple peers and unsupported WireGuard fields. Supported fields are <code>Address</code>, <code>PrivateKey</code>, optional <code>MTU</code> (1280–1420), and one peer's <code>PublicKey</code>, optional <code>PresharedKey</code>, <code>Endpoint</code>, <code>AllowedIPs</code> and optional <code>PersistentKeepalive</code> (1–120 seconds). Defaults are MTU 1420 and keepalive 25 seconds; the guest interface is <code>kiacwg0</code>.</p>
+
+  <h2 id="join">Join the worker</h2>
+  <pre><code>kiac join worker --name remote-lab \
+  --server https://10.250.76.1:6443 \
+  --token-file ./agent-token --wireguard-config ./worker.conf \
+  --node-ip 10.250.76.2 --k8s-version 1.37 \
+  --pod-cidr 10.42.0.0/16 --service-cidr 10.43.0.0/16</code></pre>
+  <p>Adapt every address and CIDR to your cluster. <code>--k8s-version</code> accepts a pinned minor or exact release. Kiac defaults to two vCPUs, 2G memory, a 20G persistent disk and a ten-minute readiness wait.</p>
+  <table>
+    <tr><th>Flag</th><th>Accepted range</th></tr>
+    <tr><td><code>--cpus</code></td><td>1–32</td></tr>
+    <tr><td><code>--memory</code></td><td>1–60G</td></tr>
+    <tr><td><code>--disk</code></td><td>8–1024G</td></tr>
+    <tr><td><code>--wait</code></td><td>Positive duration, up to one hour; package installation has a separate bounded ten-minute minimum budget</td></tr>
+  </table>
+  <p>The K3s agent verifies the token's CA hash before sending credentials. Kiac uses the agent's own kubelet certificate to observe its Node, verifies the owner label, VPN InternalIP, exact API and kubelet release, Flannel VXLAN pod CIDR, initial taint and Ready condition, then pins the Node UID. A successful join proves registration and readiness; verify application traffic for your topology separately.</p>
+
+  <h2 id="scheduling">Opt workloads in</h2>
+  <p>New workers carry <code>kiac.dev/external-worker=true:NoSchedule</code> so ordinary workloads do not land on a laptop just because it joined. DaemonSets and other workloads that already tolerate all taints can still schedule. Add a matching selector and toleration to the intended workload:</p>
+  <pre><code>spec:
+  nodeSelector:
+    kiac.dev/external-worker: "true"
+  tolerations:
+    - key: kiac.dev/external-worker
+      operator: Equal
+      value: "true"
+      effect: NoSchedule</code></pre>
+  <p>This fragment belongs under the Pod spec; for a Deployment, put it under <code>spec.template.spec</code>. An operator may deliberately remove the taint after a successful join. Later <code>start worker</code> respects that choice.</p>
+
+  <h2 id="lifecycle">Lifecycle and retry</h2>
+  <pre><code>kiac get workers
+kiac get workers -o json
+kiac logs worker remote-lab
+kiac stop worker remote-lab
+kiac start worker remote-lab --wait 10m</code></pre>
+  <p>Starting verifies the original Node UID and VPN address again and waits for the Node's reported boot ID to match the current guest boot ID. A cached Ready condition from an earlier boot does not satisfy this check. The fixed WireGuard and K3s units start on guest boot.</p>
+  <p>Failures before agent startup remove only the newly created owned local VM. Once startup may have registered a remote Node, Kiac retains the VM and its node-password with phase <code>joining</code>. Fix the network or cluster issue and run <code>kiac start worker remote-lab</code> to retry with the same identity and the saved guest files, even if the original host credential files are gone. Ownership mismatches or cleanup failures also retain inventory.</p>
+  <p>Credentials cross the management channel through standard input and remain in private files inside the guest. Host inventory under <code>~/.kiac/workers</code> contains public identity and a CA hash, not the token or WireGuard private key. Worker logs redact the saved token, its credentials and private WireGuard keys inside the guest before returning output to the host. Command failures omit private remote output.</p>
+  <div class="note"><b>Separate inventory and lifecycle</b>
+  External workers use a <code>kiacx-worker-…</code> VM namespace. Cluster delete, resume, verify, support bundles and the web UI do not manage them. Stopping affects only the local VM and does not drain remote workloads.</div>
+
+  <h2 id="remove">Drain remotely, then delete locally</h2>
+  <p>Use your external-cluster credentials to drain workloads and remove the remote Node first. Obtain its VM/Node name from <code>kiac get workers -o json</code> and substitute your own context and node:</p>
+  <pre><code>kubectl --context YOUR_EXTERNAL_CONTEXT drain NODE_NAME --ignore-daemonsets
+kubectl --context YOUR_EXTERNAL_CONTEXT delete node NODE_NAME
+kiac delete worker remote-lab</code></pre>
+  <p><code>kiac delete worker</code> removes only its owned local VM and inventory. It never calls the external cluster's administrative API. If you remove the VM first, draining or deleting the remote Node remains your responsibility. Kiac does not configure the external control plane, other nodes, CNI, addons or your host kubeconfig.</p>
+
+  <h2 id="validation">Completed alpha validation</h2>
+  <p>The v0.11.0 acceptance run used two VMs on separate vmnet subnets on the same Mac, connected through a controlled WireGuard lab. It verified bidirectional pod-IP traffic, DNS and ClusterIP access, scheduling opt-in through the worker taint, the same Node UID after stop/start, log-secret redaction and local deletion preserving the remote Node.</p>
+  <p>This is completed lab validation, not a claim of cloud or production readiness. Different gateways, routing policies and external clusters need their own connectivity and workload validation. Host sleep/wake is not part of this acceptance record.</p>
+  <p>The source guide is also available as <a href="https://github.com/saiyam1814/kiac/blob/main/docs/external-worker-alpha.md"><code>docs/external-worker-alpha.md</code></a>.</p>
+
+  <div class="pn">
+    <a href="gpu.html"><span>Previous</span>Apple GPU (beta)</a>
+    <a class="next" href="observability.html"><span>Next</span>Observability</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

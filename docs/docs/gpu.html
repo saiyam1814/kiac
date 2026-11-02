@@ -33,6 +33,7 @@
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
     <a class="on" href="gpu.html">Apple GPU (beta)</a>
+    <a href="external-workers.html">External workers (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -69,11 +70,13 @@
   <p>This beta covers local Venus/Vulkan integration with Kubernetes. The following profiles were exercised on an Apple M1 Max running macOS 27.0.1. These results do not establish production support, an SLA, or validation across all Apple silicon models, macOS releases, and workloads.</p>
   <table>
     <tr><th>Profile</th><th>Completed validation</th></tr>
-    <tr><td>K3s 1.37, DRA, two GPU workers</td><td>Native Vulkan queue submission and 64-byte transfer readback; healthy, failed, and recovered live status; allocated Pod device-health transitions; blocked and recovered new claims; existing workloads retained during probe failure; stale-report withdrawal after pausing the probe; driver Pod replacement.</td></tr>
+    <tr><td>K3s 1.37, DRA, two GPU workers</td><td>Native Vulkan queue submission and 64-byte transfer readback; healthy, failed, and recovered live status; allocated Pod device-health transitions; blocked and recovered new claims; existing workloads retained during probe failure; stale-report withdrawal after pausing the probe; driver Pod replacement; full VM stop/resume with changed boot IDs and both GPUs healthy afterward.</td></tr>
     <tr><td>K3s 1.36.4, DRA</td><td>Healthy, failed, and recovered live status; allocation health and blocking/recovery of new claims; stale-report withdrawal; driver Pod replacement.</td></tr>
-    <tr><td>kubeadm 1.37, device plugin</td><td>Probe failure withdraws allocatable GPU capacity to zero; fresh health restores it; kubelet device-plugin socket replacement and a new workload allocation.</td></tr>
-    <tr><td>Pinned TinyLlama on Venus</td><td>Inference confirmed 23 offloaded model layers before VM restart in both the K3s 1.37 DRA and kubeadm 1.37 device-plugin profiles. This validates an actual GPU workload in addition to the transfer probe.</td></tr>
+    <tr><td>K3s 1.37, device plugin</td><td>Probe failure withdraws allocatable capacity to zero and blocks new allocations; existing consumers remain; fresh health restores availability; real K3s kubelet socket replacement and a new allocation; full VM stop/resume with changed boot IDs.</td></tr>
+    <tr><td>kubeadm 1.37, device plugin</td><td>Probe failure withdraws allocatable GPU capacity to zero; fresh health restores it; kubelet device-plugin socket replacement and a new workload allocation; full VM stop/resume with changed boot IDs.</td></tr>
+    <tr><td>Pinned TinyLlama on Venus</td><td>Inference confirmed 23 offloaded model layers after full VM stop/resume in K3s 1.37 DRA, K3s 1.37 device-plugin and kubeadm 1.37 device-plugin profiles. This validates an actual GPU workload in addition to the transfer probe.</td></tr>
   </table>
+  <p>These completed recovery results are included in the <a href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0">v0.11.0 release</a>. The optional <a href="external-workers.html">external-worker alpha</a> is a separate CPU-worker path; it does not register this GPU driver with an external cluster.</p>
   <p>Health means a bounded queue and transfer operation completed; it does not prove compute-shader correctness or application performance. Guest access is Venus/Vulkan, not CUDA or direct Metal passthrough. DRA memory requests account against each VM's GPU window, not dedicated physical memory or a hard isolation boundary between workers sharing the Mac GPU. Host sleep/wake has not been validated. Native Metal comparison remains an optional benchmark function and was not rerun as part of this beta recovery matrix.</p>
 
   <h2 id="requirements">Requirements</h2>

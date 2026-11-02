@@ -33,6 +33,7 @@
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
     <a href="gpu.html">Apple GPU (beta)</a>
+    <a href="external-workers.html">External workers (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
     <a href="observability.html">Observability</a>
@@ -56,8 +57,8 @@
 <main>
   <div class="kicker">Docs</div>
   <h1>kiac: Kubernetes in Apple Containers</h1>
-  <p class="lede">kiac creates local Kubernetes clusters on Apple silicon where every node boots as its own lightweight virtual machine: fast everyday clusters on Apple's open-source <a href="https://github.com/apple/container">container</a> runtime, plus opt-in real Apple GPU clusters through krunkit and Venus.</p>
-  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.7.1">v0.7.1: real Apple GPU clusters with Venus and Kubernetes DRA &rarr;</a>
+  <p class="lede">kiac creates Kubernetes clusters on Apple silicon with a lightweight VM for every node. Use Apple's open-source <a href="https://github.com/apple/container">container</a> runtime for everyday clusters, or the optional krunkit backend for local Apple GPU workloads and external K3s workers.</p>
+  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0">v0.11.0: local GPU support enters beta; external K3s workers enter alpha &rarr;</a>
   <div class="note"><b>Part of the cloud native ecosystem</b>
   kiac is <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">listed in the CNCF Landscape</a> under Platform / Certified Kubernetes - Installer. A Landscape listing is ecosystem inclusion, not CNCF-hosted project status.</div>
 
@@ -70,7 +71,8 @@
     <li><b>LoadBalancer.</b> kiac-lb, a tiny controller inside the control-plane VM, assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds; the edge proxy keeps large external uploads flowing through NodePorts and LoadBalancers. See <a href="networking.html#loadbalancer">Networking</a>.</li>
     <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for supervised rancher/k3s per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
     <li><b>Cilium and eBPF.</b> <code>--cni cilium --kernel full</code> boots the nodes on a published, sha-pinned kernel build and drives the official Cilium installer. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
-    <li><b>Real Apple GPU nodes (beta).</b> <code>--gpu-workers N</code> exposes the Mac's GPU to selected Kubernetes workers through krunkit and Venus, with an honest <code>kiac.dev/gpu</code> resource, device plugin or DRA allocation, and a pinned inference benchmark. See <a href="gpu.html">Apple GPU</a>.</li>
+    <li><b>Real Apple GPU nodes (beta).</b> <code>--gpu-workers N</code> exposes the Mac's GPU through Venus/Vulkan with DRA or device-plugin scheduling, continuous native health checks, allocation recovery and a pinned inference benchmark. See <a href="gpu.html">Apple GPU</a> for validated profiles and limits.</li>
+    <li><b>External K3s workers (alpha).</b> <code>kiac join worker</code> joins a Mac-hosted CPU worker to an existing IPv4 K3s/Flannel VXLAN cluster over operator-managed WireGuard. New workers require scheduling opt-in; remote networking, draining and Node deletion remain operator responsibilities. See <a href="external-workers.html">External workers</a>.</li>
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>
     <li><b>Optional observability.</b> <code>--observability</code> installs Prometheus and Grafana with dashboards already provisioned. See <a href="observability.html">Observability</a>.</li>
     <li><b>Optional Gateway API.</b> <code>--gateway</code> installs the Gateway API CRDs and Traefik with a ready-to-use Gateway. See <a href="gateway-api.html">Gateway API</a>.</li>
@@ -86,11 +88,14 @@
     <tr><td>macOS 26+</td><td>needed for multi-node networking; single-node may still work on older macOS</td></tr>
     <tr><td><a href="https://github.com/apple/container/releases">apple/container</a> 1.6.0+</td><td>ordinary clusters; 1.6.1 recommended; signed pkg installer from Apple; fixes pinned image digest verification</td></tr>
     <tr><td><code>kubectl</code></td><td>any recent version</td></tr>
-    <tr><td>GPU mode only: krunkit 1.3.2+ and vmnet-helper 0.13.0+</td><td>optional; ordinary clusters do not load or pay for this backend</td></tr>
+    <tr><td>GPU clusters and external workers: krunkit 1.3.2+, vmnet-helper 0.13.0+ and renderer dependencies</td><td>optional backend; see <a href="gpu.html#requirements">setup</a>; ordinary clusters do not require it</td></tr>
   </table>
 
   <h2 id="install">Install</h2>
   <pre><code>brew install --cask saiyam1814/tap/kiac</code></pre>
+  <p>Already installed? Upgrade to the latest release:</p>
+  <pre><code>brew update &amp;&amp; brew upgrade --cask kiac
+kiac version</code></pre>
   <p>Prefer Go, or building from source:</p>
   <pre><code># With Go
 go install github.com/saiyam1814/kiac@latest
