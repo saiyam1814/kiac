@@ -34,7 +34,7 @@ release assets). The job:
    boots on arm64 (its own build.sh ships `arch/arm64/boot/Image` as
    `vmlinux-arm64`).
 4. Uploads the Image, resolved `.config`, and `.sha256` as a build
-   artifact. Tag builds also publish these files as release assets.
+   artifact. Tag builds publish the Image and checksum as release assets.
 
 ## Using a built kernel
 
