@@ -61,7 +61,8 @@
 
   <h2 id="doctor">First move: kiac doctor</h2>
   <pre><code>kiac doctor        <span class="c"># checks macOS, apple/container, the system service, kubectl, arm64</span>
-kiac doctor --fix  <span class="c"># also starts the container system service if it is stopped</span></code></pre>
+kiac doctor --fix  <span class="c"># also starts the container system service if it is stopped</span>
+kiac doctor --dns  <span class="c"># also shows merged Apple runtime DNS defaults without changes</span></code></pre>
   <p>What <code>--fix</code> actually runs is <code>container system start</code>. You can run that yourself, and inspect the service with <code>container system status</code>. kiac also starts the service automatically during <code>create</code> preflight.</p>
 
   <h2 id="cluster-exists">"cluster already exists"</h2>
@@ -110,9 +111,10 @@ kiac verify cluster --name gpu-lab</code></pre>
   <h2 id="vpn-dns">Image pulls fail with VPN software on the Mac</h2>
   <p>Symptom: the cluster creates, but pods stay in <code>ImagePullBackOff</code> and node logs show something like <code>lookup registry.k8s.io on 192.168.64.1:53: read: connection refused</code>.</p>
   <p>Node VMs get their DNS from the vmnet gateway (<code>192.168.64.1</code>), which is your Mac's own mDNSResponder answering on the NAT network. Some VPN and Zero Trust clients assume control of the host's port 53 to run their own DNS proxy; mDNSResponder then stops serving the gateway address, and every lookup from the VMs is refused. The VPN's own proxy typically listens only on loopback, so the VMs cannot reach it either.</p>
-  <p>Point the nodes at resolvers that stay reachable through the VPN with <code>--dns</code> (repeatable, up to 3 entries — resolv.conf's own limit). Given, it replaces the node's resolv.conf entirely rather than adding to whatever the runtime would otherwise set:</p>
+  <p>Point the nodes at resolvers that stay reachable through the VPN with <code>--dns</code> (repeatable, up to 3 entries — resolv.conf's own limit). This replaces the nameserver list rather than adding to the runtime's nameservers. On apple/container, domain, search domains and resolver options are inherited independently:</p>
   <pre><code>kiac create cluster --dns 1.1.1.1 --dns 8.8.8.8</code></pre>
   <p>Or in a <a href="config-file.html">config file</a>: <code>dns: [1.1.1.1, 8.8.8.8]</code>. Choose resolvers your VPN's tunnel actually reaches — public resolvers are the common case, but a corporate resolver works too if it is reachable from inside the VM.</p>
+  <p>Apple/container 1.7+ supports <code>[container.dns]</code> defaults for <code>nameservers</code>, <code>domain</code>, <code>searchDomains</code> and <code>options</code>. Kiac's <code>--dns</code> overrides only <code>nameservers</code>. An unset container domain falls back to Apple's top-level <code>[dns].domain</code>. Run <code>kiac doctor --dns</code> to view only the merged DNS defaults that the service exposes. The query has a five-second deadline and 64 KiB output limit; unrelated configuration and raw error output are withheld. It does not change the configuration, restart the service, inspect existing guest resolvers, or test reachability. On 1.6, absent <code>[container.dns]</code> fields correctly retain runtime defaults.</p>
   <p><code>--dns</code> is creation-time configuration: an existing affected cluster must be deleted and recreated to adopt it.</p>
 
   <h2 id="pending-ip">LoadBalancer EXTERNAL-IP stays &lt;pending&gt;</h2>

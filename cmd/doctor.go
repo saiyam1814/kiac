@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
@@ -12,6 +13,7 @@ import (
 )
 
 var doctorFix bool
+var doctorDNS bool
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -92,6 +94,16 @@ var doctorCmd = &cobra.Command{
 			}
 		}
 
+		if doctorDNS && cliOK && versionErr == nil {
+			defaults, err := rt.DNSDefaults(5 * time.Second)
+			if err != nil {
+				failures++
+				ui.Check(false, "apple/container DNS defaults", err.Error())
+			} else {
+				printDoctorDNS(defaults)
+			}
+		}
+
 		_, kubectlErr := exec.LookPath("kubectl")
 		ui.Check(kubectlErr == nil, "kubectl", "")
 		if kubectlErr != nil {
@@ -116,6 +128,24 @@ var doctorCmd = &cobra.Command{
 
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "attempt to fix failed checks (starts the container system service)")
+	doctorCmd.Flags().BoolVar(&doctorDNS, "dns", false, "show only merged apple/container DNS defaults (read-only; does not test guest resolution)")
+}
+
+func printDoctorDNS(defaults runtime.DNSDefaults) {
+	ui.Check(true, "apple/container DNS defaults", "read-only; applies to new ordinary nodes, not existing nodes or krunkit")
+	if len(defaults.Nameservers) == 0 {
+		ui.Infof("nameservers: runtime network resolver (no configured override)")
+	} else {
+		ui.Infof("nameservers: %q", defaults.Nameservers)
+	}
+	if defaults.Domain == nil {
+		ui.Infof("domain: unset")
+	} else {
+		ui.Infof("domain: %q (%s)", *defaults.Domain, defaults.DomainSource)
+	}
+	ui.Infof("search domains: %q", defaults.SearchDomains)
+	ui.Infof("resolver options: %q", defaults.Options)
+	ui.Hintf("kiac create cluster --dns replaces nameservers only; configured domain, search domains and options remain inherited")
 }
 
 func macOSVersion() string {

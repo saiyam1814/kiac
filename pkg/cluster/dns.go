@@ -11,10 +11,10 @@ import (
 const maxNodeDNSServers = 3
 
 // nodeDNS returns the nameserver list for a cluster's node VMs. An
-// explicit --dns/dns: list fully replaces the runtime's stock
-// resolv.conf; it does not stack behind whatever the runtime would
-// otherwise hand the VM. Without it, nodeDNS returns empty and the
-// default is kept.
+// explicit --dns/dns: list replaces the runtime's nameservers. On
+// apple/container, domain, search domains and resolver options retain
+// their independently configured defaults. Without it, nodeDNS returns
+// empty and the runtime chooses the resolver configuration.
 func nodeDNS(cfg Config) []string {
 	return cfg.DNS
 }

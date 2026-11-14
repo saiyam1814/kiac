@@ -85,7 +85,7 @@ kiac create cluster --config cluster.yaml</code></pre>
     <tr><td><code>--image</code></td><td></td><td>node image (overrides <code>--k8s-version</code>)</td></tr>
     <tr><td><code>--cni</code></td><td><code>kindnet</code></td><td>pod network: <code>kindnet</code>, <code>cilium</code>, <code>flannel</code>, or <code>none</code> (bring your own). On ordinary kubeadm clusters Cilium and Flannel need <code>--kernel full</code>; Flannel (upstream v0.28.9 embedded, VXLAN backend) needs no host CLI and is not available on GPU clusters; kubeadm GPU clusters use krunkit's kernel and need only the host <code>cilium</code> CLI. Ordinary k3s uses kindnet and GPU k3s uses bundled Flannel; both ignore this flag</td></tr>
     <tr><td><code>--kernel</code></td><td></td><td>custom node kernel: <code>full</code> (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter, cached in <code>~/.kiac/kernels/</code>) or a path to an arm64 boot Image. See <a href="cilium.html">Cilium &amp; the full kernel</a></td></tr>
-    <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Given, it replaces the runtime's default resolv.conf entirely rather than adding to it (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
+    <tr><td><code>--dns</code></td><td>runtime default</td><td>nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit): <code>--dns 1.1.1.1 --dns 8.8.8.8</code>. Replaces runtime nameservers only; on apple/container, configured domain, search domains and resolver options remain inherited (see <a href="troubleshooting.html#vpn-dns">Troubleshooting</a>)</td></tr>
     <tr><td><code>--ip-family</code></td><td><code>ipv4</code></td><td><code>ipv4</code>, <code>dual</code>, or <code>ipv6</code>. Non-IPv4 ordinary clusters select the full kernel; GPU clusters currently require IPv4</td></tr>
     <tr><td><code>--mount</code></td><td></td><td>bind a host directory into every node VM; repeat <code>type=bind,source=/host/path,target=/node/path[,readonly]</code>. Explicit CLI mounts replace config-file mounts</td></tr>
     <tr><td><code>-p, --publish</code></td><td></td><td>repeatable <code>[host-ip:]host-port:container-port[/protocol]</code> forwards to the control-plane VM only. Omitted host IP binds all IPv4 interfaces; use <code>127.0.0.1</code> for loopback. Ordinary apple/container clusters only; does not add API-server certificate SANs</td></tr>
@@ -193,10 +193,12 @@ kiac load image api:dev web:dev --name dev    <span class="c"># several at once<
   <h2 id="doctor">kiac doctor</h2>
   <p>Check that this Mac can run kiac clusters: macOS version (26+ for multi-node), apple/container CLI 1.6.0+ (1.6.1 recommended; fixes pinned image digest verification), the container system service, <code>kubectl</code>, and Apple silicon.</p>
   <pre><code>kiac doctor
-kiac doctor --fix</code></pre>
+kiac doctor --fix
+kiac doctor --dns</code></pre>
   <table>
     <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>--fix</code></td><td><code>false</code></td><td>attempt to fix failed checks (starts the container system service)</td></tr>
+    <tr><td><code>--dns</code></td><td><code>false</code></td><td>also show merged apple/container DNS defaults using a bounded, read-only query: nameservers, domain (including host-domain fallback), search domains and options. Applies to new ordinary nodes, not existing nodes or krunkit; does not test resolver reachability. A failed requested query exits nonzero without printing unrelated configuration</td></tr>
   </table>
 
   <h2 id="external-workers">External worker commands (alpha)</h2>

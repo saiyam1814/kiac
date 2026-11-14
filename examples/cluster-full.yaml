@@ -60,8 +60,9 @@ cni: kindnet
 ipFamily: ipv4
 
 # Nameserver IPs for the node VMs, up to 3 (resolv.conf's own limit).
-# Given, this replaces the runtime's default resolv.conf entirely
-# rather than adding to it. Useful when VPN/Zero Trust software on the
+# Replaces runtime nameservers rather than adding to them; on Apple,
+# configured domain, search domains and resolver options stay inherited.
+# Useful when VPN/Zero Trust software on the
 # Mac takes over the host's port 53, breaking the vmnet gateway
 # resolver nodes use by default (see docs/docs/troubleshooting.html).
 # dns: [1.1.1.1, 8.8.8.8]
