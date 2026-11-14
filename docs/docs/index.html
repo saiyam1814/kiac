@@ -58,7 +58,7 @@
   <div class="kicker">Docs</div>
   <h1>kiac: Kubernetes in Apple Containers</h1>
   <p class="lede">kiac creates Kubernetes clusters on Apple silicon with a lightweight VM for every node. Use Apple's open-source <a href="https://github.com/apple/container">container</a> runtime for everyday clusters, or the optional krunkit backend for local Apple GPU workloads and external K3s workers.</p>
-  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.11.0">v0.11.0: local GPU support enters beta; external K3s workers enter alpha &rarr;</a>
+  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.12.0">v0.12.0: inspect runtime DNS defaults and VM resource samples &rarr;</a>
   <div class="note"><b>Part of the cloud native ecosystem</b>
   kiac is <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">listed in the CNCF Landscape</a> under Platform / Certified Kubernetes - Installer. A Landscape listing is ecosystem inclusion, not CNCF-hosted project status.</div>
 
@@ -67,6 +67,7 @@
   <ul>
     <li><b>One lightweight VM per node.</b> Each node has its own kernel, kubelet, cgroups, and IP. The isolation boundary between nodes is the hypervisor, not Linux namespaces.</li>
     <li><b>Metrics.</b> metrics-server ships preconfigured; <code>kubectl top nodes</code> works out of the box.</li>
+    <li><b>Runtime visibility.</b> <code>kiac doctor --dns</code> reads the merged DNS defaults for new ordinary nodes. The dashboard shows Apple/container CPU and container-memory samples separately from Kubernetes metrics. See <a href="cli-reference.html#doctor">DNS inspection</a> and <a href="dashboard.html#vm-resource-samples">VM resource samples</a>.</li>
     <li><b>Storage.</b> A default StorageClass backed by local-path-provisioner, so PVCs just bind.</li>
     <li><b>LoadBalancer.</b> kiac-lb, a tiny controller inside the control-plane VM, assigns node IPs to <code>type: LoadBalancer</code> Services in about two seconds; the edge proxy keeps large external uploads flowing through NodePorts and LoadBalancers. See <a href="networking.html#loadbalancer">Networking</a>.</li>
     <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for supervised rancher/k3s per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
@@ -106,6 +107,7 @@ git clone https://github.com/saiyam1814/kiac &amp;&amp; cd kiac &amp;&amp; make 
   <h2 id="verify">Verify your setup</h2>
   <pre><code>kiac doctor</code></pre>
   <p><code>kiac doctor</code> checks the macOS version, the apple/container CLI, the container system service, <code>kubectl</code>, and the CPU architecture. If the container system service is stopped, <code>kiac doctor --fix</code> starts it for you (kiac also starts it automatically on <code>create</code>).</p>
+  <p>Use <code>kiac doctor --dns</code> to also inspect the merged runtime nameservers, domain, search domains and resolver options. This read-only query applies to new ordinary nodes; it does not test DNS reachability or change existing nodes or krunkit.</p>
 
   <h2 id="first-cluster">First cluster</h2>
   <pre><code>kiac create cluster --name dev --workers 2</code></pre>

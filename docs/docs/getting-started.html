@@ -64,6 +64,7 @@
   <p>Doctor verifies five things: macOS 26+ (multi-node networking needs it; single-node may still work on older versions), the <code>apple/container</code> CLI at 1.6.0 or newer (1.6.1 recommended; fixes pinned image digest verification), the container system service, <code>kubectl</code> on your PATH, and an arm64 CPU.</p>
   <p>After installing a supported CLI, if the container system service is stopped:</p>
   <pre><code>kiac doctor --fix    <span class="c"># runs: container system start</span></code></pre>
+  <p>Before creating ordinary nodes, inspect the runtime's merged DNS defaults with <code>kiac doctor --dns</code>. It shows inherited nameservers, domain, search domains and options without changing configuration or testing resolver reachability. See the <a href="cli-reference.html#doctor">doctor flags</a>.</p>
 
   <h2 id="create">2. Create a cluster</h2>
   <pre><code>kiac create cluster --name dev --workers 2</code></pre>
