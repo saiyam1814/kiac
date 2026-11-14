@@ -63,6 +63,7 @@ type server struct {
 	vmInventory map[string]vmInventory
 	vmCache     map[string]*vmMetricsCache
 	vmSlots     chan struct{}
+	vmQueue     []vmPending
 	vmStats     func(context.Context, []string) ([]runtime.VMStats, error)
 }
 

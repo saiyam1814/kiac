@@ -47,6 +47,12 @@ type vmMetricsCache struct {
 	running  bool
 }
 
+type vmPending struct {
+	name    string
+	targets []vmNodeTarget
+	cache   *vmMetricsCache
+}
+
 // recordVMInventory is called by the existing cluster-list poll. Sampling can
 // therefore stay entirely off the request path, while scope comes from real
 // runtime inventory rather than names supplied in a URL. A changed/stopped or
@@ -84,6 +90,15 @@ func (s *server) recordVMInventory(clusters map[string][]runtime.Info) {
 			delete(s.vmCache, name)
 		}
 	}
+	// At most one queued item per current cache entry. Inventory churn
+	// cannot accumulate deleted/recreated clusters behind active collectors.
+	queue := s.vmQueue[:0]
+	for _, pending := range s.vmQueue {
+		if s.vmCache[pending.name] == pending.cache {
+			queue = append(queue, pending)
+		}
+	}
+	s.vmQueue = queue
 }
 
 func emptyVMMetrics(targets []vmNodeTarget) vmMetricsResponse {
@@ -153,22 +168,37 @@ func (s *server) vmMetrics(w http.ResponseWriter, r *http.Request) {
 			response.SampledAt = cache.response.SampledAt
 		}
 		if !cache.running && now.Sub(cache.attempt) >= vmRefreshInterval {
-			select {
-			case s.vmSlots <- struct{}{}:
-				cache.running, cache.attempt = true, now
-				go s.collectVMMetrics(name, inventory.nodes, cache)
-			default:
-				// At most two samplers across all clusters and tabs. The
-				// next poll retries without queuing unbounded goroutines.
-			}
+			cache.running, cache.attempt = true, now
+			s.vmQueue = append(s.vmQueue, vmPending{name, inventory.nodes, cache})
+			s.startVMSamplersLocked(now)
 		}
 	}
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, response)
 }
 
+// A FIFO queue prevents a fixed browser polling order from starving later
+// clusters. Only two goroutines run; waiting entries are bounded by the
+// owned inventory and deduplicated with cache.running.
+func (s *server) startVMSamplersLocked(now time.Time) {
+	for len(s.vmQueue) > 0 && len(s.vmSlots) < cap(s.vmSlots) {
+		pending := s.vmQueue[0]
+		s.vmQueue[0] = vmPending{}
+		s.vmQueue = s.vmQueue[1:]
+		inventory, exists := s.vmInventory[pending.name]
+		if s.vmCache[pending.name] != pending.cache {
+			continue
+		}
+		if !exists || s.busy[pending.name] || now.Sub(inventory.updated) > vmInventoryMaxAge {
+			pending.cache.running = false
+			continue
+		}
+		s.vmSlots <- struct{}{}
+		go s.collectVMMetrics(pending.name, pending.targets, pending.cache)
+	}
+}
+
 func (s *server) collectVMMetrics(name string, targets []vmNodeTarget, cache *vmMetricsCache) {
-	defer func() { <-s.vmSlots }()
 	response := emptyVMMetrics(targets)
 	response.State = "unavailable"
 	var names []string
@@ -212,9 +242,11 @@ func (s *server) collectVMMetrics(name string, targets []vmNodeTarget, cache *vm
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	<-s.vmSlots
 	// Inventory changes replace the cache pointer, preventing a late sample
 	// from reintroducing a deleted/stopped node or an old cluster instance.
 	if s.vmCache[name] == cache {
 		cache.response, cache.running = response, false
 	}
+	s.startVMSamplersLocked(now)
 }

@@ -165,6 +165,44 @@ func TestVMMetricsGlobalConcurrencyLimit(t *testing.T) {
 	close(release)
 }
 
+func TestVMMetricsFixedPollingOrderEventuallySamplesEveryCluster(t *testing.T) {
+	started, release := make(chan string, 10), make(chan struct{})
+	s := &server{vmStats: func(_ context.Context, names []string) ([]runtime.VMStats, error) {
+		started <- names[0]
+		<-release
+		usage := uint64(123)
+		return []runtime.VMStats{{Node: names[0], MemoryUsageBytes: &usage}}, nil
+	}}
+	names := []string{"one", "two", "three", "four", "five"}
+	inventory := map[string][]runtime.Info{}
+	for _, name := range names {
+		inventory[name] = []runtime.Info{{Name: "kiac-" + name + "-control-plane", Status: "running"}}
+	}
+	s.recordVMInventory(inventory)
+	// Several tabs polling in the same order must neither duplicate the
+	// waiting entries nor let the first two clusters starve the rest.
+	for range 4 {
+		for _, name := range names {
+			getVMMetrics(t, s, name)
+		}
+	}
+	<-started
+	<-started
+	s.mu.Lock()
+	queued := len(s.vmQueue)
+	s.mu.Unlock()
+	if queued != 3 {
+		t.Fatalf("queued collectors = %d, want one per remaining cluster", queued)
+	}
+	close(release)
+	for _, name := range names {
+		waitVMSample(t, s, name)
+	}
+	if len(started) != 3 {
+		t.Fatalf("collectors started more than once or later clusters starved: %d remaining events", len(started))
+	}
+}
+
 func TestVMMetricsLateResultCannotRestoreStoppedNode(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	s := &server{vmStats: func(context.Context, []string) ([]runtime.VMStats, error) {
