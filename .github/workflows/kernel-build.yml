@@ -1,4 +1,4 @@
-# Builds the kiac "full" node kernel: kernel.org 6.12.x with
+# Builds the kiac "full" node kernel: kernel.org 6.18.x with
 # apple/containerization's arm64 base config plus kernel/config-full
 # (VXLAN, GENEVE, br_netfilter, eBPF JIT + BTF, WireGuard, ...) so
 # Cilium/Calico/flannel can run inside kiac node VMs.
@@ -27,16 +27,16 @@ permissions:
   artifact-metadata: write
 
 env:
-  # 6.12.28 matches the Kata default kernel `container` 1.0.0 boots
-  # (vmlinux-6.12.28-153), minimizing guest ABI drift for vminitd.
-  KERNEL_VERSION: "6.12.28"
-  KERNEL_SHA256: "e8a099182562aecff781de72ce769461e706d97af42d740dff20eb450dd5771e"
-  # apple/containerization ref providing the base kernel config. Its
-  # config targets 6.18.5; `make olddefconfig` reconciles it against
-  # 6.12.x, and the assert step below catches anything that gets
-  # dropped. The config is additionally pinned by checksum.
-  CONTAINERIZATION_REF: "0.35.0"
-  BASE_CONFIG_SHA256: "cc6cc583a69d4297be50e8fb3a255fe3da2d1cb0aa9c98a9ae4db605505de1cc"
+  # Match the Linux version of Apple/container 1.7.1's recommended
+  # Kata 4.3.1 kernel; the Kiac config remains independently asserted.
+  # Checksum: https://cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc
+  KERNEL_VERSION: "6.18.56"
+  KERNEL_SHA256: "4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89"
+  # apple/containerization ref providing the base config. Its generated
+  # header still names 6.1.68: `make olddefconfig` reconciles it against
+  # 6.18.x, and check-config.sh catches dropped CNI/boot requirements.
+  CONTAINERIZATION_REF: "0.54.0"
+  BASE_CONFIG_SHA256: "dedb03de6d686534efbca3a90bac304721e818bd96bc421b4d2213724a4e260b"
 
 jobs:
   build:
@@ -79,14 +79,11 @@ jobs:
               cd /kbuild
               ./scripts/kconfig/merge_config.sh -m /w/config-base /w/kernel/config-full
               make ARCH=arm64 olddefconfig
-              # olddefconfig silently drops options whose dependencies
-              # are unmet; a kernel missing any of these would boot but
-              # break the CNIs this build exists for, so fail loudly.
-              while read -r opt; do
-                grep -qx "${opt}" .config || { echo "MISSING ${opt} after olddefconfig"; exit 1; }
-              done < <(grep "^CONFIG_" /w/kernel/config-full)
+              /w/kernel/check-config.sh /w/kernel/config-full .config
               make ARCH=arm64 -j"$(nproc)" LOCALVERSION="-kiac-full" Image
+              /w/kernel/check-config.sh /w/kernel/config-full .config
               cp arch/arm64/boot/Image "/w/kiac-kernel-${KERNEL_VERSION}-full"
+              cp .config "/w/kiac-kernel-${KERNEL_VERSION}-full.config"
             '
 
       - name: Checksum
@@ -101,6 +98,7 @@ jobs:
           path: |
             kiac-kernel-${{ env.KERNEL_VERSION }}-full
             kiac-kernel-${{ env.KERNEL_VERSION }}-full.sha256
+            kiac-kernel-${{ env.KERNEL_VERSION }}-full.config
           if-no-files-found: error
 
       - name: Attest kernel provenance

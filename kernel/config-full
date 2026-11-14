@@ -15,6 +15,28 @@
 # docs.cilium.io "System Requirements"
 # (Documentation/operations/system_requirements.rst, fetched 2026-07-06).
 
+# --- Monolithic guest boot and container runtime ----------------------
+# Consumer: vminitd's boot disk, host/guest transport and filesystem
+# sharing, plus containerd's overlay snapshots. Keep these explicit so
+# a future upstream base config cannot produce a CNI-ready kernel that
+# cannot start a Kiac node. There is no guest module-loading fallback.
+# CONFIG_MODULES is not set
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_NET=y
+CONFIG_VIRTIO_CONSOLE=y
+CONFIG_VSOCKETS=y
+CONFIG_VIRTIO_VSOCKETS=y
+CONFIG_EXT4_FS=y
+CONFIG_VIRTIO_FS=y
+CONFIG_OVERLAY_FS=y
+CONFIG_NAMESPACES=y
+CONFIG_NET_NS=y
+# Expose the resolved config for guest diagnostics and CNI acceptance.
+CONFIG_IKCONFIG=y
+CONFIG_IKCONFIG_PROC=y
+
 # --- Cilium base eBPF requirements ------------------------------------
 # Consumer: Cilium agent datapath (all modes).
 CONFIG_BPF=y
