@@ -70,7 +70,7 @@ kiac ui --port 0       <span class="c"># pick any free port</span></code></pre>
     <li><b>Live resource bars</b>: CPU and memory per node, fed by your Mac's <code>kubectl top nodes</code> against the cluster's <code>kiac-&lt;name&gt;</code> context, so they work on every distro (kubeadm and k3s alike). Bars turn red at 85%. They appear once metrics-server has scraped (about a minute after create) and degrade gracefully to plain node state before that.</li>
     <li><b>Stop / Start buttons</b> per node, running the same <a href="node-chaos.html">node chaos</a> commands as the CLI. LoadBalancer IPs re-point automatically after a restart; there is no pool state to re-sync.</li>
   </ul>
-  <h3>VM resource samples</h3>
+  <h3 id="vm-resource-samples">VM resource samples</h3>
   <p>Expand <b>VM resource samples · Apple/container</b> to see runtime CPU and container memory separately from Kubernetes metrics-server. CPU is normalized against the node's configured vCPUs; memory is the runtime's container counter, not the Mac's total VM memory footprint. Apple/container 1.7.1 reports CPU rate; older versions may only report memory. GPU nodes using krunkit show that runtime sampling is unavailable.</p>
   <p>Samples refresh in the background, with at most two collectors active across all clusters. Values expire after 15 seconds, and stopped nodes show their state instead of an old measurement.</p>
   <h3>Addon links</h3>
