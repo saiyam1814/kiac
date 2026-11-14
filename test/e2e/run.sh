@@ -3,6 +3,9 @@ set -Eeuo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 PROFILE=${1:-quick}
+if [[ "${PROFILE}" == compat ]]; then
+  exec "${ROOT}/test/e2e/compat.sh"
+fi
 RUN_ID=${KIAC_E2E_RUN_ID:-$(date +%s)}
 RUN_ID=$(printf '%s' "${RUN_ID}" | tr -cd 'a-zA-Z0-9-' | cut -c1-20)
 export KIAC_E2E_PREFIX=${KIAC_E2E_PREFIX:-"ci-${RUN_ID}"}
