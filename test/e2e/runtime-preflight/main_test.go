@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -149,6 +150,42 @@ func TestVacancyChecksProtectExistingResources(t *testing.T) {
 	}
 	if err := validateImageAbsent([]byte("busybox:1.37.0\n"), "kiac-e2e-compat:test"); err != nil {
 		t.Fatal(err)
+	}
+	const liveInventory = "kindest/node@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5\nkiac-e2e-cni:171\n"
+	if err := validateImageAbsent([]byte(liveInventory), "kiac-e2e-compat:test"); err != nil {
+		t.Fatalf("unrelated real runtime digest inventory rejected: %v", err)
+	}
+}
+
+func TestStandalonePreflightAcceptsDigestInventory(t *testing.T) {
+	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
+		t.Skip("standalone preflight intentionally requires an Apple silicon host")
+	}
+	// Build the real command without the test binary: testing itself may
+	// register hash algorithms, masking a missing production-side import.
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "preflight")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	build := exec.CommandContext(ctx, "go", "build", "-buildvcs=false", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("standalone build: %v %s", err, output)
+	}
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "sw_vers"), []byte("#!/bin/sh\nprintf '27.0.1\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	fixture := "#!/bin/sh\ncase \"$*\" in\n 'system status --format json') printf '%s\\n' '" + goodStatus + "' ;;\n 'image list --quiet') printf '%s\\n' 'kindest/node@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5' 'kiac-e2e-cni:171' ;;\n *) exit 99 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(bin, "container"), []byte(fixture), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, binary, "--expected-container-version", "1.7.1", "--assert-image-absent", "kiac-e2e-compat:fixture")
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone digest inventory rejected: %v %s", err, output)
 	}
 }
 

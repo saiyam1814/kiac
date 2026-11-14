@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "crypto/sha256" // Register OCI sha256 digests for distribution/reference.
+	_ "crypto/sha512" // OCI inventories may also contain sha384/sha512 digests.
 	"encoding/json"
 	"errors"
 	"flag"
