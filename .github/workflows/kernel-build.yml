@@ -133,4 +133,5 @@ jobs:
               "kiac-kernel-${KERNEL_VERSION}-full" \
               "kiac-kernel-${KERNEL_VERSION}-full.sha256"
           fi
-          gh release edit "$tag" --draft=false --verify-tag
+          # Kernel assets must not replace the latest Kiac app release.
+          gh release edit "$tag" --draft=false --verify-tag --latest=false
