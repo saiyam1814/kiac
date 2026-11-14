@@ -87,10 +87,11 @@
     <tr><th>Requirement</th><th>Detail</th></tr>
     <tr><td>Apple silicon Mac</td><td>arm64 only</td></tr>
     <tr><td>macOS 26+</td><td>needed for multi-node networking; single-node may still work on older macOS</td></tr>
-    <tr><td><a href="https://github.com/apple/container/releases">apple/container</a> 1.6.0+</td><td>ordinary clusters; 1.6.1 recommended; signed pkg installer from Apple; fixes pinned image digest verification</td></tr>
+    <tr><td><a href="https://github.com/apple/container/releases">apple/container</a> 1.6.0+</td><td>ordinary clusters; 1.6.1 recommended; signed pkg installer from Apple; 1.6.0+ includes the pinned image digest verification fix</td></tr>
     <tr><td><code>kubectl</code></td><td>any recent version</td></tr>
     <tr><td>GPU clusters and external workers: krunkit 1.3.2+, vmnet-helper 0.13.0+ and renderer dependencies</td><td>optional backend; see <a href="gpu.html#requirements">setup</a>; ordinary clusters do not require it</td></tr>
   </table>
+  <p><b>Completed v0.12.0 compatibility checks:</b> Apple/container 1.6.1 and 1.7.1 passed acceptance on an M1 Max running macOS 27.0.1, using two-node kubeadm and K3s clusters, including VM stop/resume and Service and DNS checks.</p>
 
   <h2 id="install">Install</h2>
   <pre><code>brew install --cask saiyam1814/tap/kiac</code></pre>
