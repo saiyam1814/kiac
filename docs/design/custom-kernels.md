@@ -13,7 +13,8 @@ kiac create cluster --cni flannel --kernel full
 kiac create cluster --kernel /absolute/path/to/Image --cni none
 ```
 
-`full` downloads KIAC's published ARM64 kernel into `~/.kiac/kernels/`.
+`full` downloads KIAC's published Linux 6.18.56 ARM64 kernel (about 38 MiB)
+from the `kernel-v6.18.56-full` release into `~/.kiac/kernels/`.
 `pkg/cluster/kernel.go` pins its SHA256 and verifies downloads and cache
 hits. An explicit local path selects the user's kernel image instead.
 Selection is stored with the cluster and passed to the runtime at node
@@ -31,7 +32,7 @@ creation. GPU clusters boot the kernel in their Fedora disk and reject
   clusters; it does not enforce NetworkPolicy.
 - Calico is not bundled. `--cni none` leaves CNI installation to the user.
 
-The 6.18.35 kernel recommended by apple/container 1.4.1 includes many
+The 6.18.56 debug kernel recommended by apple/container 1.7.1 includes many
 features absent from older retained kernels. KIAC still requires an
 explicit kernel for ordinary Cilium and Flannel clusters. Non-IPv4
 clusters auto-select the full kernel for IPv6 netfilter and use kindnet.
@@ -40,8 +41,9 @@ clusters auto-select the full kernel for IPv6 netfilter and use kindnet.
 
 [The kernel directory](../../kernel/README.md) describes the pinned build
 inputs and configuration checks. The workflow verifies the source and
-base-config checksums, merges `kernel/config-full`, rejects missing
-required options, and publishes the ARM64 boot Image and checksum.
+base-config checksums, merges `kernel/config-full` with the
+apple/containerization 0.54.0 base config, rejects missing required enabled
+or disabled options, and publishes the ARM64 boot Image and checksum.
 
 `test/e2e/run.sh flannel` exercises four nodes, cross-node traffic,
 Gateway, observability, host mounts and worker restart. The dual-stack

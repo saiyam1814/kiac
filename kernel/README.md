@@ -26,7 +26,7 @@ release assets). The job:
 1. Downloads kernel.org `linux-6.18.56.tar.xz` (sha256-pinned).
 2. Fetches Apple's `config-arm64` at containerization tag 0.54.0
    (sha256-pinned).
-3. Inside `docker run ubuntu:24.04` (hermetic toolchain, includes
+3. Inside a digest-pinned Ubuntu 24.04 build container (including
    `dwarves` for BTF): merges `config-full` with
    `scripts/kconfig/merge_config.sh`, runs `make olddefconfig`, fails
    if any required enabled or disabled fragment option was dropped, and builds the uncompressed
@@ -39,7 +39,8 @@ release assets). The job:
 ## Using a built kernel
 
 `ResolveKernel` in `pkg/cluster/kernel.go` maps the name `full` to the
-release asset, downloads it once to `~/.kiac/kernels/`, and verifies
+published `kernel-v6.18.56-full` release (about 38 MiB), downloads its ARM64
+boot Image once to `~/.kiac/kernels/`, and verifies
 its sha256 against the checksum pinned in `kernelAssets` on download
 and on every cache hit. New kernel releases must update that pin after
 validating their published artifact.

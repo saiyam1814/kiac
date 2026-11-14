@@ -30,8 +30,8 @@ kiac create cluster --name cilium --workers 2 --cni cilium --kernel full --gatew
 
 What happens, in order:
 
-- `--kernel full` downloads the published kiac kernel once (a ~15MB
-  arm64 boot Image from the `kernel-v6.12.28-full` release,
+- `--kernel full` downloads the published kiac kernel once (about 38 MiB,
+  an ARM64 boot Image from the `kernel-v6.18.56-full` release,
   sha256-verified on download and on every cache hit, cached under
   `~/.kiac/kernels`). It is Apple's base kernel config plus what CNIs
   need: VXLAN, Geneve, br_netfilter, nf_tables, the eBPF JIT with BTF,

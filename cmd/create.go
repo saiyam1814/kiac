@@ -86,7 +86,7 @@ var createClusterCmd = &cobra.Command{
 			ui.Warnf("%s", msg)
 		}
 		// Reject a bad --cni before --kernel full can start a download:
-		// a typo should cost a message, not 37MB. Create re-checks.
+		// a typo should cost a message, not a kernel download. Create re-checks.
 		if selectedDistro == "kubeadm" && createCfg.GPUWorkers == 0 {
 			pre := createCfg
 			pre.Kernel = createKernel

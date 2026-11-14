@@ -30,14 +30,14 @@ var kernelAssets = map[string]kernelAsset{
 	// br_netfilter, BPF JIT + BTF, WireGuard) on top of Apple's base
 	// config; see kernel/config-full.
 	"full": {
-		URL:    "https://github.com/saiyam1814/kiac/releases/download/kernel-v6.12.28-full/kiac-kernel-6.12.28-full",
-		SHA256: "bc0455952b4542f0a28d2dfedf00538e8f4c67d8a93f70a0c875e6f22d671926",
-		File:   "kiac-kernel-6.12.28-full",
+		URL:    "https://github.com/saiyam1814/kiac/releases/download/kernel-v6.18.56-full/kiac-kernel-6.18.56-full",
+		SHA256: "e5cb669fc715979e39a15f462983c932ae60317ad2f0261a0999bdc6cd5b5a64",
+		File:   "kiac-kernel-6.18.56-full",
 	},
 }
 
 // kernelHTTP allows the kernel to take a while on slow links but never
-// hang a create forever; the asset is ~37MB.
+// hang a create forever; the asset is about 38 MiB.
 var kernelHTTP = &http.Client{Timeout: 10 * time.Minute}
 
 // ResolveKernel maps a --kernel value to a local kernel binary path.

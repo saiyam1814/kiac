@@ -145,7 +145,7 @@ kiac verify cluster --name gpu-lab</code></pre>
   <p>KIAC does not bundle a Calico manifest. Older retained kernels also lack its prerequisites; newer runtime kernels do not change the CNIs KIAC installs. Cilium is the supported path to a policy-enforcing CNI (<code>--cni cilium --kernel full</code>) and Flannel the supported overlay without a host CLI (<code>--cni flannel --kernel full</code>); on the full kernel you can also install Calico yourself with <code>--kernel full --cni none</code>. The kernel story is in <a href="networking.html#kernel">Networking</a>.</p>
 
   <h2 id="kernel-download">Downloads and the ~/.kiac cache</h2>
-  <p><code>--kernel full</code> downloads the published kernel release asset (about 37MB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
+  <p><code>--kernel full</code> downloads the published Linux 6.18.56 kernel release asset (about 38 MiB) into <code>~/.kiac/kernels/</code> on first use, and the k3s path caches the CNI plugins archive under <code>~/.kiac/</code>. Every artifact is sha256-verified against a checksum pinned in the kiac binary, on download and again on every cache hit, so:</p>
   <ul>
     <li>A <code>sha256 mismatch</code> error means the download was corrupted (or the cache tampered with); the file is discarded, just re-run.</li>
     <li>Deleting a download-only subdirectory such as <code>~/.kiac/kernels</code>, <code>~/.kiac/images</code>, or <code>~/.kiac/models</code> triggers a fresh verified download when needed.</li>
