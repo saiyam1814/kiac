@@ -11,6 +11,34 @@ Run one distro locally:
 ./test/e2e/run.sh k3s
 ```
 
+For the focused Apple/container compatibility profile, start the selected
+runtime separately and require its exact version:
+
+```sh
+KIAC_EXPECTED_CONTAINER_VERSION=1.7.1 ./test/e2e/run.sh compat
+KIAC_EXPECTED_CONTAINER_VERSION=1.6.1 ./test/e2e/run.sh compat
+```
+
+`compat` runs kubeadm and K3s sequentially, with one control plane and one
+worker at a time. Before creating any runtime resources it requires an
+Apple silicon Mac on macOS 26 or newer and checks that both the actual CLI
+and running API server report the expected version through
+`container system status --format json`. A version-labelled runner alone
+is insufficient: a newer CLI connected to an older daemon fails closed.
+The preflight prints only versions and platform information, excluding
+runtime paths and resource inventories. It is bounded to 20 seconds and
+64 KiB of output and never starts services or installs software.
+
+The profile generates its own scratch OCI image from the static traffic
+probe, without BuildKit or a base image. It imports the exact short tag
+through `kiac load image`, starts a `Never`-pull pod on each node, verifies
+cross-node DNS and ClusterIP uploads, stops both VMs and resumes the
+cluster. It requires both guest boot IDs to change, waits for kubelets to
+report those new IDs, and repeats real pod traffic before deletion. It
+checks that neither owned node VM remains. For a focused rerun, set
+`KIAC_COMPAT_DISTRO=kubeadm` or `k3s`. To use an already built CLI, set
+`KIAC_BIN=/absolute/path/to/kiac KIAC_E2E_SKIP_BUILD=true`.
+
 `quick` runs both IPv4 distros. `dual` runs both dual-stack distros,
 `flannel` runs a kubeadm IPv4 cluster with `--cni flannel --kernel full`,
 and `full` runs all five clusters. Every IPv4 profile creates one control
@@ -38,15 +66,28 @@ The script defaults to both distros. For a focused local rerun, set
 
 ## GitHub runner
 
-The workflow deliberately has no `pull_request` trigger. A public fork
-must never execute contributor-controlled code on a self-hosted Mac.
-Attach a dedicated Apple silicon runner with the labels `macOS`, `ARM64`,
-and `kiac-runtime`, install `apple/container`, `kubectl`, krunkit 1.3.2+, and
-vmnet-helper 0.13.0+, and keep repository secrets off that machine. Then set
-the repository Actions variable `KIAC_RUNTIME_CI_ENABLED` to `true`.
+The workflow deliberately has no `pull_request` trigger, and every
+self-hosted job requires `refs/heads/main`, including manual dispatch.
+This YAML guard protects accidental dispatches; it is not a server-side
+security boundary against a branch that changes its own workflow. Before
+enabling the jobs, restrict the runner group to this workflow's trusted
+`refs/heads/main` revision through GitHub's selected-workflow access policy,
+or use isolated ephemeral runners with an equivalent trusted-ref boundary.
+Contributor-controlled branches must never execute on a persistent Mac.
 
-Once enabled, code merges run `quick`, the Monday schedule runs `full`, the
-first day of each month runs `gpu`, and maintainers can dispatch any profile
-manually. The job uploads no artifacts, uses only standard public-repository
-Actions plus the self-hosted machine, and therefore consumes no paid runner
-minutes.
+The CPU matrix needs two dedicated Apple silicon runners with `macOS` and
+`ARM64` labels plus `kiac-runtime-1.6.1` or `kiac-runtime-1.7.1`, respectively.
+Provision macOS 26+, `kubectl` and the exact runtime version on each runner
+beforehand. The CPU job never upgrades a runtime or registers a personal
+machine. Keep repository secrets off those machines. GPU and extended
+manual profiles retain the separate `kiac-runtime` label and their existing
+krunkit 1.3.2+/vmnet-helper 0.13.0+ prerequisites; the CPU matrix does not
+require those GPU dependencies.
+
+The repository variable `KIAC_RUNTIME_CI_ENABLED` must remain `false` until
+the dedicated runners are available; this change does not enable it.
+Once enabled, code merges and the Monday schedule run the CPU compatibility
+matrix, the first day of each month runs `gpu`, and maintainers can dispatch
+`compat` or the original extended profiles manually **from main**. The jobs
+upload no artifacts. Their runner labels separate the two CPU runtime
+versions from the GPU/extended queue.

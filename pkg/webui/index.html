@@ -87,6 +87,9 @@
   .bar i.hot{background:var(--bad)}
   .metric span{color:var(--mid);font-size:11.5px;font-family:var(--mono)}
   .dim{color:var(--subtle)}
+  .vm-stats{margin-top:14px;border-top:1px solid var(--divider);padding-top:12px}
+  .vm-stats summary{font-size:12px;font-weight:600;color:var(--mid);cursor:pointer}
+  .vm-stats .note{margin:9px 0;font-size:12px}
   .ta-r{text-align:right}
   .note{color:var(--mid);font-size:12px;margin-top:10px}
   .empty{color:var(--mid);font-size:14px}
@@ -197,7 +200,7 @@ const $ = id => document.getElementById(id);
 async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const state = { clusters: [], metrics: {}, addons: {} };
+const state = { clusters: [], metrics: {}, vmMetrics: {}, vmExpanded: {}, addons: {} };
 
 async function loadMeta() {
   const m = await j('/api/meta');
@@ -258,6 +261,34 @@ function bar(pct, label) {
   return `<div class="metric"><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${Math.min(pct, 100)}%"></i></div><span>${pct}%${label ? ' · ' + esc(label) : ''}</span></div>`;
 }
 
+function bytesLabel(bytes) {
+  if (typeof bytes !== 'number' || !isFinite(bytes)) return '—';
+  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + ' GiB' : (bytes / 1048576).toFixed(0) + ' MiB';
+}
+
+function vmResources(name) {
+  const m = state.vmMetrics[name];
+  if (!m) return '';
+  // Cache age is also checked in the browser so an interrupted poll cannot
+  // leave an old runtime sample presented as current on a subsequent render.
+  const age = m.sampledAt ? (Date.now() - Date.parse(m.sampledAt)) / 1000 : null;
+  const stale = m.stale || (age !== null && (!isFinite(age) || age > 15 || age < -1));
+  const rows = (m.nodes || []).map(n => {
+    const sampled = !stale && n.state === 'sampled';
+    const cpu = sampled && typeof n.cpuPercent === 'number' ? bar(Math.round(n.cpuPercent * 10) / 10, n.cpuCapacity + ' vCPU')
+      : sampled && typeof n.cpuCoreUsage === 'number' ? esc(n.cpuCoreUsage.toFixed(2) + ' cores · capacity unknown') : '<span class="dim">—</span>';
+    const memory = sampled && typeof n.memoryPercent === 'number' ? bar(Math.round(n.memoryPercent * 10) / 10, bytesLabel(n.memoryUsageBytes) + ' / ' + bytesLabel(n.memoryLimitBytes))
+      : sampled && typeof n.memoryUsageBytes === 'number' ? esc(bytesLabel(n.memoryUsageBytes)) : '<span class="dim">—</span>';
+    const status = stale && n.state === 'sampled' ? 'Sample expired' : sampled ? 'Sampled ' + Math.max(0, Math.round(age || 0)) + 's ago' : n.message || n.state;
+    return `<tr><td class="mono">${esc(n.node)}</td><td>${cpu}</td><td>${memory}</td><td>${esc(status)}</td></tr>`;
+  }).join('');
+  return `<details class="vm-stats" ${state.vmExpanded[name] ? 'open' : ''} ontoggle="state.vmExpanded['${name}']=this.open"><summary>VM resource samples · Apple/container</summary>
+    <div class="note">Separate from Kubernetes metrics-server. CPU is the share of configured VM CPUs; memory is the container counter, not the host VM footprint. Older runtimes may omit CPU rate.</div>
+    <div class="tscroll"><table class="nodes"><thead><tr><th>Node</th><th>VM CPU allocation</th><th>Container memory</th><th>Sample</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${m.state === 'collecting' ? '<div class="note">Collecting a runtime sample…</div>' : ''}
+  </details>`;
+}
+
 function card(c) {
   const nodes = c.nodes || [];
   const m = state.metrics[c.name];
@@ -296,10 +327,11 @@ function card(c) {
       </div>
     </div>
     <div class="tscroll"><table class="nodes">
-      <thead><tr><th>Node</th><th>Role</th><th>State</th><th>IP</th><th>CPU</th><th>Memory</th><th></th></tr></thead>
+      <thead><tr><th>Node</th><th>Role</th><th>State</th><th>IP</th><th>Node CPU</th><th>Node memory</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     ${m && !m.ready ? '<div class="note">Live metrics not available yet - metrics-server needs the cluster up and ~60s of scraping.</div>' : ''}
+    ${vmResources(c.name)}
   </div>`;
 }
 
@@ -319,6 +351,7 @@ async function refresh() {
     if (cs.error) return;
     state.clusters = cs;
     render();
+    refreshVMMetrics();
     await Promise.all(cs.map(async c => {
       const [m, a] = await Promise.all([
         j(`/api/clusters/${c.name}/metrics`).catch(() => null),
@@ -330,6 +363,30 @@ async function refresh() {
     render();
   } catch (e) { /* server restarting; next tick retries */ }
   finally { polling = false; }
+}
+
+let vmPolling = false;
+async function refreshVMMetrics() {
+  if (vmPolling) return;
+  vmPolling = true;
+  try {
+    await Promise.all(state.clusters.map(async c => {
+      const vm = await j(`/api/clusters/${c.name}/vm-metrics`).catch(() => null);
+      if (vm && !vm.error) state.vmMetrics[c.name] = vm;
+    }));
+    render();
+  } finally { vmPolling = false; }
+}
+
+function expireVMSamples() {
+  let changed = false;
+  for (const m of Object.values(state.vmMetrics)) {
+    if (!m.stale && m.sampledAt && Date.now() - Date.parse(m.sampledAt) > 15000) {
+      m.stale = true;
+      changed = true;
+    }
+  }
+  if (changed) render();
 }
 
 let pollTimer;
@@ -448,7 +505,7 @@ $('con-in').addEventListener('keydown', e => {
   else if (e.key === 'Escape') closeConsole();
 });
 
-loadMeta(); refresh(); setInterval(refresh, 5000);
+loadMeta(); refresh(); setInterval(refresh, 5000); setInterval(refreshVMMetrics, 5000); setInterval(expireVMSamples, 1000);
 </script>
 </body>
 </html>

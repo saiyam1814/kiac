@@ -91,7 +91,7 @@ Containers are great for packaging software, and kiac depends on them. The point
 - 💥 **Node chaos you can trust** — `kiac stop node` / `kiac start node` stop and restart a real node VM: NotReady detection, eviction, rescheduling, rejoin.
 - **Diagnostics with an exit code** — `kiac verify cluster` checks the VM, Kubernetes, pod network, DNS, storage, metrics, edge proxy, LoadBalancer, Gateway, observability, and host API paths without changing the cluster. JSON output is stable for automation; `kiac support bundle` writes a bounded, redacted archive for issue reports.
 - 📄 **Declarative clusters** — `kiac create cluster --config cluster.yaml` describes the whole cluster in one file; explicit flags override it.
-- 🖥️ **A console when you want one** — `kiac ui` opens a local web console: cluster cards, live resource bars, node stop/start buttons, Grafana and Gateway links, a create form, and a per-cluster kubectl Console drawer (loopback-only, no shell). Works on every distro. Same engine as the CLI.
+- 🖥️ **A console when you want one** — `kiac ui` opens a local web console: cluster cards, Kubernetes resource bars, separate Apple/container CPU and memory samples, node stop/start buttons, Grafana and Gateway links, a create form, and a per-cluster kubectl Console drawer (loopback-only, no shell). Works on every distro. Same engine as the CLI.
 - 🍎 **Native stack** — one Swift runtime from Apple, one Go binary from us. Coexists with Docker Desktop, kind, and k3d; never touches the Docker socket.
 
 ## Quickstart
@@ -262,6 +262,7 @@ $ curl http://192.168.64.3       # HTTP 200, straight from your Mac
 ```bash
 kiac doctor                                  # check your setup
 kiac doctor --fix                            # ...and auto-start the container service
+kiac doctor --dns                            # show merged Apple runtime DNS defaults (read-only)
 kiac create cluster                          # single node, everything included
 kiac create cluster --name dev --workers 2   # 1 control plane + 2 workers
 kiac create cluster --k8s-version 1.34       # pick your Kubernetes (kubeadm 1.32-1.37 pinned)
@@ -314,7 +315,7 @@ Full guides and command reference live on the [docs site](https://saiyam1814.git
 | `--image` | resolved from `--k8s-version` | explicit node image override |
 | `--cni` | `kindnet` | kubeadm pod network: `kindnet`, `cilium`, `flannel`, or `none`; Cilium needs the host CLI and, on ordinary apple/container clusters, `--kernel full`; Flannel (v0.28.9 embedded, VXLAN, no host CLI) needs `--kernel full` and is not available on GPU clusters. Only Cilium enforces NetworkPolicy |
 | `--kernel` | Apple's stock kernel | `full` downloads the published kiac kernel (VXLAN, Geneve, br_netfilter, eBPF, WireGuard; sha-pinned, cached in `~/.kiac/kernels`), or pass a path to a kernel Image |
-| `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); given, it replaces the runtime's default resolv.conf entirely rather than adding to it |
+| `--dns` | runtime default | nameserver IPs for the node VMs, repeatable up to 3; replaces runtime nameservers only. On apple/container, configured domain, search domains and resolver options remain inherited |
 | `--mount` | | bind a host directory into every node VM; repeat `type=bind,source=/host/path,target=/node/path[,readonly]`. Explicit CLI mounts replace config-file mounts |
 | `-p`, `--publish` | | publish host traffic to the control-plane VM only using `[host-ip:]host-port:container-port[/protocol]`; omitted host IP binds all IPv4 interfaces, so use `127.0.0.1` for loopback only; repeatable; does not add API-server TLS SANs |
 | `--registry-ca` | | repeatable `HOST[:PORT]=PEM_FILE`; configure registry-specific HTTPS CA trust on every node for workload image pulls; kubeadm and K3s, including GPU clusters |

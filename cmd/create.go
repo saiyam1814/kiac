@@ -86,7 +86,7 @@ var createClusterCmd = &cobra.Command{
 			ui.Warnf("%s", msg)
 		}
 		// Reject a bad --cni before --kernel full can start a download:
-		// a typo should cost a message, not 37MB. Create re-checks.
+		// a typo should cost a message, not a kernel download. Create re-checks.
 		if selectedDistro == "kubeadm" && createCfg.GPUWorkers == 0 {
 			pre := createCfg
 			pre.Kernel = createKernel
@@ -216,7 +216,7 @@ func init() {
 	f.StringVar(&createCfg.CNI, "cni", "kindnet", "kubeadm pod network: kindnet, cilium (ordinary clusters need --kernel full), flannel (needs --kernel full), or none (bring your own)")
 	f.StringVar(&createIPFamily, "ip-family", "ipv4", "IP family for pods, Services, and nodes: ipv4, dual (IPv4-primary + IPv6), or ipv6 (IPv6-primary; needs the full kernel, auto-selected)")
 	f.StringVar(&createKernel, "kernel", "", "custom node kernel: 'full' (downloads the published kiac kernel with VXLAN/eBPF/br_netfilter) or a path to a kernel Image")
-	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3 (resolv.conf's own limit); overrides the runtime's default resolv.conf entirely rather than adding to it")
+	f.StringSliceVar(&createCfg.DNS, "dns", nil, "nameserver IPs for the node VMs, repeatable up to 3; replaces runtime nameservers only (domain, search domains and options remain inherited on apple/container)")
 	f.Var(&createCfg.Mounts, "mount", "bind a host directory into every node VM (type=bind,source=/host/path,target=/node/path[,readonly]); repeatable")
 	f.VarP(&createCfg.Publish, "publish", "p", "publish a host port to the control-plane VM only ([host-ip:]host-port:container-port[/protocol]); omitted host IP binds all IPv4 interfaces; repeatable; does not add API-server TLS SANs")
 	f.Var(&createCfg.RegistryCAs, "registry-ca", "trust a PEM CA bundle for HTTPS image pulls on every node (HOST[:PORT]=PEM_FILE); repeatable")

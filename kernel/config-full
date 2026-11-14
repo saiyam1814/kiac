@@ -2,9 +2,9 @@
 #
 # Applied on top of apple/containerization's kernel/config-arm64 (pinned
 # ref in .github/workflows/kernel-build.yml) with the kernel tree's
-# scripts/kconfig/merge_config.sh, then `make olddefconfig`. Everything
-# is =y: Apple's base sets "# CONFIG_MODULES is not set" (fully
-# monolithic, no module loading at runtime) and this fragment keeps
+# scripts/kconfig/merge_config.sh, then `make olddefconfig`. Required
+# features are built in: Apple's base disables loadable modules (fully
+# monolithic, no module loading at runtime), and this fragment keeps
 # that model, so any feature a CNI would normally modprobe must be
 # built in here.
 #
@@ -14,6 +14,28 @@
 # requirement. Each option cites its consumer; Cilium options come from
 # docs.cilium.io "System Requirements"
 # (Documentation/operations/system_requirements.rst, fetched 2026-07-06).
+
+# --- Monolithic guest boot and container runtime ----------------------
+# Consumer: vminitd's boot disk, host/guest transport and filesystem
+# sharing, plus containerd's overlay snapshots. Keep these explicit so
+# a future upstream base config cannot produce a CNI-ready kernel that
+# cannot start a Kiac node. There is no guest module-loading fallback.
+# CONFIG_MODULES is not set
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_VIRTIO_NET=y
+CONFIG_VIRTIO_CONSOLE=y
+CONFIG_VSOCKETS=y
+CONFIG_VIRTIO_VSOCKETS=y
+CONFIG_EXT4_FS=y
+CONFIG_VIRTIO_FS=y
+CONFIG_OVERLAY_FS=y
+CONFIG_NAMESPACES=y
+CONFIG_NET_NS=y
+# Expose the resolved config for guest diagnostics and CNI acceptance.
+CONFIG_IKCONFIG=y
+CONFIG_IKCONFIG_PROC=y
 
 # --- Cilium base eBPF requirements ------------------------------------
 # Consumer: Cilium agent datapath (all modes).
@@ -35,8 +57,8 @@ CONFIG_BPF_JIT=y
 CONFIG_NET_CLS_BPF=y
 CONFIG_NET_CLS_ACT=y
 CONFIG_NET_SCH_INGRESS=y
-# BTF: Apple's base sets CONFIG_DEBUG_INFO_NONE=y, which blocks
-# CONFIG_DEBUG_INFO_BTF. Flip to toolchain-default DWARF so BTF can be
+# BTF: Apple's base disables debug info, which blocks BTF. Flip to
+# toolchain-default DWARF so BTF can be
 # emitted; the build container must ship pahole (dwarves package).
 # CONFIG_DEBUG_INFO_NONE is not set
 CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y
@@ -102,6 +124,22 @@ CONFIG_IPVLAN=y
 # ipsets for policy; only hash:ip is required by Cilium above.
 CONFIG_IP_SET_HASH_NET=y
 CONFIG_IP_SET_HASH_IPPORTNET=y
+
+# --- Legacy iptables compatibility -------------------------------------
+# Consumer: Kiac's edge proxy and node images shipping iptables-legacy.
+# Linux 6.18 separates legacy table support behind explicit gates. Keep
+# both address families built in alongside nftables rather than losing
+# the filter/mangle/raw/NAT tables during olddefconfig reconciliation.
+CONFIG_NETFILTER_XTABLES=y
+CONFIG_NETFILTER_XTABLES_LEGACY=y
+CONFIG_IP_NF_IPTABLES=y
+CONFIG_IP_NF_IPTABLES_LEGACY=y
+CONFIG_IP_NF_FILTER=y
+CONFIG_IP_NF_MANGLE=y
+CONFIG_IP_NF_RAW=y
+CONFIG_IP_NF_NAT=y
+CONFIG_IP_NF_TARGET_MASQUERADE=y
+CONFIG_IP6_NF_IPTABLES_LEGACY=y
 
 # --- IPv6 Services (--ip-family dual / ipv6) ----------------------------
 # Consumer: kube-proxy programming IPv6 ClusterIP/NodePort/LoadBalancer

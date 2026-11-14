@@ -21,9 +21,10 @@ on:
       profile:
         description: Runtime test profile
         required: true
-        default: quick
+        default: compat
         type: choice
         options:
+          - compat
           - quick
           - kubeadm
           - k3s
@@ -40,8 +41,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  compatibility:
+    # Never execute a dispatched branch or pull-request revision on a
+    # persistent Mac. Version-labelled runners are provisioned separately;
+    # this job never installs/upgrades their runtime or starts its API service.
+    if: >-
+      vars.KIAC_RUNTIME_CI_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' || inputs.profile == 'compat') &&
+      github.event.schedule != '43 4 1 * *'
+    strategy:
+      fail-fast: false
+      matrix:
+        container-version: ["1.6.1", "1.7.1"]
+    runs-on: [self-hosted, macOS, ARM64, "kiac-runtime-${{ matrix.container-version }}"]
+    timeout-minutes: 90
+    env:
+      KIAC_EXPECTED_CONTAINER_VERSION: ${{ matrix.container-version }}
+      KIAC_E2E_KUBECONFIG: /tmp/kiac-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.container-version }}.kubeconfig
+      KIAC_E2E_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.container-version }}
+      KIAC_E2E_STATE_FILE: /tmp/kiac-e2e-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.container-version }}.clusters
+    steps:
+      - name: Check out trusted main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.6"
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            internal/gpudriver/go.sum
+
+      - name: Check exact installed CLI and running server version
+        run: go run ./test/e2e/runtime-preflight --expected-container-version "${KIAC_EXPECTED_CONTAINER_VERSION}"
+
+      - name: Exercise two-VM kubeadm and K3s compatibility
+        run: ./test/e2e/run.sh compat
+
+      - name: Remove recorded test clusters after cancellation
+        if: always()
+        run: ./test/e2e/compat-cleanup.sh
+
   runtime:
-    if: vars.KIAC_RUNTIME_CI_ENABLED == 'true'
+    # GPU hardware and the original extended profiles retain their existing
+    # labels. They do not occupy either CPU compatibility matrix runner.
+    if: >-
+      vars.KIAC_RUNTIME_CI_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.profile != 'compat') ||
+      github.event.schedule == '43 4 1 * *')
     runs-on: [self-hosted, macOS, ARM64, kiac-runtime]
     timeout-minutes: 120
     env:
@@ -77,14 +129,20 @@ jobs:
             workflow_dispatch) profile="${DISPATCH_PROFILE}" ;;
             *) profile=quick ;;
           esac
+          case "${profile}" in
+            quick|kubeadm|k3s|dual|flannel|gpu|full) ;;
+            *) echo "invalid runtime profile" >&2; exit 1 ;;
+          esac
           echo "profile=${profile}" >> "${GITHUB_OUTPUT}"
 
       - name: Exercise real Kiac clusters
+        env:
+          SELECTED_PROFILE: ${{ steps.profile.outputs.profile }}
         run: |
-          if [[ "${{ steps.profile.outputs.profile }}" == gpu ]]; then
+          if [[ "${SELECTED_PROFILE}" == gpu ]]; then
             ./test/e2e/gpu.sh
           else
-            ./test/e2e/run.sh "${{ steps.profile.outputs.profile }}"
+            ./test/e2e/run.sh "${SELECTED_PROFILE}"
           fi
 
       - name: Remove test clusters

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/saiyam1814/kiac/pkg/cluster"
+	"github.com/saiyam1814/kiac/pkg/runtime"
 )
 
 //go:embed index.html
@@ -58,6 +59,12 @@ type server struct {
 	busy    map[string]bool   // cluster names with an in-flight mutating job
 	created map[string]string // cluster name -> creationTimestamp, stable for the cluster's lifetime
 	next    int
+
+	vmInventory map[string]vmInventory
+	vmCache     map[string]*vmMetricsCache
+	vmSlots     chan struct{}
+	vmQueue     []vmPending
+	vmStats     func(context.Context, []string) ([]runtime.VMStats, error)
 }
 
 func newServer() (*server, error) {
@@ -65,7 +72,7 @@ func newServer() (*server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &server{mgr: cluster.NewManager(), self: self, kubectl: hostKubectl,
+	return &server{mgr: cluster.NewManager(), self: self, kubectl: hostKubectl, vmStats: runtime.New().VMStats,
 		jobs: map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}, nil
 }
 
@@ -81,6 +88,7 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/clusters/{name}", s.deleteCluster)
 	mux.HandleFunc("GET /api/clusters/{name}/kubeconfig", s.kubeconfig)
 	mux.HandleFunc("GET /api/clusters/{name}/metrics", s.metrics)
+	mux.HandleFunc("GET /api/clusters/{name}/vm-metrics", s.vmMetrics)
 	mux.HandleFunc("GET /api/clusters/{name}/addons", s.addons)
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/stop", s.nodeAction("stop"))
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/start", s.nodeAction("start"))
@@ -171,12 +179,14 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []clusterInfo{}
+	vmNodes := make(map[string][]runtime.Info, len(names))
 	for _, n := range names {
 		nodes, err := s.mgr.Nodes(n)
 		if err != nil {
 			continue
 		}
 		ci := clusterInfo{Name: n, Created: s.createdAt(n)}
+		vmNodes[n] = nodes
 		for _, nd := range nodes {
 			ni := nodeInfo{Name: nd.Name, Status: nd.Status, Image: nd.Image, Role: nodeRole(nd.Name)}
 			// IPs come from inside the VM; a stopped node has none.
@@ -190,6 +200,7 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 		out = append(out, ci)
 	}
 	s.pruneCreated(names)
+	s.recordVMInventory(vmNodes)
 	writeJSON(w, 200, out)
 }
 

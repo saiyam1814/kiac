@@ -72,15 +72,15 @@
   </table>
 
   <h2 id="kernel">What --kernel full is</h2>
-  <p>Node VMs normally boot the runtime's configured kernel. Older installations may still use the minimal 6.12.28 build; apple/container 1.4.1 recommends a more capable 6.18.35 build. See <a href="networking.html#kernel">kernel versions and defaults</a>. <code>--kernel full</code> swaps in a kernel kiac builds in CI (<code>.github/workflows/kernel-build.yml</code>) from two pinned inputs: Apple's containerization base config and kiac's <code>kernel/config-full</code> fragment. On top of the base it enables:</p>
+  <p>Node VMs normally boot the runtime's configured kernel. Older installations may still use the minimal 6.12.28 build; apple/container 1.7.1 recommends Kata's more capable 6.18.56 debug kernel. See <a href="networking.html#kernel">kernel versions and defaults</a>. <code>--kernel full</code> swaps in a kernel kiac builds in CI (<code>.github/workflows/kernel-build.yml</code>) from two pinned inputs: Apple's containerization base config and kiac's <code>kernel/config-full</code> fragment. On top of the base it enables:</p>
   <ul>
     <li><b>VXLAN and Geneve</b>: overlay datapaths (Cilium's tunnel mode, flannel's vxlan backend).</li>
     <li><b>br_netfilter and nf_tables</b>: bridged traffic steered through iptables/nftables, which bridge-based CNIs assume.</li>
     <li><b>BPF JIT and BTF</b>: the eBPF machinery Cilium's datapath loads.</li>
     <li><b>WireGuard</b> and <b>kprobes</b>: transparent encryption and the tracing hooks tools like Hubble and Tetragon build on.</li>
   </ul>
-  <p>The kernel stays monolithic with zero loadable modules, matching Apple's model, and its version (6.12.28) matches the kernel apple/container 1.0.0 boots by default, minimizing guest ABI drift.</p>
-  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 37MB) from the <code>kernel-v6.12.28-full</code> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
+  <p>The full kernel is Linux 6.18.56, built from the checksum-pinned source and apple/containerization 0.54.0 base config. It stays monolithic with zero loadable modules. CI asserts the required boot, filesystem and CNI settings after Kconfig dependency resolution, including the explicit legacy IPv4 and IPv6 table gates introduced in newer kernels.</p>
+  <p>Supply-chain mechanics: the first <code>--kernel full</code> downloads the release asset (about 38 MiB) from the <a href="https://github.com/saiyam1814/kiac/releases/tag/kernel-v6.18.56-full"><code>kernel-v6.18.56-full</code></a> GitHub release into <code>~/.kiac/kernels/</code>. Its sha256 is pinned inside the kiac binary and verified on download <em>and on every cache hit</em>, so a corrupted or tampered cache can never boot a node. You can also pass your own build: <code>--kernel /path/to/Image</code> takes any uncompressed arm64 boot Image.</p>
   <pre><code>kiac create cluster --kernel full                 <span class="c"># full kernel, default kindnet CNI</span>
 kiac create cluster --kernel full --cni cilium    <span class="c"># full kernel + Cilium</span>
 kiac create cluster --kernel full --cni flannel   <span class="c"># full kernel + upstream Flannel, no host CLI</span>
