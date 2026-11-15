@@ -65,6 +65,13 @@ type server struct {
 	vmSlots     chan struct{}
 	vmQueue     []vmPending
 	vmStats     func(context.Context, []string) ([]runtime.VMStats, error)
+
+	gpuInventory map[string]gpuInventory
+	gpuCache     map[string]*gpuCache
+	gpuSlots     chan struct{}
+	gpuQueue     []gpuPending
+	gpuInspect   func(context.Context, string) (cluster.GPUInspection, error)
+	hostGPUCache hostGPUCache
 }
 
 func newServer() (*server, error) {
@@ -73,6 +80,9 @@ func newServer() (*server, error) {
 		return nil, err
 	}
 	return &server{mgr: cluster.NewManager(), self: self, kubectl: hostKubectl, vmStats: runtime.New().VMStats,
+		gpuInspect: func(ctx context.Context, name string) (cluster.GPUInspection, error) {
+			return inspectGPUCommand(ctx, self, name)
+		},
 		jobs: map[string]*job{}, busy: map[string]bool{}, created: map[string]string{}}, nil
 }
 
@@ -89,6 +99,8 @@ func (s *server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/clusters/{name}/kubeconfig", s.kubeconfig)
 	mux.HandleFunc("GET /api/clusters/{name}/metrics", s.metrics)
 	mux.HandleFunc("GET /api/clusters/{name}/vm-metrics", s.vmMetrics)
+	mux.HandleFunc("GET /api/clusters/{name}/gpu", s.gpu)
+	mux.HandleFunc("GET /api/gpu/host", s.hostGPU)
 	mux.HandleFunc("GET /api/clusters/{name}/addons", s.addons)
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/stop", s.nodeAction("stop"))
 	mux.HandleFunc("POST /api/clusters/{name}/nodes/{node}/start", s.nodeAction("start"))
@@ -201,6 +213,7 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 	}
 	s.pruneCreated(names)
 	s.recordVMInventory(vmNodes)
+	s.recordGPUInventory(vmNodes)
 	writeJSON(w, 200, out)
 }
 
@@ -633,6 +646,7 @@ func (s *server) startJob(name string, args []string) (string, error) {
 		return "", fmt.Errorf("an operation on cluster %q is already running", name)
 	}
 	s.busy[name] = true
+	s.invalidateGPULocked(name)
 	s.next++
 	id := strconv.Itoa(s.next)
 	j := &job{Status: "running"}

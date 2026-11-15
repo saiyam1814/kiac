@@ -67,7 +67,7 @@ func TestServeGuardsAllRoutes(t *testing.T) {
 	defer ln.Close()
 
 	for _, path := range []string{"/", "/api/meta", "/api/jobs/1",
-		"/api/clusters/dev/metrics", "/api/clusters/dev/vm-metrics", "/api/clusters/dev/addons",
+		"/api/clusters/dev/metrics", "/api/clusters/dev/vm-metrics", "/api/clusters/dev/gpu", "/api/gpu/host", "/api/clusters/dev/addons",
 		"/api/clusters/dev/nodes/kiac-dev-worker-1/stop"} {
 		req := httptest.NewRequest("GET", "http://placeholder"+path, nil)
 		req.Host = "evil.example:5180"
