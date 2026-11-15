@@ -267,19 +267,30 @@ test_data_paths() {
   k delete namespace kiac-e2e --wait=true
 }
 
-test_inference() {
-  k apply -f "${ROOT}/examples/gpu-inference.yaml"
-  # The pinned model is over 600 MiB; allow the first download on slower links.
-  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=20m
+assert_inference() {
+  local rollout_timeout=${1:-10m}
+  k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout="${rollout_timeout}"
   retry 30 2 wait_for_lb kiac-gpu-demo tinyllama
   local ip response
   ip=$(k -n kiac-gpu-demo get svc tinyllama -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-  response=$(curl --noproxy '*' -fsS --max-time 90 "http://${ip}:8080/completion" \
+  # Service status can precede the edge proxy's reconcile, including on resume.
+  retry 30 2 curl --noproxy '*' -fsS --connect-timeout 3 --max-time 5 "http://${ip}:8080/health" >/dev/null
+  response=$(curl --noproxy '*' -fsS --connect-timeout 5 --max-time 90 "http://${ip}:8080/completion" \
     -H 'Content-Type: application/json' \
     -d '{"prompt":"Kubernetes on Apple GPUs is","n_predict":16}')
   printf '%s\n' "${response}" | go -C "${ROOT}" run ./test/e2e/check-inference --max-tokens 16
-  k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'Virtio-GPU Venus' >/dev/null
-  k -n kiac-gpu-demo logs deployment/tinyllama | grep -F 'offloaded 23/23 layers to GPU' >/dev/null
+  k -n kiac-gpu-demo logs deployment/tinyllama -c llama-server | grep -F 'Virtio-GPU Venus' >/dev/null
+  k -n kiac-gpu-demo logs deployment/tinyllama -c llama-server | grep -F 'offloaded 23/23 layers to GPU' >/dev/null
+}
+
+test_inference() {
+  k apply -f "${ROOT}/examples/gpu-inference.yaml"
+  # Exercise the serving worker during the gpu-1 stop/start below, even when
+  # this profile has multiple GPU workers. Keep the public example generic.
+  k -n kiac-gpu-demo patch deployment tinyllama --type=merge \
+    -p "{\"spec\":{\"template\":{\"spec\":{\"nodeSelector\":{\"kubernetes.io/hostname\":\"kiac-${CURRENT_CLUSTER}-gpu-1\"}}}}}"
+  # Match the deployment's initial startup deadline, including model download.
+  assert_inference 35m
 }
 
 test_internal_observability() {
@@ -389,9 +400,10 @@ run_gpu_cluster() {
     "${KIAC_BIN}" start node gpu-1 --name "${name}"
     k wait --for=condition=Ready nodes --all --timeout=8m
     assert_gpu_inventory "${driver}" "${gpu_workers}"
+    assert_inference
     stop_all_and_resume "${gpu_workers}" "${workers}"
     assert_gpu_inventory "${driver}" "${gpu_workers}"
-    k -n kiac-gpu-demo rollout status deployment/tinyllama --timeout=10m
+    assert_inference
   elif [[ "${profile}" == no-lb-observability ]]; then
     [[ "$(k get node "kiac-${name}-control-plane" -o 'go-template={{index .metadata.labels "kiac.io/lb-primary"}}')" == true ]]
     test_internal_observability
