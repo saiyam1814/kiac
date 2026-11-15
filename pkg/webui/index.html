@@ -90,6 +90,28 @@
   .vm-stats{margin-top:14px;border-top:1px solid var(--divider);padding-top:12px}
   .vm-stats summary{font-size:12px;font-weight:600;color:var(--mid);cursor:pointer}
   .vm-stats .note{margin:9px 0;font-size:12px}
+  .gpu-health{margin-top:16px;border-top:1px solid var(--divider);padding-top:14px}
+  .gpu-heading{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;font-weight:700}
+  .gpu-heading .tag{font-size:11px;font-weight:600;border-radius:6px;background:var(--bg);color:var(--mid);padding:3px 7px}
+  .gpu-path{font-size:12px;color:var(--mid);margin-top:7px;line-height:1.6}
+  .gpu-path b{font-weight:600;color:var(--ink)}
+  .gpu-status{font-size:12px;margin-top:10px;line-height:1.5}
+  .gpu-details{margin-top:12px}
+  .gpu-details summary{font-size:12px;font-weight:600;color:var(--accent);cursor:pointer}
+  .gpu-details h3{font-size:12px;margin:16px 0 7px}
+  .gpu-details table.nodes td{vertical-align:top}
+  .gpu-details table.nodes .reason{white-space:normal;min-width:180px;max-width:430px;line-height:1.45;overflow-wrap:anywhere}
+  .gpu-details .subline{font-size:11px;color:var(--mid);margin-top:4px;white-space:normal;overflow-wrap:anywhere}
+  .gpu-explanation{background:#f5f8fe;border-radius:10px;padding:10px 12px;color:var(--mid);font-size:12px;line-height:1.5;margin-top:10px}
+  .gpu-host-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .gpu-host-head h2{margin:0}
+  .gpu-host-head .btn{margin-left:auto}
+  .gpu-host-devices{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .gpu-host-device{border:1px solid var(--divider);border-radius:10px;padding:10px 12px;font-size:13px;font-weight:600}
+  .gpu-host-device small{display:block;color:var(--mid);font-weight:400;font-size:12px;margin-top:4px}
+  .gpu-preset{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .gpu-preset .btn{font-size:12px;padding:6px 10px}
+  .gpu-preset span{font-size:12px;color:var(--mid)}
   .ta-r{text-align:right}
   .note{color:var(--mid);font-size:12px;margin-top:10px}
   .empty{color:var(--mid);font-size:14px}
@@ -138,6 +160,7 @@
       <div id="jobstate"></div>
       <pre id="joblog"></pre>
     </div>
+    <div class="panel" id="host-gpu"></div>
     <h2 style="margin:0 4px -6px">Clusters <span class="count" id="count">0</span></h2>
     <div class="col" id="cards"><div class="panel empty">Loading…</div></div>
   </section>
@@ -162,6 +185,8 @@
         <div><label>Resource driver</label><select id="gpu-driver"></select></div>
         <div><label>VM image</label><select id="gpu-image"></select></div>
         <div><label>Disk / node</label><input id="gpu-disk" value="20G"></div>
+        <div class="gpu-preset"><button class="btn ghost" id="gpu-inference-preset" type="button">Use inference preset · 4 GiB</button><span id="gpu-preset-status" aria-live="polite">Sets worker VM memory only.</span></div>
+        <div class="gpu-note">The bundled GPU benchmark needs a worker with at least 2 vCPUs and 3 GiB RAM. Models may need more. This preset sets VM memory, not a dedicated VRAM reservation.</div>
         <div class="gpu-note">All nodes use krunkit networking in this mode; only GPU workers publish schedulable Apple Venus GPU inventory.</div>
       </fieldset>
       <div class="checks">
@@ -200,7 +225,21 @@ const $ = id => document.getElementById(id);
 async function j(url, opts) { const r = await fetch(url, opts); return r.json(); }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-const state = { clusters: [], metrics: {}, vmMetrics: {}, vmExpanded: {}, addons: {} };
+const state = { clusters: [], metrics: {}, vmMetrics: {}, vmExpanded: {}, addons: {}, gpu: {}, gpuExpanded: {}, hostGPU: null, hostRequested: false };
+const hasGPU = c => (c.nodes || []).some(n => n.role === 'gpu-worker');
+const gpuIdentity = c => JSON.stringify([c.created || '', (c.nodes || []).map(n => [n.name, n.role, n.status]).sort()]);
+const GPU_MAX_AGE_MS = 30000;
+const HOST_GPU_MAX_AGE_MS = 300000;
+
+// The preset is opt-in. Neither enabling GPU nodes nor changing a driver
+// changes a memory value the user has entered.
+$('gpu-inference-preset').addEventListener('click', () => {
+  $('memory').value = '4G';
+  $('gpu-preset-status').textContent = 'Worker VM memory set to 4 GiB.';
+});
+$('memory').addEventListener('input', () => {
+  $('gpu-preset-status').textContent = 'Custom worker VM memory; preset not applied.';
+});
 
 async function loadMeta() {
   const m = await j('/api/meta');
@@ -289,6 +328,78 @@ function vmResources(name) {
   </details>`;
 }
 
+function snapshotExpired(snapshot, maxAge) {
+  if (!snapshot || snapshot.stale) return true;
+  const capturedAt = snapshot.capturedAt || (snapshot.inspection && snapshot.inspection.capturedAt);
+  const age = Date.now() - Date.parse(capturedAt);
+  return !isFinite(age) || age < -1000 || age > maxAge;
+}
+
+function snapshotAge(snapshot) {
+  const capturedAt = snapshot.capturedAt || (snapshot.inspection && snapshot.inspection.capturedAt);
+  return Math.max(0, Math.round((Date.now() - Date.parse(capturedAt)) / 1000));
+}
+
+function renderHostGPU() {
+  const wanted = state.hostRequested || state.clusters.some(hasGPU);
+  const m = state.hostGPU;
+  const fresh = m && m.state === 'ready' && !snapshotExpired(m, HOST_GPU_MAX_AGE_MS);
+  let body = '<div class="note">Inspect the Mac’s native GPU name and Metal support before creating a GPU cluster.</div>';
+  if (wanted) {
+    if (fresh) {
+      body = `<div class="gpu-host-devices">${(m.devices || []).map(d => `<div class="gpu-host-device">${esc(d.name)}${d.metalSupport ? `<small>Metal: ${esc(d.metalSupport)}</small>` : '<small>Metal support not reported</small>'}</div>`).join('') || '<div class="note">No GPU devices reported by macOS.</div>'}</div>
+        <div class="note">Native macOS inventory · inspected ${snapshotAge(m)}s ago; readings are cached for one minute. GPU clusters currently execute through Vulkan/Venus; this inventory is not a native Metal execution service or a utilization reading.</div>`;
+    } else {
+      const expired = m && m.state === 'ready';
+      const message = m && m.message || (m && m.state === 'unsupported' ? 'Native Mac GPU inventory is not supported on this host.' : m && m.state === 'unavailable' ? 'Mac GPU inventory is unavailable. Try Check hardware.' : 'Inspecting native Mac GPU hardware…');
+      body = `<div class="note">${esc(expired ? 'Hardware snapshot expired. Refreshing…' : message)}</div>`;
+    }
+  }
+  $('host-gpu').innerHTML = `<div class="gpu-host-head"><h2>Mac GPU <span class="count">native inventory</span></h2><button type="button" class="btn tiny ghost" onclick="inspectHostGPU()">${wanted ? 'Check hardware' : 'Inspect Mac GPU'}</button></div>${body}`;
+}
+
+function inspectHostGPU() {
+  state.hostRequested = true;
+  renderHostGPU();
+  refreshHostGPU(true);
+}
+
+function gpuResources(c) {
+  if (!hasGPU(c)) return '';
+  const m = state.gpu[c.name];
+  const inspection = m && m.inspection;
+  const fresh = inspection && (m.state === 'ready' || m.state === 'collecting') && !snapshotExpired(m, GPU_MAX_AGE_MS);
+  const base = `<div class="gpu-heading">Apple GPU <span class="tag">beta</span><span class="tag">shared host GPU</span></div>
+    <div class="gpu-path"><b>Linux Vulkan</b> → Venus → virglrenderer / MoltenVK → <b>macOS Metal</b></div>`;
+  if (!fresh) {
+    const fallback = m && m.state === 'stopped' ? 'GPU cluster is stopped. Start its nodes to inspect live health.' : m && m.state === 'unsupported' ? 'GPU inspection is not supported for this cluster.' : m && m.state === 'unavailable' ? 'GPU inspection is unavailable. Retrying…' : 'Collecting GPU health, allocations and workloads…';
+    const message = m && m.state === 'ready' ? 'Snapshot expired. Refreshing GPU health…' : (m && m.message) || fallback;
+    return `<section class="gpu-health">${base}<div class="gpu-status">${esc(message)}</div><div class="note">Health and capacity values are hidden until a current snapshot is available.</div></section>`;
+  }
+  const status = inspection.status || {};
+  const nodes = status.nodes || [];
+  const claims = inspection.claims || [];
+  const workloads = inspection.workloads || [];
+  const devices = inspection.devices || [];
+  const ready = nodes.filter(n => n.schedulable).length;
+  const pending = workloads.filter(w => w.phase === 'Pending').length;
+  const nodeRows = nodes.map(n => `<tr><td class="mono">${esc(n.name)}</td><td><span class="${n.health === 'healthy' ? 'ok' : n.health === 'unhealthy' ? 'bad' : 'dim'}">${esc(n.health || 'unknown')}</span>${n.healthScope ? `<div class="subline">${esc(n.healthScope)}</div>` : ''}${n.healthMessage ? `<div class="subline">${esc(n.healthMessage)}</div>` : ''}</td><td>${n.schedulable ? '<span class="ok">Ready</span>' : 'Not ready'}<div class="subline">${n.driverReady ? 'Driver ready' : 'Driver not ready'} · ${n.renderDevice ? 'Render device present' : 'Render device absent'}</div></td><td>${typeof n.memoryMiB === 'number' && n.memoryMiB > 0 ? esc(bytesLabel(n.memoryMiB * 1048576)) : '—'}</td></tr>`).join('');
+  const deviceRows = devices.map(d => `<tr><td class="mono">${esc(d.node || d.pool)}<div class="subline">${esc(d.device)}</div></td><td>${esc(d.capacity || 'unknown')}</td><td>${esc(d.reserved ?? 'unknown')}</td><td>${esc(d.unreserved ?? 'unknown')}</td></tr>`).join('');
+  const claimRows = claims.map(cl => `<tr><td class="mono">${esc(cl.namespace)}/${esc(cl.name)}</td><td>${esc(cl.state)}${cl.deleting ? '<div class="subline">Deleting</div>' : ''}</td><td>${(cl.allocations || []).map(a => `${esc(a.pool)}/${esc(a.device)}${a.memory ? ' · ' + esc(a.memory) : ''}${a.adminAccess ? ' · admin access' : ''}`).join('<br>') || '—'}</td><td>${(cl.consumers || []).map(esc).join('<br>') || '—'}</td></tr>`).join('');
+  const workloadRows = workloads.map(w => `<tr><td class="mono">${esc(w.namespace)}/${esc(w.name)}${w.node ? `<div class="subline">${esc(w.node)}</div>` : ''}</td><td>${esc(w.phase || 'unknown')}</td><td class="reason">${w.reason ? `<b>${esc(w.reason)}</b>` : '—'}${w.message ? `<div class="subline">${esc(w.message)}</div>` : ''}${(w.claims || []).length ? `<div class="subline">Claims: ${w.claims.map(esc).join(', ')}</div>` : ''}</td></tr>`).join('');
+  return `<section class="gpu-health">${base}
+    <div class="gpu-status"><b>${ready}/${nodes.length}</b> GPU workers schedulable · ${esc(status.driver || 'unknown')} · ${claims.length} claim${claims.length === 1 ? '' : 's'} · ${pending} pending workload${pending === 1 ? '' : 's'}</div>
+    <div class="note">Snapshot ${snapshotAge(m)}s ago${m.state === 'collecting' ? ' · refresh in progress' : ''}. Health checks verify queue submission and transfer readback; they do not measure GPU utilization or shader correctness.</div>
+    <details class="gpu-details" ${state.gpuExpanded[c.name] ? 'open' : ''} ontoggle="state.gpuExpanded['${c.name}']=this.open"><summary>Health, allocations and workload details</summary>
+      <h3>GPU workers</h3><div class="tscroll"><table class="nodes"><thead><tr><th>Node</th><th>Vulkan health</th><th>Scheduling</th><th>VM GPU window</th></tr></thead><tbody>${nodeRows}</tbody></table></div>
+      <div class="gpu-explanation">All GPU workers share this Mac’s physical GPU and unified memory. VM GPU windows and DRA reservations are scheduler accounting, not measured VRAM usage or hard memory isolation. Do not add VM windows together to estimate host GPU capacity.</div>
+      ${status.driver === 'dra' ? `<h3>DRA memory accounting · VM windows</h3>${deviceRows ? `<div class="tscroll"><table class="nodes"><thead><tr><th>Node / device</th><th>Capacity</th><th>Reserved</th><th>Unreserved</th></tr></thead><tbody>${deviceRows}</tbody></table></div>` : '<div class="note">No complete DRA memory inventory reported.</div>'}
+      <h3>Resource claims</h3>${claimRows ? `<div class="tscroll"><table class="nodes"><thead><tr><th>Claim</th><th>State</th><th>Allocation / memory</th><th>Consumers</th></tr></thead><tbody>${claimRows}</tbody></table></div>` : '<div class="note">No Kiac GPU resource claims.</div>'}` : '<div class="note">The device plugin publishes one schedulable GPU resource per worker. ResourceClaim accounting is available with the DRA driver.</div>'}
+      <h3>GPU workloads</h3>${workloadRows ? `<div class="tscroll"><table class="nodes"><thead><tr><th>Workload / node</th><th>Phase</th><th>Scheduling or container reason</th></tr></thead><tbody>${workloadRows}</tbody></table></div>` : '<div class="note">No workloads requesting Kiac GPU resources.</div>'}
+      ${(inspection.notes || []).map(note => `<div class="note">${esc(note)}</div>`).join('')}
+    </details></section>`;
+}
+
 function card(c) {
   const nodes = c.nodes || [];
   const m = state.metrics[c.name];
@@ -332,6 +443,7 @@ function card(c) {
     </table></div>
     ${m && !m.ready ? '<div class="note">Live metrics not available yet - metrics-server needs the cluster up and ~60s of scraping.</div>' : ''}
     ${vmResources(c.name)}
+    ${gpuResources(c)}
   </div>`;
 }
 
@@ -340,6 +452,7 @@ function render() {
   $('count').textContent = cs.length;
   $('cards').innerHTML = cs.length ? cs.map(card).join('')
     : '<div class="panel empty">No clusters yet. Create one on the right - it takes about three minutes.</div>';
+  renderHostGPU();
 }
 
 let polling = false;
@@ -349,9 +462,17 @@ async function refresh() {
   try {
     const cs = await j('/api/clusters');
     if (cs.error) return;
+    // A stopped/replaced worker must not retain an older healthy snapshot.
+    for (const c of state.clusters) {
+      const next = cs.find(n => n.name === c.name);
+      if (!next || gpuIdentity(next) !== gpuIdentity(c)) delete state.gpu[c.name];
+      if (!next) delete state.gpuExpanded[c.name];
+    }
     state.clusters = cs;
     render();
     refreshVMMetrics();
+    refreshGPU();
+    refreshHostGPU();
     await Promise.all(cs.map(async c => {
       const [m, a] = await Promise.all([
         j(`/api/clusters/${c.name}/metrics`).catch(() => null),
@@ -385,6 +506,48 @@ function expireVMSamples() {
       m.stale = true;
       changed = true;
     }
+  }
+  if (changed) render();
+}
+
+let gpuPolling = false;
+async function refreshGPU() {
+  if (gpuPolling) return;
+  gpuPolling = true;
+  try {
+    await Promise.all(state.clusters.filter(hasGPU).map(async c => {
+      const identity = gpuIdentity(c);
+      const m = await j(`/api/clusters/${c.name}/gpu`, {signal: AbortSignal.timeout(8000)}).catch(() => null);
+      const current = state.clusters.find(n => n.name === c.name);
+      if (!current || gpuIdentity(current) !== identity) return;
+      if (m && !m.error) state.gpu[c.name] = m;
+      else if (!state.gpu[c.name]) state.gpu[c.name] = {state: 'unavailable', message: 'GPU inspection unavailable. Retrying…'};
+      render();
+    }));
+  } finally { gpuPolling = false; }
+}
+
+let hostGPUPolling = false;
+async function refreshHostGPU(force = false) {
+  if (hostGPUPolling || (!state.hostRequested && !state.clusters.some(hasGPU))) return;
+  if (!force && state.hostGPU && state.hostGPU.state === 'ready' && !snapshotExpired(state.hostGPU, 60000)) return;
+  hostGPUPolling = true;
+  try {
+    const m = await j('/api/gpu/host', {signal: AbortSignal.timeout(8000)}).catch(() => null);
+    if (m && !m.error) state.hostGPU = m;
+    else if (!state.hostGPU) state.hostGPU = {state: 'unavailable', message: 'Mac GPU inventory unavailable. Try Check hardware.'};
+    renderHostGPU();
+  } finally { hostGPUPolling = false; }
+}
+
+function expireGPUSnapshots() {
+  let changed = false;
+  for (const m of Object.values(state.gpu)) {
+    if (!m.stale && m.inspection && snapshotExpired(m, GPU_MAX_AGE_MS)) { m.stale = true; changed = true; }
+  }
+  if (state.hostGPU && !state.hostGPU.stale && state.hostGPU.capturedAt && snapshotExpired(state.hostGPU, HOST_GPU_MAX_AGE_MS)) {
+    state.hostGPU.stale = true;
+    changed = true;
   }
   if (changed) render();
 }
@@ -505,7 +668,8 @@ $('con-in').addEventListener('keydown', e => {
   else if (e.key === 'Escape') closeConsole();
 });
 
-loadMeta(); refresh(); setInterval(refresh, 5000); setInterval(refreshVMMetrics, 5000); setInterval(expireVMSamples, 1000);
+renderHostGPU(); loadMeta(); refresh(); setInterval(refresh, 5000); setInterval(refreshVMMetrics, 5000); setInterval(expireVMSamples, 1000);
+setInterval(refreshGPU, 5000); setInterval(refreshHostGPU, 5000); setInterval(expireGPUSnapshots, 1000);
 </script>
 </body>
 </html>
