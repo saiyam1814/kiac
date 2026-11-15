@@ -15,8 +15,8 @@ metadata:
     app.kubernetes.io/name: tinyllama
 spec:
   replicas: 1
-  # Allow the initial 600+ MiB model download on slower connections.
-  progressDeadlineSeconds: 1800
+  # Allow slow initial model downloads and server startup.
+  progressDeadlineSeconds: 2100
   strategy:
     type: Recreate
   selector:

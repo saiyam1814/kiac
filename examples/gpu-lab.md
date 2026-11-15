@@ -114,18 +114,39 @@ native Metal.
 
 ```sh
 kubectl apply -f examples/gpu-inference.yaml
-kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=10m
+kubectl rollout status deployment/tinyllama -n kiac-gpu-demo --timeout=35m
+kubectl wait -n kiac-gpu-demo \
+  --for=jsonpath='{.status.loadBalancer.ingress[0].ip}' \
+  service/tinyllama --timeout=2m
 IP=$(kubectl get svc tinyllama -n kiac-gpu-demo \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-curl -fsS "http://${IP}:8080/completion" \
+curl --noproxy '*' -fsS --connect-timeout 5 --max-time 10 \
+  --retry 20 --retry-all-errors --retry-delay 2 --retry-max-time 120 \
+  "http://${IP}:8080/health"
+curl --noproxy '*' -fsS --connect-timeout 5 --max-time 90 \
+  "http://${IP}:8080/completion" \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Kubernetes on Apple GPUs is","n_predict":32}'
-kubectl logs -n kiac-gpu-demo deploy/tinyllama | grep 'Virtio-GPU Venus'
+kubectl logs -n kiac-gpu-demo deploy/tinyllama -c llama-server \
+  | grep -E 'Virtio-GPU Venus|offloaded 23/23 layers to GPU'
 ```
 
 The init container downloads the same revision-pinned model and verifies its
-SHA-256 before the server starts. The server image is the exact arm64 digest
-validated by this lab.
+SHA-256 before the server starts. The first rollout waits up to 35 minutes for
+image pulling, model download, and startup. The health request waits for the
+LoadBalancer route before sending one completion request. The server image is
+the exact arm64 digest validated by this lab. Check that the logs contain both
+the Venus device and the `offloaded 23/23 layers to GPU` line.
+
+The serving model is stored in a Pod-scoped `emptyDir`. It survives a container
+restart within the same Pod, but replacing the Pod downloads it again. This
+storage is separate from the benchmark's `~/.kiac/models` cache. To inspect a
+slow or failed download:
+
+```sh
+kubectl logs -n kiac-gpu-demo deploy/tinyllama -c model-download
+kubectl describe pods -n kiac-gpu-demo -l app.kubernetes.io/name=tinyllama
+```
 
 ## 6. Request DRA memory explicitly
 

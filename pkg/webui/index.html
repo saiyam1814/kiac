@@ -46,6 +46,7 @@
   .gpu-toggle label{display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:13.5px;font-weight:600}
   .gpu-toggle input{width:auto;accent-color:var(--accent)}
   .gpu-options{grid-column:1/-1;border:0;border-bottom:1px solid var(--divider);padding:0 0 12px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .gpu-options legend{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:10px}
   .gpu-options[hidden]{display:none}
   .gpu-note{grid-column:1/-1;color:var(--mid);font-size:12px;line-height:1.45}
   button.primary{grid-column:1/-1;background:var(--accent);color:#fff;border:none;border-radius:99px;padding:12px;font-size:15px;font-weight:600;cursor:pointer}
@@ -173,20 +174,21 @@
       <div><label>Kubernetes</label><select id="version" required></select></div>
       <div><label>Distro</label><select id="distro"></select></div>
       <div><label>CNI</label><select id="cni"></select></div>
-      <div><label>CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
-      <div><label>Memory / node</label><input id="memory" value="2G"></div>
+      <div><label for="cpus">CPUs / node</label><input id="cpus" type="number" min="1" max="16" value="4"></div>
+      <div><label for="memory">Memory / node</label><input id="memory" value="2G"></div>
       <div><label>Control-plane memory</label><input id="cp-memory" value="4G"></div>
       <div class="full" id="cni-note" style="display:none;font-size:12px;color:var(--mid);margin-top:-6px"></div>
       <div class="gpu-toggle">
         <label><input type="checkbox" id="gpu"> Apple GPU nodes <small>beta</small></label>
       </div>
       <fieldset class="gpu-options" id="gpu-options" hidden>
-        <div><label>GPU workers</label><input id="gpu-workers" type="number" min="1" max="4" value="1"></div>
-        <div><label>Resource driver</label><select id="gpu-driver"></select></div>
-        <div><label>VM image</label><select id="gpu-image"></select></div>
-        <div><label>Disk / node</label><input id="gpu-disk" value="20G"></div>
-        <div class="gpu-preset"><button class="btn ghost" id="gpu-inference-preset" type="button">Use inference preset · 4 GiB</button><span id="gpu-preset-status" aria-live="polite">Sets worker VM memory only.</span></div>
-        <div class="gpu-note">The bundled GPU benchmark needs a worker with at least 2 vCPUs and 3 GiB RAM. Models may need more. This preset sets VM memory, not a dedicated VRAM reservation.</div>
+        <legend>Apple GPU worker settings</legend>
+        <div><label for="gpu-workers">GPU workers</label><input id="gpu-workers" type="number" min="1" max="4" value="1"></div>
+        <div><label for="gpu-driver">Resource driver</label><select id="gpu-driver"></select></div>
+        <div><label for="gpu-image">VM image</label><select id="gpu-image"></select></div>
+        <div><label for="gpu-disk">Disk / node</label><input id="gpu-disk" value="20G"></div>
+        <div class="gpu-preset"><button class="btn ghost" id="gpu-inference-preset" type="button" aria-describedby="gpu-preset-status">Use inference preset · ≥4 CPUs, 4 GiB</button><span id="gpu-preset-status" aria-live="polite">Sets worker VM memory to 4 GiB and ensures at least 4 CPUs per node.</span></div>
+        <div class="gpu-note">The bundled inference server requests 2 CPUs; a 4-CPU VM leaves scheduling headroom for Kubernetes and GPU agents. Models may need more memory. VM memory is not a dedicated VRAM reservation.</div>
         <div class="gpu-note">All nodes use krunkit networking in this mode; only GPU workers publish schedulable Apple Venus GPU inventory.</div>
       </fieldset>
       <div class="checks">
@@ -232,14 +234,17 @@ const GPU_MAX_AGE_MS = 30000;
 const HOST_GPU_MAX_AGE_MS = 300000;
 
 // The preset is opt-in. Neither enabling GPU nodes nor changing a driver
-// changes a memory value the user has entered.
+// changes sizing the user has entered.
 $('gpu-inference-preset').addEventListener('click', () => {
   $('memory').value = '4G';
-  $('gpu-preset-status').textContent = 'Worker VM memory set to 4 GiB.';
+  $('cpus').value = String(Math.max(4, Number($('cpus').value) || 4));
+  $('gpu-preset-status').textContent = `Worker VM memory set to 4 GiB; ${$('cpus').value} CPUs per node (at least 4).`;
 });
-$('memory').addEventListener('input', () => {
-  $('gpu-preset-status').textContent = 'Custom worker VM memory; preset not applied.';
-});
+for (const id of ['memory', 'cpus']) {
+  $(id).addEventListener('input', () => {
+    $('gpu-preset-status').textContent = 'Custom VM sizing; inference preset not applied.';
+  });
+}
 
 async function loadMeta() {
   const m = await j('/api/meta');
@@ -340,6 +345,16 @@ function snapshotAge(snapshot) {
   return Math.max(0, Math.round((Date.now() - Date.parse(capturedAt)) / 1000));
 }
 
+// Polling replaces these panels. Keep keyboard focus on a stable control when
+// it still exists, without scrolling away from the user's current position.
+function replacePanelHTML(panel, html) {
+  const focused = document.activeElement;
+  const focusedID = focused && panel.contains(focused) ? focused.id : '';
+  panel.innerHTML = html;
+  const replacement = focusedID && $(focusedID);
+  if (replacement && panel.contains(replacement)) replacement.focus({preventScroll: true});
+}
+
 function renderHostGPU() {
   const wanted = state.hostRequested || state.clusters.some(hasGPU);
   const m = state.hostGPU;
@@ -355,7 +370,7 @@ function renderHostGPU() {
       body = `<div class="note">${esc(expired ? 'Hardware snapshot expired. Refreshing…' : message)}</div>`;
     }
   }
-  $('host-gpu').innerHTML = `<div class="gpu-host-head"><h2>Mac GPU <span class="count">native inventory</span></h2><button type="button" class="btn tiny ghost" onclick="inspectHostGPU()">${wanted ? 'Check hardware' : 'Inspect Mac GPU'}</button></div>${body}`;
+  replacePanelHTML($('host-gpu'), `<div class="gpu-host-head"><h2>Mac GPU <span class="count">native inventory</span></h2><button id="inspect-host-gpu" type="button" class="btn tiny ghost" onclick="inspectHostGPU()">${wanted ? 'Check hardware' : 'Inspect Mac GPU'}</button></div>${body}`);
 }
 
 function inspectHostGPU() {
@@ -390,7 +405,7 @@ function gpuResources(c) {
   return `<section class="gpu-health">${base}
     <div class="gpu-status"><b>${ready}/${nodes.length}</b> GPU workers schedulable · ${esc(status.driver || 'unknown')} · ${claims.length} claim${claims.length === 1 ? '' : 's'} · ${pending} pending workload${pending === 1 ? '' : 's'}</div>
     <div class="note">Snapshot ${snapshotAge(m)}s ago${m.state === 'collecting' ? ' · refresh in progress' : ''}. Health checks verify queue submission and transfer readback; they do not measure GPU utilization or shader correctness.</div>
-    <details class="gpu-details" ${state.gpuExpanded[c.name] ? 'open' : ''} ontoggle="state.gpuExpanded['${c.name}']=this.open"><summary>Health, allocations and workload details</summary>
+    <details class="gpu-details" ${state.gpuExpanded[c.name] ? 'open' : ''} ontoggle="state.gpuExpanded['${c.name}']=this.open"><summary id="gpu-details-${esc(c.name)}">Health, allocations and workload details</summary>
       <h3>GPU workers</h3><div class="tscroll"><table class="nodes"><thead><tr><th>Node</th><th>Vulkan health</th><th>Scheduling</th><th>VM GPU window</th></tr></thead><tbody>${nodeRows}</tbody></table></div>
       <div class="gpu-explanation">All GPU workers share this Mac’s physical GPU and unified memory. VM GPU windows and DRA reservations are scheduler accounting, not measured VRAM usage or hard memory isolation. Do not add VM windows together to estimate host GPU capacity.</div>
       ${status.driver === 'dra' ? `<h3>DRA memory accounting · VM windows</h3>${deviceRows ? `<div class="tscroll"><table class="nodes"><thead><tr><th>Node / device</th><th>Capacity</th><th>Reserved</th><th>Unreserved</th></tr></thead><tbody>${deviceRows}</tbody></table></div>` : '<div class="note">No complete DRA memory inventory reported.</div>'}
@@ -450,8 +465,8 @@ function card(c) {
 function render() {
   const cs = state.clusters;
   $('count').textContent = cs.length;
-  $('cards').innerHTML = cs.length ? cs.map(card).join('')
-    : '<div class="panel empty">No clusters yet. Create one on the right - it takes about three minutes.</div>';
+  replacePanelHTML($('cards'), cs.length ? cs.map(card).join('')
+    : '<div class="panel empty">No clusters yet. Create one on the right - it takes about three minutes.</div>');
   renderHostGPU();
 }
 
