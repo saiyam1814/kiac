@@ -59,6 +59,7 @@ type options struct {
 	tlsKey            string
 	healthFile        string
 	probeBinary       string
+	native            nativeOptions
 }
 
 type driver struct {
@@ -78,7 +79,7 @@ func main() {
 
 func run() error {
 	opts := options{}
-	flag.StringVar(&opts.mode, "mode", "dra", "agent mode: dra, device-plugin, health-watchdog, health-check, health-status, or webhook")
+	flag.StringVar(&opts.mode, "mode", "dra", "agent mode: dra, native-dra/native-cleanup (alpha), device-plugin, health-watchdog, health-check, health-status, or webhook")
 	flag.StringVar(&opts.nodeName, "node-name", os.Getenv("NODE_NAME"), "Kubernetes node name")
 	flag.StringVar(&opts.podUID, "pod-uid", os.Getenv("POD_UID"), "driver pod UID for rolling updates")
 	flag.StringVar(&opts.cdiRoot, "cdi-root", defaultCDIRoot, "host CDI specification directory")
@@ -92,6 +93,11 @@ func run() error {
 	flag.StringVar(&opts.tlsKey, "tls-key", "", "webhook TLS private key")
 	flag.StringVar(&opts.healthFile, "health-file", defaultHealthFile, "shared Vulkan health report")
 	flag.StringVar(&opts.probeBinary, "probe-binary", "/opt/kiac/kiac-vulkan-probe", "native Vulkan probe executable (health watchdog only)")
+	flag.StringVar(&opts.native.endpoint, "native-endpoint", "", "native Metal broker HTTPS origin (native-dra only)")
+	flag.StringVar(&opts.native.caFile, "native-ca", "", "native Metal broker CA certificate file (native-dra only)")
+	flag.StringVar(&opts.native.adminTokenFile, "native-admin-token-file", "", "native Metal broker admin token file; never injected into workloads")
+	flag.StringVar(&opts.native.selectedNode, "native-node-name", "", "one explicitly selected native Metal node; must match --node-name")
+	flag.DurationVar(&opts.native.leaseTTL, "native-lease-ttl", 120*time.Second, "native service lease lifetime (30s to 300s)")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flag.Args())
@@ -102,6 +108,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	switch opts.mode {
+	case "native-dra":
+		return runNativeDriver(ctx, opts)
+	case "native-cleanup":
+		return runNativeCleanup(ctx, opts)
 	case "health-watchdog":
 		return runHealthWatchdog(ctx, opts)
 	case "health-check", "health-status":

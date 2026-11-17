@@ -209,6 +209,49 @@ GPU mode is beta. See the [tested profiles and limitations](https://saiyam1814.g
 
 `kiac gpu bench` uses four CPU threads for both backends and records the reported llama.cpp build IDs, GPU identity, and timing variability. The host binary is not version-pinned: differing build IDs mean the comparison cannot isolate virtualization overhead. Each run owns a temporary, uniquely labelled pod in the `default` namespace; cleanup does not target another run's pod.
 
+### Run native Apple GPU inference (unreleased alpha)
+
+Source builds from `main` also include a native Metal host service. Ordinary Apple/container nodes can authorize a Linux Pod through the separate `metal.kiac.dev` DRA driver, then send HTTPS requests for fixed Metal compute or native llama.cpp inference. GPU execution and model memory stay on macOS, outside the Pod's Linux isolation and resource limits. This does not expose a Metal/CUDA device in Linux and does not require `--gpu-workers`.
+
+This alpha is **not in v0.12.0 or its Homebrew package**. Build and use the local binary:
+
+```bash
+make build
+./bin/kiac create cluster --name native-lab --distro k3s \
+  --k8s-version 1.37 --workers 1 --cpus 2 --memory 2G
+
+# Discover the worker's gateway; confirm that IP is assigned to your Mac.
+container exec kiac-native-lab-worker-1 ip -4 route show default
+ifconfig
+
+# In a separate terminal, keep the service running. Replace both example values.
+MAC_VM_GATEWAY=192.168.64.1
+MODEL_GGUF=/absolute/path/to/your/model.gguf
+./bin/kiac gpu native serve --listen "${MAC_VM_GATEWAY}:5181" \
+  --model "$MODEL_GGUF" --server-binary llama-server
+```
+
+The gateway varies by network; `192.168.64.1` is an example. Provide an existing local GGUF model and Metal-enabled `llama-server`; omit both inference flags for compute-only mode. The service also needs Xcode command line tools with `xcrun swiftc`.
+
+```bash
+# From another terminal in the checkout, before allocating a Kubernetes claim:
+./bin/kiac gpu native status
+./bin/kiac gpu native self-test --count 65536
+./bin/kiac gpu native chat --prompt "Explain local Kubernetes." --max-tokens 32 --stream
+./bin/kiac gpu native install --name native-lab --node worker-1
+
+kubectl --context kiac-native-lab apply -f examples/gpu-native-inference.yaml
+kubectl --context kiac-native-lab wait \
+  --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-native-inference --timeout=5m
+kubectl --context kiac-native-lab logs kiac-native-inference
+
+# Keep the host service running until uninstall confirms lease cleanup.
+kubectl --context kiac-native-lab delete -f examples/gpu-native-inference.yaml
+./bin/kiac gpu native uninstall --name native-lab
+```
+
+One exclusive lease covers Kiac's host service across attached clusters; other Mac applications still share the physical GPU. The completed M1 Max/macOS 27.0.1 profile verified 65,536 Metal results with zero error, TinyLlama 23/23 layer offload, a non-root DRA client Pod, driver replacement, broker restart credential rotation and VM recovery with a separate restartable consumer. The bundled one-shot Pod must be recreated after worker loss. Read the [native Metal alpha guide](https://saiyam1814.github.io/kiac/docs/gpu-native.html) for architecture, credentials, limits and recovery scope.
+
 ### Run Portainer CE on kiac
 
 This example installs Portainer Community Edition as an optional application inside a kiac Kubernetes cluster. Portainer is not bundled with kiac and adds nothing to normal cluster startup or idle resource use. Community Edition does not require a license key; Portainer Business Edition does.

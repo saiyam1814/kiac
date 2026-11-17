@@ -1,0 +1,98 @@
+# Native Metal alpha: run `kiac gpu native serve --listen <VM-gateway>:5181
+# --model /absolute/path/to/model.gguf`, then `kiac gpu native install --name dev`.
+# Requires Kubernetes 1.36+, a Metal-enabled llama-server, and one selected node.
+# The Linux Pod receives a short-lived lease, not a Metal/CUDA device. Compute
+# executes in the Mac host service, outside the Pod's Linux isolation boundary.
+#
+# kubectl apply -f examples/gpu-native-inference.yaml
+# kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/kiac-native-inference --timeout=5m
+# kubectl logs kiac-native-inference
+# kubectl delete -f examples/gpu-native-inference.yaml
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: kiac-native-metal
+spec:
+  devices:
+    requests:
+      - name: metal
+        exactly:
+          deviceClassName: metal.kiac.dev
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kiac-native-inference
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  resourceClaims:
+    - name: metal
+      resourceClaimName: kiac-native-metal
+  containers:
+    - name: demo
+      image: docker.io/library/python:3.14-alpine@sha256:f0b25c48745f2cedc4e06b32b410ef83835ee0248e8cfcbfe0dcdbce8542dc03
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 100m
+          memory: 64Mi
+        limits:
+          memory: 128Mi
+        claims:
+          - name: metal
+      command: [python3, -u, -c]
+      args:
+        - |
+          import json, os, ssl, urllib.request
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          def request(path, payload=None):
+              # Reload on every request: the DRA agent renews/rotates this file.
+              with open(os.environ["KIAC_METAL_CREDENTIALS"]) as file:
+                  credentials = json.load(file)
+              endpoint = credentials["endpoint"]
+              assert endpoint.startswith("https://")
+              tls = ssl.create_default_context(cafile=credentials["caFile"])
+              client = urllib.request.build_opener(
+                  urllib.request.ProxyHandler({}),
+                  urllib.request.HTTPSHandler(context=tls), NoRedirect())
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(endpoint + path, data=data, headers={
+                  "Authorization": "Bearer " + credentials["token"],
+                  "Content-Type": "application/json"})
+              with client.open(req, timeout=120) as response:
+                  return json.load(response)
+
+          capabilities = request("/v1/capabilities")
+          assert capabilities["backend"] == "native-metal"
+          result = request("/v1/compute/vector-add", {"count": 65536})
+          assert result["verifiedElements"] == 65536
+          assert result["maximumError"] == 0
+          print(json.dumps({"test": "native-metal", "device": result["device"]["name"],
+              "verifiedElements": result["verifiedElements"],
+              "maximumError": result["maximumError"],
+              "gpuMilliseconds": result["gpuMilliseconds"]}))
+
+          chat = request("/v1/chat/completions", {
+              "model": "kiac-native", "max_tokens": 16, "temperature": 0,
+              "messages": [{"role": "user", "content": "Name one benefit of local Kubernetes."}]})
+          assert chat["choices"][0]["message"]["content"].strip()
+          assert 1 <= chat["usage"]["completion_tokens"] <= 16
+          print(json.dumps({"test": "native-inference", "model": chat["model"],
+              "completionTokens": chat["usage"]["completion_tokens"],
+              "text": chat["choices"][0]["message"]["content"]}))
