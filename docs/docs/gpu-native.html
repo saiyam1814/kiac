@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Native Apple GPU inference with Kubernetes DRA · kiac docs</title>
+<meta name="description" content="Run native Metal compute and llama.cpp inference on a Mac from DRA-authorized Kubernetes Pods with Kiac's source-only native GPU alpha.">
+<link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+<link rel="stylesheet" href="docs.css">
+</head>
+<body>
+<input type="checkbox" id="menu">
+<header><div class="hin">
+  <a class="brand" href="../index.html"><img src="../assets/logo-mark.svg" alt="kiac"> kiac</a>
+  <a class="crumb" href="index.html">Docs</a>
+  <span class="spacer"></span>
+  <label for="menu" class="mtoggle">Menu</label>
+  <a class="gh" href="https://github.com/saiyam1814/kiac">GitHub</a>
+</div></header>
+<div class="wrap">
+<aside>
+  <div class="group"><div class="glabel">Start here</div>
+    <a href="index.html">Overview &amp; install</a>
+    <a href="getting-started.html">Getting started</a>
+  </div>
+  <div class="group"><div class="glabel">Core concepts</div>
+    <a href="networking.html">Networking</a>
+    <a href="storage-and-metrics.html">Storage &amp; metrics</a>
+    <a href="config-file.html">Config file</a>
+    <a href="cli-reference.html">CLI reference</a>
+  </div>
+  <div class="group"><div class="glabel">Distros &amp; kernels</div>
+    <a href="k3s.html">k3s distro</a>
+    <a href="cilium.html">Cilium &amp; the full kernel</a>
+    <a href="gpu.html">Apple GPU (beta)</a>
+    <a class="on" href="gpu-native.html">Native Metal service (alpha)</a>
+    <a href="external-workers.html">External workers (alpha)</a>
+  </div>
+  <div class="group"><div class="glabel">Built-in addons</div>
+    <a href="observability.html">Observability</a>
+    <a href="gateway-api.html">Gateway API</a>
+  </div>
+  <div class="group"><div class="glabel">Hands-on</div>
+    <a href="labs.html">Integration labs</a>
+    <a href="portainer.html">Portainer on kiac</a>
+    <a href="rancher.html">Rancher on kiac</a>
+  </div>
+  <div class="group"><div class="glabel">Day two</div>
+    <a href="node-chaos.html">Node chaos</a>
+    <a href="persistence.html">Reboots &amp; resume</a>
+    <a href="dashboard.html">Dashboard (kiac ui)</a>
+    <a href="troubleshooting.html">Troubleshooting</a>
+  </div>
+  <div class="group"><div class="glabel">Project</div>
+    <a href="contributing.html">Contributing</a>
+  </div>
+</aside>
+<main>
+  <div class="kicker">Alpha · Source builds from main</div>
+  <h1>Native Apple GPU service</h1>
+  <p class="lede">Run fixed Metal compute and native llama.cpp inference on your Mac, with Kubernetes DRA controlling which Linux Pod receives a short-lived service credential. The Pod sends authenticated HTTPS requests; the Mac executes the GPU work.</p>
+
+  <div class="warn"><b>Unreleased alpha</b>
+  This feature is implemented on <code>main</code> and requires a source build. It is not included in v0.12.0 or its Homebrew package. It adds a host service alongside the existing <a href="gpu.html">Venus/Vulkan GPU beta</a>; it does not expose a Metal or CUDA device inside Linux containers.</div>
+
+  <h2 id="architecture">How the native path works</h2>
+  <pre><code>Linux Pod in an Apple/container node
+  → DRA lease credentials mounted read-only by CDI
+  → HTTPS with the Mac service's private CA
+  → Kiac host broker on macOS
+  → fixed Metal compute / native llama.cpp Metal inference
+  → Apple GPU</code></pre>
+  <p>The ordinary Kubernetes nodes keep using Apple/container. You do not create <code>--gpu-workers</code> for this path. One explicitly selected node runs the separate <code>metal.kiac.dev</code> DRA driver. Its <code>DeviceClass</code> selects one exclusive host-service device, rather than publishing a copy of the Mac GPU on every worker.</p>
+  <p>On preparation, the driver verifies the allocated ResourceClaim and obtains a short-lived lease from the broker. CDI mounts <code>/var/run/kiac-metal</code> read-only into the consuming container and sets <code>KIAC_METAL_CREDENTIALS</code>. That directory contains only the lease credential and public CA certificate. The host admin token is mounted only into the DRA driver, never the consumer.</p>
+  <table>
+    <tr><th>Existing Venus/Vulkan beta</th><th>Native Metal service alpha</th></tr>
+    <tr><td>Linux application uses Vulkan through Venus and MoltenVK.</td><td>Linux application calls a bounded HTTPS API; native execution stays on macOS.</td></tr>
+    <tr><td>Krunkit GPU workers publish <code>gpu.kiac.dev</code> / <code>kiac.dev/gpu</code>.</td><td>One selected ordinary node publishes <code>metal.kiac.dev</code>.</td></tr>
+    <tr><td>Allocated containers receive a Linux render device.</td><td>Allocated containers receive service credentials, with no DRM device.</td></tr>
+  </table>
+  <p>Both paths share the Mac's physical GPU with other applications. The native lease controls Kiac's host service, not every process on macOS. It provides neither a GPU utilization percentage nor a physical VRAM partition. Native model memory and execution remain outside the Pod's Linux resource limits and isolation boundary.</p>
+
+  <h2 id="requirements">Requirements and source build</h2>
+  <ul>
+    <li>An Apple silicon Mac with an ordinary Apple/container cluster. The completed profile below used macOS 27.0.1 and Apple/container 1.7.1.</li>
+    <li>Go matching the repository's toolchain, <code>make</code>, <code>kubectl</code>, and Xcode command line tools with <code>xcrun swiftc</code>. Kiac compiles its fixed Metal helper locally.</li>
+    <li>Kubernetes 1.36 or later for DRA; the walkthrough uses the tested K3s 1.37 profile.</li>
+    <li>For inference, an already installed Metal-enabled <code>llama-server</code> executable and an existing local GGUF model. Kiac does not download a model or install llama.cpp for this service.</li>
+  </ul>
+  <pre><code>git clone https://github.com/saiyam1814/kiac
+cd kiac
+make build
+./bin/kiac gpu native --help
+xcrun swiftc --version</code></pre>
+  <p>Use <code>./bin/kiac</code> throughout this walkthrough so an older Homebrew binary does not receive commands it does not implement.</p>
+
+  <h2 id="cluster">1. Create an ordinary cluster</h2>
+  <pre><code>./bin/kiac create cluster --name native-lab --distro k3s \
+  --k8s-version 1.37 --workers 1 --cpus 2 --memory 2G
+
+kubectl --context kiac-native-lab get nodes</code></pre>
+  <p>The model runs on the host, so the worker does not need room to load it. The Python client in the example requests 64 MiB and limits its Linux container to 128 MiB; those values do not limit the model's host memory use.</p>
+
+  <h2 id="serve">2. Discover the VM gateway and start the service</h2>
+  <p>The default listener, <code>127.0.0.1:5181</code>, supports host-only use. Pods need an explicit private IP assigned to the Mac and reachable from the node VM. Read the worker's default route, then confirm the gateway address belongs to a Mac interface:</p>
+  <pre><code>container exec kiac-native-lab-worker-1 ip -4 route show default
+ifconfig</code></pre>
+  <p>For example, a route through <code>192.168.64.1</code> and the same address on a Mac VM bridge indicate a candidate listener. The address and interface name vary with your network; <code>192.168.64.1</code> is an example, not a fixed Kiac setting. The service refuses wildcard, public and unassigned interface addresses.</p>
+  <p>In a terminal that will remain open, set your discovered address and existing model path:</p>
+  <pre><code>MAC_VM_GATEWAY=192.168.64.1 <span class="c"># replace with your verified Mac VM-network IP</span>
+MODEL_GGUF=/absolute/path/to/your/model.gguf
+
+./bin/kiac gpu native serve --listen "${MAC_VM_GATEWAY}:5181" \
+  --model "$MODEL_GGUF" --server-binary llama-server</code></pre>
+  <p>Omit both <code>--model</code> and <code>--server-binary</code> to enable only inventory and fixed compute. Inference requires a compatible local GGUF file no larger than 16 GiB. Startup requires detected Metal and full model-layer offload; partial or zero-layer offload is rejected. Use <code>--startup-timeout 5m</code> if a larger model needs longer to load.</p>
+  <p>The foreground process owns the model server and reaps its process group on shutdown. It uses a private CA and admin credential under <code>~/.kiac/native-gpu</code>. Set the persistent <code>--state-dir</code> flag consistently on all commands if you choose a different private directory.</p>
+
+  <h2 id="host-test">3. Check the host before attaching Kubernetes</h2>
+  <p>In another terminal, from the same checkout:</p>
+  <pre><code>./bin/kiac gpu native status
+./bin/kiac gpu native self-test --count 65536
+./bin/kiac gpu native chat --prompt "Name one benefit of local Kubernetes." \
+  --max-tokens 16
+./bin/kiac gpu native chat --prompt "Explain Kubernetes in one sentence." \
+  --max-tokens 32 --stream</code></pre>
+  <p><code>status</code> checks live engine readiness. Host <code>self-test</code> and <code>chat</code> acquire a temporary exclusive lease and release it when the command finishes. They cannot borrow a lease already held by a Kubernetes claim. The self-test verifies every result from a fixed vector-add kernel, rather than only reporting a GPU name.</p>
+  <p>Chat accepts text messages through an OpenAI-compatible <code>/v1/chat/completions</code> route with the model alias <code>kiac-native</code>. This alpha uses a 2,048-token context, one concurrent operation and at most 512 generated tokens per request. Streaming uses server-sent events; the CLI requires a terminal <code>[DONE]</code> event.</p>
+
+  <h2 id="dra">4. Attach one node through DRA</h2>
+  <pre><code>./bin/kiac gpu native install --name native-lab --node worker-1
+
+kubectl --context kiac-native-lab get deviceclass metal.kiac.dev
+kubectl --context kiac-native-lab get resourceslices
+kubectl --context kiac-native-lab -n kiac-native-gpu get pods</code></pre>
+  <p>Installation selects a running node owned by this cluster and waits for a healthy native device published by its current driver Pod. Only that node can satisfy the native DeviceClass. Changing the selected node requires removing native consumers and claims, uninstalling, and installing again.</p>
+  <p>The default lease lifetime is 120 seconds. The driver periodically verifies the live claim and its allocation before renewal. Deleted, changed or unverifiable claims are not renewed. Broker unavailability blocks new preparation; Kubernetes API failure prevents unverified renewal. Unpreparing a claim revokes its lease.</p>
+
+  <h2 id="pod">5. Run native compute and inference from a Linux Pod</h2>
+  <pre><code>kubectl --context kiac-native-lab apply -f examples/gpu-native-inference.yaml
+kubectl --context kiac-native-lab wait \
+  --for=jsonpath='{.status.phase}'=Succeeded \
+  pod/kiac-native-inference --timeout=5m
+kubectl --context kiac-native-lab logs kiac-native-inference</code></pre>
+  <p>This example requires the model-enabled service from step 2. The <a href="https://github.com/saiyam1814/kiac/blob/main/examples/gpu-native-inference.yaml">digest-pinned Python example</a> runs as UID 1000 with a read-only root filesystem, all Linux capabilities dropped and no Kubernetes service-account token. It requests the <code>metal.kiac.dev</code> claim, reloads the mounted credential before every request, disables proxies and redirects, verifies the private CA, and checks both 65,536 Metal results and a bounded chat completion. It never prints the token.</p>
+  <p>The program prints selected verified fields such as device name, verified element count, error, generated token count and response text. Model output quality is not a GPU correctness test. If the Pod fails, inspect <code>kubectl --context kiac-native-lab describe pod kiac-native-inference</code> and its logs. This one-shot <code>restartPolicy: Never</code> example must be recreated after worker loss or a failed request; it does not rerun when the service or VM recovers. The VM recovery validation below used a separate restartable consumer.</p>
+  <p>Applications must reopen <code>KIAC_METAL_CREDENTIALS</code> for each operation. The read-only directory mount lets the driver replace the file atomically when a lease is renewed or rotated. Do not copy a token into an environment variable or cache it for the Pod's entire lifetime.</p>
+
+  <h2 id="validation">Completed alpha validation</h2>
+  <p>The following results were recorded on an Apple M1 Max with macOS 27.0.1, Apple/container 1.7.1, an ordinary K3s 1.37 cluster and Linux kernel 6.18.35. The test cluster used four vCPUs and 4 GiB per VM; model memory remained on the host. They establish this local acceptance profile, not support across all Apple hardware or production environments.</p>
+  <table>
+    <tr><th>Check</th><th>Completed result</th></tr>
+    <tr><td>Native Metal compute</td><td>65,536 vector elements verified with maximum error 0.</td></tr>
+    <tr><td>Native TinyLlama inference</td><td>Metal detected and all 23/23 model layers offloaded; bounded text completions and a CLI stream with a terminal <code>[DONE]</code> event completed.</td></tr>
+    <tr><td>DRA-authorized Linux client</td><td>The exact public non-root example reached <code>Succeeded</code>, verified 65,536 elements with zero error and returned a 16-token inference completion using only its mounted lease and CA.</td></tr>
+    <tr><td>Driver Pod replacement</td><td>Prepared claim and native workload access recovered after the DRA driver restarted.</td></tr>
+    <tr><td>Host broker restart</td><td>The same Pod observed credential rotation through its directory mount; the new token worked and the previous token returned HTTP 401. Compute and inference worked afterward.</td></tr>
+    <tr><td>Uninstall and fresh install</td><td>The real node-local cleanup Job completed, native ResourceSlices and credential/CDI artifacts were absent, and a fresh install and second uninstall succeeded.</td></tr>
+    <tr><td>Worker VM stop/start</td><td>A separate <code>restartPolicy: Always</code> consumer retained its Pod UID, observed a changed worker boot ID and a higher container restart count, then verified 65,536 Metal results with zero error and completed a bounded inference request.</td></tr>
+    <tr><td>Consumer and claim deletion</td><td>The previous leased credential returned HTTP 401 after removal.</td></tr>
+  </table>
+  <p>Broker restart deliberately invalidates prior leases. Requests fail closed until the driver rechecks the claim and publishes a new credential, typically around the next renewal at the default interval of about 40 seconds. Clients that need recovery should reread credentials and retry transient failures within their own bounded deadline. Host sleep/wake has not been validated.</p>
+
+  <h2 id="cleanup">6. Remove consumers, then uninstall</h2>
+  <pre><code>kubectl --context kiac-native-lab delete -f examples/gpu-native-inference.yaml
+./bin/kiac gpu native uninstall --name native-lab</code></pre>
+  <p>Delete both the Pod and its ResourceClaim: a retained claim can continue reserving the exclusive allocation. Uninstall refuses allocated native claims, stops the renewing driver, removes its verified node-owned ResourceSlices, rechecks claims, and runs a node-local cleanup Job to revoke saved leases and remove native CDI credentials. A failed revocation keeps the cleanup checkpoint for retry; restore the host service and retry uninstall.</p>
+  <p>Keep the host service running through uninstall so it can confirm revocation. Then press Ctrl-C in its terminal. This removes the native integration without changing the separate Venus driver or deleting your local model. Delete the ordinary cluster only when you are finished with it:</p>
+  <pre><code>./bin/kiac delete cluster --name native-lab</code></pre>
+
+  <div class="pn">
+    <a href="gpu.html"><span>Related</span>Apple GPU via Venus (beta)</a>
+    <a class="next" href="troubleshooting.html"><span>Help</span>Troubleshooting</a>
+  </div>
+</main>
+</div>
+</body>
+</html>

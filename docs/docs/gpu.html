@@ -33,6 +33,7 @@
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
     <a class="on" href="gpu.html">Apple GPU (beta)</a>
+    <a href="gpu-native.html">Native Metal service (alpha)</a>
     <a href="external-workers.html">External workers (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
@@ -61,6 +62,9 @@
 
   <div class="warn"><b>This is Vulkan, not CUDA.</b>
   The GPU is real, but the API inside the Linux guest is Mesa Venus over virtio-gpu. CUDA, NVML, <code>nvidia-smi</code>, Metal, and MLX are not available in pods. Kiac never advertises <code>nvidia.com/gpu</code> as node capacity.</div>
+
+  <div class="note"><b>Native Metal service: separate alpha on main</b>
+  A source build can also run native Metal compute and llama.cpp inference in a Mac host service, authorized from ordinary Apple/container Kubernetes nodes through the separate <code>metal.kiac.dev</code> DRA driver. Pods receive short-lived HTTPS credentials rather than a Metal device. This alpha is not part of v0.12.0 or its Homebrew package. See the <a href="gpu-native.html">native service architecture, tested profile and walkthrough</a>.</div>
 
   <h2 id="architecture">Architecture</h2>
   <p>Ordinary Kiac clusters keep using the fast apple/container backend. A cluster with <code>--gpu-workers</code> uses krunkit and vmnet-helper for its complete topology: control plane, ordinary workers, and GPU workers. This keeps every node on one reliable VM network. Only nodes named <code>-gpu-N</code> publish GPU labels, receive the <code>kiac.dev/gpu=true:NoSchedule</code> taint, and provide schedulable GPU inventory. Kiac mounts <code>/dev/dri</code> only into workloads allocated through its GPU driver.</p>
