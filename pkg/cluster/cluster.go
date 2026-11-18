@@ -4,6 +4,8 @@ package cluster
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/distribution/reference"
 	"github.com/saiyam1814/kiac/pkg/runtime"
 	"github.com/saiyam1814/kiac/pkg/ui"
+	"gopkg.in/yaml.v3"
 )
 
 const adminConf = "/etc/kubernetes/admin.conf"
@@ -802,16 +805,72 @@ func (m *Manager) Kubeconfig(name string) (string, error) {
 		return "", fmt.Errorf("no cluster named %q found", name)
 	}
 	cp := ControlPlane(name)
-	configPath := kubeconfigPathForNodes(infos)
+	// Prefix queries also include clusters such as dev-extra when exporting
+	// dev. Only this cluster's exact control plane identifies its distro.
+	var controlPlane *runtime.Info
+	for i := range infos {
+		if infos[i].Name == cp {
+			controlPlane = &infos[i]
+			break
+		}
+	}
+	if controlPlane == nil {
+		return "", fmt.Errorf("cluster %q has no control-plane container %s", name, cp)
+	}
+	configPath := kubeconfigPathForNodes([]runtime.Info{*controlPlane})
 	raw, err := m.rt.Exec(cp, "cat", configPath)
 	if err != nil {
 		return "", fmt.Errorf("reading %s from %s: %w", configPath, cp, err)
 	}
-	ip, err := m.rt.IP(cp)
+	ip, err := m.kubeconfigServerIP(cp, raw)
 	if err != nil {
 		return "", err
 	}
 	return standaloneKubeconfig(name, raw, ip)
+}
+
+// kubeconfigServerIP preserves the API endpoint's address family while
+// refreshing its address from the running VM. In IPv6-only kubeadm clusters,
+// the API server advertises and certifies IPv6 even though vmnet also gives
+// the node IPv4. The source endpoint can be stale, so use it only for family
+// detection, never as the exported address.
+func (m *Manager) kubeconfigServerIP(cp, raw string) (string, error) {
+	var source struct {
+		Clusters []struct {
+			Cluster struct {
+				Server string `yaml:"server"`
+			} `yaml:"cluster"`
+		} `yaml:"clusters"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &source); err != nil {
+		return "", fmt.Errorf("parsing cluster kubeconfig: %w", err)
+	}
+	if len(source.Clusters) == 0 {
+		return "", fmt.Errorf("cluster kubeconfig has no API server")
+	}
+	endpoint, err := url.Parse(source.Clusters[0].Cluster.Server)
+	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" {
+		return "", fmt.Errorf("cluster kubeconfig has an invalid API server URL")
+	}
+	family := IPv4
+	if ip := net.ParseIP(endpoint.Hostname()); ip != nil && ip.To4() == nil {
+		family = IPv6
+	}
+	var ip string
+	if family == IPv6 {
+		ip, err = m.rt.IPv6(cp)
+	} else {
+		ip, err = m.rt.IP(cp)
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading current %s address of %s: %w", family, cp, err)
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.IsUnspecified() || parsed.IsLoopback() ||
+		(family == IPv6) != (parsed.To4() == nil) {
+		return "", fmt.Errorf("node %s has no usable current %s address", cp, family)
+	}
+	return ip, nil
 }
 
 func kubeconfigPathForNodes(infos []runtime.Info) string {

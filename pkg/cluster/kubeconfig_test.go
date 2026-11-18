@@ -107,3 +107,25 @@ func TestServiceAccountKubeconfigDropsAdminCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestStandaloneKubeconfigIsSelfContained(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "config"))
+	got, err := standaloneKubeconfig("dev", sampleAdminConf, "192.168.64.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"current-context: kiac-dev", "server: https://192.168.64.2:6443", "client-key-data: Zm9v"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("standalone kubeconfig missing %q:\n%s", want, got)
+		}
+	}
+	if got := strings.Count(got, "name: kiac-dev"); got != 3 {
+		t.Errorf("expected exactly 3 kiac-dev entries (cluster/user/context), got %d", got)
+	}
+	if strings.Contains(got, "kubernetes-admin") {
+		t.Errorf("standalone kubeconfig kept admin.conf entry names:\n%s", got)
+	}
+	if _, err := os.Stat(os.Getenv("KUBECONFIG")); !os.IsNotExist(err) {
+		t.Errorf("standalone render touched KUBECONFIG: %v", err)
+	}
+}

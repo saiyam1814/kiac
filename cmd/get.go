@@ -13,7 +13,14 @@ import (
 var (
 	getNodesName      string
 	getClustersOutput string
+	getKubeconfigName string
 )
+
+// renderKubeconfig returns a cluster's standalone kubeconfig. Tests replace
+// it so command validation runs without the container runtime.
+var renderKubeconfig = func(name string) (string, error) {
+	return cluster.NewManager().Kubeconfig(name)
+}
 
 var getCmd = &cobra.Command{
 	Use:   "get",
@@ -86,6 +93,31 @@ var getNodesCmd = &cobra.Command{
 	},
 }
 
+var getKubeconfigCmd = &cobra.Command{
+	Use:   "kubeconfig",
+	Short: "Print a cluster's kubeconfig without merging it into ~/.kube/config",
+	Long: `Print a standalone kubeconfig for one cluster to stdout, using the context
+kiac-<name>. Your existing kubeconfig is not modified.
+
+The kubeconfig carries cluster-admin credentials. Its server is the control-plane
+VM's current address; after a host reboot, run kiac resume cluster first.`,
+	Example: `  kiac get kubeconfig --name dev > dev.kubeconfig
+  KUBECONFIG=dev.kubeconfig kubectl get nodes`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !cluster.ValidName(getKubeconfigName) {
+			return fmt.Errorf("invalid cluster name %q", getKubeconfigName)
+		}
+		kubeconfig, err := renderKubeconfig(getKubeconfigName)
+		if err != nil {
+			return err
+		}
+		// No banner: stdout must stay a valid kubeconfig for redirection.
+		_, err = fmt.Fprint(cmd.OutOrStdout(), kubeconfig)
+		return err
+	},
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "-"
@@ -96,5 +128,6 @@ func orDash(s string) string {
 func init() {
 	getClustersCmd.Flags().StringVarP(&getClustersOutput, "output", "o", "", "output format: wide or json")
 	getNodesCmd.Flags().StringVar(&getNodesName, "name", "dev", "cluster name")
-	getCmd.AddCommand(getClustersCmd, getNodesCmd)
+	getKubeconfigCmd.Flags().StringVar(&getKubeconfigName, "name", "dev", "cluster name")
+	getCmd.AddCommand(getClustersCmd, getNodesCmd, getKubeconfigCmd)
 }

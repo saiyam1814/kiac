@@ -132,6 +132,15 @@ kiac get clusters -o json    <span class="c"># machine-readable, always a JSON a
     <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name</td></tr>
   </table>
 
+  <h2 id="get-kubeconfig">kiac get kubeconfig</h2>
+  <p>Print a standalone kubeconfig for one cluster (context <code>kiac-&lt;name&gt;</code>) to stdout without touching <code>~/.kube/config</code>. It carries cluster-admin credentials, so keep the file private. The server is the control-plane VM's current address; after a host reboot, run <a href="#resume-cluster">kiac resume cluster</a> first.</p>
+  <pre><code>kiac get kubeconfig --name dev &gt; dev.kubeconfig
+KUBECONFIG=dev.kubeconfig kubectl get nodes</code></pre>
+  <table>
+    <tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>--name</code></td><td><code>dev</code></td><td>cluster name</td></tr>
+  </table>
+
   <h2 id="stop-node">kiac stop node</h2>
   <p>Stop a node VM to test real node failure: the node goes NotReady and its pods reschedule. Accepts the short node name (<code>worker-1</code>, <code>control-plane</code>) or the full container name (<code>kiac-dev-worker-1</code>). Stopping the control plane of a single-node cluster is refused; on multi-node clusters it proceeds with a warning. See <a href="node-chaos.html">Node chaos</a>.</p>
   <pre><code>kiac stop node worker-1

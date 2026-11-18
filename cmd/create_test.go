@@ -22,7 +22,7 @@ func TestDefaultK8sVersionUsesDistroReleaseStream(t *testing.T) {
 }
 
 func TestFlagOnlyClusterCommandsRejectArgs(t *testing.T) {
-	for _, command := range []*cobra.Command{createClusterCmd, deleteClusterCmd, getClustersCmd, getNodesCmd} {
+	for _, command := range []*cobra.Command{createClusterCmd, deleteClusterCmd, getClustersCmd, getNodesCmd, getKubeconfigCmd} {
 		t.Run(command.CommandPath(), func(t *testing.T) {
 			if err := command.ValidateArgs(nil); err != nil {
 				t.Fatalf("ValidateArgs(nil): %v", err)
