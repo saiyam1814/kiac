@@ -97,7 +97,7 @@ var getKubeconfigCmd = &cobra.Command{
 	Use:   "kubeconfig",
 	Short: "Print a cluster's kubeconfig without merging it into ~/.kube/config",
 	Long: `Print a standalone kubeconfig for one cluster to stdout, using the context
-kiac-<name>. Nothing on disk changes.
+kiac-<name>. Your existing kubeconfig is not modified.
 
 The kubeconfig carries cluster-admin credentials. Its server is the control-plane
 VM's current address; after a host reboot, run kiac resume cluster first.`,
