@@ -320,6 +320,7 @@ kiac create cluster -p 127.0.0.1:8080:80    # publish localhost:8080 to control-
 kiac ui                                      # local web console: manage clusters, kubectl Console per cluster
 kiac get clusters                            # -o wide for versions/age, -o json for scripts
 kiac get nodes --name dev
+kiac get kubeconfig --name dev > dev.kubeconfig  # standalone kubeconfig; ~/.kube/config untouched
 kiac stop node worker-1 --name dev           # real node failure: NotReady, eviction, rescheduling
 kiac start node worker-1 --name dev          # node rejoins; idempotent
 kiac resume cluster --name dev               # bring a cluster back after a host reboot; idempotent
