@@ -33,6 +33,7 @@
     <a href="k3s.html">k3s distro</a>
     <a href="cilium.html">Cilium &amp; the full kernel</a>
     <a href="gpu.html">Apple GPU (beta)</a>
+    <a href="gpu-native.html">Native Metal service (alpha)</a>
     <a href="external-workers.html">External workers (alpha)</a>
   </div>
   <div class="group"><div class="glabel">Built-in addons</div>
@@ -57,8 +58,8 @@
 <main>
   <div class="kicker">Docs</div>
   <h1>kiac: Kubernetes in Apple Containers</h1>
-  <p class="lede">kiac creates Kubernetes clusters on Apple silicon with a lightweight VM for every node. Use Apple's open-source <a href="https://github.com/apple/container">container</a> runtime for everyday clusters, or the optional krunkit backend for local Apple GPU workloads and external K3s workers.</p>
-  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.12.0">v0.12.0: inspect runtime DNS defaults and VM resource samples &rarr;</a>
+  <p class="lede">kiac creates Kubernetes clusters on Apple silicon with a lightweight VM for every node. Use Apple's open-source <a href="https://github.com/apple/container">container</a> runtime for everyday clusters and workloads that call the native Metal service. The optional krunkit backend supports Vulkan GPU workloads and external K3s workers.</p>
+  <a class="release-banner" href="https://github.com/saiyam1814/kiac/releases/tag/v0.13.0">v0.13.0 &middot; Native Metal alpha, Mac GPU dashboard, and kubeconfig export &rarr;</a>
   <div class="note"><b>Part of the cloud native ecosystem</b>
   kiac is <a href="https://landscape.cncf.io/?search=kiac&amp;item=platform--certified-kubernetes-installer--kiac">listed in the CNCF Landscape</a> under Platform / Certified Kubernetes - Installer. A Landscape listing is ecosystem inclusion, not CNCF-hosted project status.</div>
 
@@ -73,6 +74,7 @@
     <li><b>Two distros.</b> kubeadm on <code>kindest/node</code> by default, or <code>--distro k3s</code> for supervised rancher/k3s per VM: a 2-node cluster in under a minute. See <a href="k3s.html">k3s distro</a>.</li>
     <li><b>Cilium and eBPF.</b> <code>--cni cilium --kernel full</code> boots the nodes on a published, sha-pinned kernel build and drives the official Cilium installer. See <a href="cilium.html">Cilium &amp; the full kernel</a>.</li>
     <li><b>Real Apple GPU nodes (beta).</b> <code>--gpu-workers N</code> exposes the Mac's GPU through Venus/Vulkan with DRA or device-plugin scheduling, continuous native health checks, allocation recovery and a pinned inference benchmark. See <a href="gpu.html">Apple GPU</a> for validated profiles and limits.</li>
+    <li><b>Native Metal service (alpha).</b> Pods on ordinary Apple/container nodes can use a DRA claim to request fixed Metal compute or llama.cpp inference on the Mac. See the <a href="gpu-native.html">native Metal walkthrough</a>.</li>
     <li><b>External K3s workers (alpha).</b> <code>kiac join worker</code> joins a Mac-hosted CPU worker to an existing IPv4 K3s/Flannel VXLAN cluster over operator-managed WireGuard. New workers require scheduling opt-in; remote networking, draining and Node deletion remain operator responsibilities. See <a href="external-workers.html">External workers</a>.</li>
     <li><b>Clusters survive reboots.</b> <code>kiac resume cluster</code> boots the VMs back up after a host reboot and heals everything the new IPs broke. See <a href="persistence.html">Reboots &amp; resume</a>.</li>
     <li><b>Optional observability.</b> <code>--observability</code> installs Prometheus and Grafana with dashboards already provisioned. See <a href="observability.html">Observability</a>.</li>
